@@ -100,7 +100,7 @@ func azureResourceKind(t string) cloud.ResourceKind {
 		return cloud.ResourceNetwork
 	case strings.Contains(t, "loadbalancers") || strings.Contains(t, "applicationgateways"):
 		return cloud.ResourceLoadBalancer
-	case strings.Contains(t, "containerservice") || strings.Contains(t, "containerregistry"):
+	case strings.Contains(t, "containerservice") || strings.Contains(t, "containerregistry") || strings.Contains(t, "managedclusters"):
 		return cloud.ResourceContainer
 	case strings.Contains(t, "sites") || strings.Contains(t, "functions"):
 		return cloud.ResourceServerless
@@ -108,6 +108,12 @@ func azureResourceKind(t string) cloud.ResourceKind {
 		return cloud.ResourceDNS
 	case strings.Contains(t, "cdn"):
 		return cloud.ResourceCDN
+	case strings.Contains(t, "redis") || strings.Contains(t, "cache"):
+		return cloud.ResourceDatabase
+	case strings.Contains(t, "keyvault"):
+		return cloud.ResourceOther
+	case strings.Contains(t, "servicebus") || strings.Contains(t, "eventhub"):
+		return cloud.ResourceOther
 	default:
 		return cloud.ResourceOther
 	}

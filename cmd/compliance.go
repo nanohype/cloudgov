@@ -15,7 +15,7 @@ var complianceCmd = &cobra.Command{
 	Short: "Map scan results to compliance benchmark controls",
 	Long: `Evaluate matlock scan results against compliance benchmarks.
 
-Available benchmarks: cis-aws-v3
+Available benchmarks: cis-aws-v3, cis-gcp-v2, cis-azure-v2, soc2
 
 Provide paths to JSON reports from prior matlock scans using the report flags.`,
 	Args: cobra.ExactArgs(1),

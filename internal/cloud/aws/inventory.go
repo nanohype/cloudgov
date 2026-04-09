@@ -8,7 +8,11 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/stxkxs/matlock/internal/cloud"
 )
@@ -51,6 +55,38 @@ func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cl
 		r, err := p.listEBSVolumes(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list ebs volumes: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["rds"] || filter["rds:db"] {
+		r, err := p.listRDSInstances(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list rds instances: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["ecs"] || filter["ecs:cluster"] {
+		r, err := p.listECSClusters(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list ecs clusters: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["elb"] || filter["elb:loadbalancer"] {
+		r, err := p.listELBLoadBalancers(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list elb load balancers: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["iam"] || filter["iam:role"] {
+		r, err := p.listIAMRoles(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list iam roles: %w", err)
 		}
 		resources = append(resources, r...)
 	}
@@ -177,6 +213,140 @@ func (p *Provider) listEBSVolumes(ctx context.Context) ([]cloud.InventoryResourc
 			}
 			if vol.CreateTime != nil {
 				t := *vol.CreateTime
+				r.CreatedAt = &t
+			}
+			resources = append(resources, r)
+		}
+	}
+	return resources, nil
+}
+
+func (p *Provider) listRDSInstances(ctx context.Context) ([]cloud.InventoryResource, error) {
+	client := rds.NewFromConfig(p.cfg)
+	var resources []cloud.InventoryResource
+
+	paginator := rds.NewDescribeDBInstancesPaginator(client, &rds.DescribeDBInstancesInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return resources, fmt.Errorf("describe db instances: %w", err)
+		}
+		for _, db := range page.DBInstances {
+			id := awssdk.ToString(db.DBInstanceIdentifier)
+			r := cloud.InventoryResource{
+				Kind:     cloud.ResourceDatabase,
+				Type:     "rds:db",
+				ID:       awssdk.ToString(db.DBInstanceArn),
+				Name:     id,
+				Provider: "aws",
+				Region:   p.cfg.Region,
+				Status:   awssdk.ToString(db.DBInstanceStatus),
+			}
+			if db.InstanceCreateTime != nil {
+				t := *db.InstanceCreateTime
+				r.CreatedAt = &t
+			}
+			resources = append(resources, r)
+		}
+	}
+	return resources, nil
+}
+
+func (p *Provider) listECSClusters(ctx context.Context) ([]cloud.InventoryResource, error) {
+	client := ecs.NewFromConfig(p.cfg)
+	var resources []cloud.InventoryResource
+
+	var nextToken *string
+	for {
+		listOut, err := client.ListClusters(ctx, &ecs.ListClustersInput{NextToken: nextToken})
+		if err != nil {
+			return resources, fmt.Errorf("list ecs clusters: %w", err)
+		}
+		if len(listOut.ClusterArns) == 0 {
+			break
+		}
+
+		descOut, err := client.DescribeClusters(ctx, &ecs.DescribeClustersInput{
+			Clusters: listOut.ClusterArns,
+		})
+		if err != nil {
+			return resources, fmt.Errorf("describe ecs clusters: %w", err)
+		}
+		for _, c := range descOut.Clusters {
+			arn := awssdk.ToString(c.ClusterArn)
+			name := awssdk.ToString(c.ClusterName)
+			resources = append(resources, cloud.InventoryResource{
+				Kind:     cloud.ResourceContainer,
+				Type:     "ecs:cluster",
+				ID:       arn,
+				Name:     name,
+				Provider: "aws",
+				Region:   p.cfg.Region,
+				Status:   awssdk.ToString(c.Status),
+			})
+		}
+
+		if listOut.NextToken == nil {
+			break
+		}
+		nextToken = listOut.NextToken
+	}
+	return resources, nil
+}
+
+func (p *Provider) listELBLoadBalancers(ctx context.Context) ([]cloud.InventoryResource, error) {
+	client := elasticloadbalancingv2.NewFromConfig(p.cfg)
+	var resources []cloud.InventoryResource
+
+	paginator := elasticloadbalancingv2.NewDescribeLoadBalancersPaginator(client, &elasticloadbalancingv2.DescribeLoadBalancersInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return resources, fmt.Errorf("describe load balancers: %w", err)
+		}
+		for _, lb := range page.LoadBalancers {
+			r := cloud.InventoryResource{
+				Kind:     cloud.ResourceLoadBalancer,
+				Type:     "elb:loadbalancer",
+				ID:       awssdk.ToString(lb.LoadBalancerArn),
+				Name:     awssdk.ToString(lb.LoadBalancerName),
+				Provider: "aws",
+				Region:   p.cfg.Region,
+			}
+			if lb.State != nil {
+				r.Status = string(lb.State.Code)
+			}
+			if lb.CreatedTime != nil {
+				t := *lb.CreatedTime
+				r.CreatedAt = &t
+			}
+			resources = append(resources, r)
+		}
+	}
+	return resources, nil
+}
+
+func (p *Provider) listIAMRoles(ctx context.Context) ([]cloud.InventoryResource, error) {
+	client := iam.NewFromConfig(p.cfg)
+	var resources []cloud.InventoryResource
+
+	paginator := iam.NewListRolesPaginator(client, &iam.ListRolesInput{})
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(ctx)
+		if err != nil {
+			return resources, fmt.Errorf("list iam roles: %w", err)
+		}
+		for _, role := range page.Roles {
+			r := cloud.InventoryResource{
+				Kind:     cloud.ResourceIAM,
+				Type:     "iam:role",
+				ID:       awssdk.ToString(role.Arn),
+				Name:     awssdk.ToString(role.RoleName),
+				Provider: "aws",
+				Region:   "global",
+			}
+			if role.CreateDate != nil {
+				t := *role.CreateDate
 				r.CreatedAt = &t
 			}
 			resources = append(resources, r)

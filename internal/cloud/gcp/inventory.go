@@ -7,8 +7,11 @@ import (
 
 	"cloud.google.com/go/storage"
 	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/container/v1"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
+	"google.golang.org/api/run/v2"
+	"google.golang.org/api/sqladmin/v1beta4"
 
 	"github.com/stxkxs/matlock/internal/cloud"
 )
@@ -35,6 +38,30 @@ func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cl
 		r, err := p.listGCSBuckets(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list gcs buckets: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["cloudsql"] || filter["cloudsql:instance"] {
+		r, err := p.listCloudSQLInstances(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list cloud sql instances: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["gke"] || filter["gke:cluster"] {
+		r, err := p.listGKEClusters(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list gke clusters: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["cloudrun"] || filter["cloudrun:service"] {
+		r, err := p.listCloudRunServices(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list cloud run services: %w", err)
 		}
 		resources = append(resources, r...)
 	}
@@ -114,6 +141,105 @@ func (p *Provider) listGCSBuckets(ctx context.Context) ([]cloud.InventoryResourc
 			CreatedAt: &created,
 		}
 		resources = append(resources, r)
+	}
+	return resources, nil
+}
+
+func (p *Provider) listCloudSQLInstances(ctx context.Context) ([]cloud.InventoryResource, error) {
+	if p.projectID == "" {
+		return nil, fmt.Errorf("GOOGLE_CLOUD_PROJECT not set")
+	}
+
+	svc, err := sqladmin.NewService(ctx, p.opts...)
+	if err != nil {
+		return nil, fmt.Errorf("create sqladmin service: %w", err)
+	}
+
+	var resources []cloud.InventoryResource
+	resp, err := svc.Instances.List(p.projectID).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("list cloud sql instances: %w", err)
+	}
+	for _, inst := range resp.Items {
+		resources = append(resources, cloud.InventoryResource{
+			Kind:     cloud.ResourceDatabase,
+			Type:     "cloudsql:instance",
+			ID:       inst.SelfLink,
+			Name:     inst.Name,
+			Provider: "gcp",
+			Region:   inst.Region,
+			Status:   inst.State,
+		})
+	}
+	return resources, nil
+}
+
+func (p *Provider) listGKEClusters(ctx context.Context) ([]cloud.InventoryResource, error) {
+	if p.projectID == "" {
+		return nil, fmt.Errorf("GOOGLE_CLOUD_PROJECT not set")
+	}
+
+	svc, err := container.NewService(ctx, p.opts...)
+	if err != nil {
+		return nil, fmt.Errorf("create container service: %w", err)
+	}
+
+	var resources []cloud.InventoryResource
+	parent := "projects/" + p.projectID + "/locations/-"
+	resp, err := svc.Projects.Locations.Clusters.List(parent).Context(ctx).Do()
+	if err != nil {
+		return nil, fmt.Errorf("list gke clusters: %w", err)
+	}
+	for _, c := range resp.Clusters {
+		resources = append(resources, cloud.InventoryResource{
+			Kind:     cloud.ResourceContainer,
+			Type:     "gke:cluster",
+			ID:       c.SelfLink,
+			Name:     c.Name,
+			Provider: "gcp",
+			Region:   c.Location,
+			Status:   c.Status,
+		})
+	}
+	return resources, nil
+}
+
+func (p *Provider) listCloudRunServices(ctx context.Context) ([]cloud.InventoryResource, error) {
+	if p.projectID == "" {
+		return nil, fmt.Errorf("GOOGLE_CLOUD_PROJECT not set")
+	}
+
+	svc, err := run.NewService(ctx, p.opts...)
+	if err != nil {
+		return nil, fmt.Errorf("create cloud run service: %w", err)
+	}
+
+	var resources []cloud.InventoryResource
+	parent := "projects/" + p.projectID + "/locations/-"
+	if err := svc.Projects.Locations.Services.List(parent).Pages(ctx, func(page *run.GoogleCloudRunV2ListServicesResponse) error {
+		for _, s := range page.Services {
+			name := s.Name
+			// Extract short name from full resource name
+			if parts := strings.Split(name, "/"); len(parts) > 0 {
+				name = parts[len(parts)-1]
+			}
+			region := ""
+			// Extract region from full name: projects/P/locations/R/services/S
+			if parts := strings.Split(s.Name, "/"); len(parts) >= 4 {
+				region = parts[3]
+			}
+			resources = append(resources, cloud.InventoryResource{
+				Kind:     cloud.ResourceServerless,
+				Type:     "cloudrun:service",
+				ID:       s.Uri,
+				Name:     name,
+				Provider: "gcp",
+				Region:   region,
+			})
+		}
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("list cloud run services: %w", err)
 	}
 	return resources, nil
 }

@@ -6,11 +6,13 @@ import (
 	"fmt"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
-	smithy "github.com/aws/smithy-go"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithy "github.com/aws/smithy-go"
 	"github.com/stxkxs/matlock/internal/cloud"
 	"github.com/stxkxs/matlock/internal/drift"
 )
@@ -22,6 +24,9 @@ func (p *Provider) SupportedResourceTypes() []string {
 		"aws_iam_policy",
 		"aws_s3_bucket",
 		"aws_s3_bucket_public_access_block",
+		"aws_instance",
+		"aws_db_instance",
+		"aws_lb",
 	}
 }
 
@@ -36,6 +41,12 @@ func (p *Provider) CheckDrift(ctx context.Context, resourceType, resourceID stri
 		return p.checkS3BucketDrift(ctx, resourceID, attrs)
 	case "aws_s3_bucket_public_access_block":
 		return p.checkS3PublicAccessBlockDrift(ctx, resourceID, attrs)
+	case "aws_instance":
+		return p.checkEC2InstanceDrift(ctx, resourceID, attrs)
+	case "aws_db_instance":
+		return p.checkRDSInstanceDrift(ctx, resourceID, attrs)
+	case "aws_lb":
+		return p.checkELBDrift(ctx, resourceID, attrs)
 	default:
 		return cloud.DriftResult{
 			ResourceType: resourceType,
@@ -214,6 +225,161 @@ func (p *Provider) checkS3PublicAccessBlockDrift(ctx context.Context, bucketName
 	return cloud.DriftResult{
 		ResourceType: "aws_s3_bucket_public_access_block",
 		ResourceID:   bucketName,
+		Status:       cloud.DriftInSync,
+	}, nil
+}
+
+func (p *Provider) checkEC2InstanceDrift(ctx context.Context, instanceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
+	client := ec2.NewFromConfig(p.cfg)
+	out, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		InstanceIds: []string{instanceID},
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "InvalidInstanceID.NotFound" {
+			return cloud.DriftResult{
+				ResourceType: "aws_instance",
+				ResourceID:   instanceID,
+				Status:       cloud.DriftDeleted,
+				Detail:       "EC2 instance not found in AWS",
+			}, nil
+		}
+		return cloud.DriftResult{}, fmt.Errorf("describe instance %s: %w", instanceID, err)
+	}
+	if len(out.Reservations) == 0 || len(out.Reservations[0].Instances) == 0 {
+		return cloud.DriftResult{
+			ResourceType: "aws_instance",
+			ResourceID:   instanceID,
+			Status:       cloud.DriftDeleted,
+			Detail:       "EC2 instance not found in AWS",
+		}, nil
+	}
+
+	inst := out.Reservations[0].Instances[0]
+	actual := map[string]interface{}{
+		"instance_type": string(inst.InstanceType),
+		"key_name":      awssdk.ToString(inst.KeyName),
+	}
+
+	diffs := drift.CompareAttributes(attrs, actual, []string{"instance_type", "key_name"})
+	if len(diffs) > 0 {
+		return cloud.DriftResult{
+			ResourceType: "aws_instance",
+			ResourceID:   instanceID,
+			Status:       cloud.DriftModified,
+			Fields:       diffs,
+		}, nil
+	}
+	return cloud.DriftResult{
+		ResourceType: "aws_instance",
+		ResourceID:   instanceID,
+		Status:       cloud.DriftInSync,
+	}, nil
+}
+
+func (p *Provider) checkRDSInstanceDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
+	client := rds.NewFromConfig(p.cfg)
+
+	// resourceID may be the DB identifier or an ARN
+	identifier := resourceID
+	if name, ok := attrs["identifier"]; ok {
+		if s, ok := name.(string); ok && s != "" {
+			identifier = s
+		}
+	}
+
+	out, err := client.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{
+		DBInstanceIdentifier: awssdk.String(identifier),
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "DBInstanceNotFound" {
+			return cloud.DriftResult{
+				ResourceType: "aws_db_instance",
+				ResourceID:   resourceID,
+				Status:       cloud.DriftDeleted,
+				Detail:       "RDS instance not found in AWS",
+			}, nil
+		}
+		return cloud.DriftResult{}, fmt.Errorf("describe db instance %s: %w", identifier, err)
+	}
+	if len(out.DBInstances) == 0 {
+		return cloud.DriftResult{
+			ResourceType: "aws_db_instance",
+			ResourceID:   resourceID,
+			Status:       cloud.DriftDeleted,
+			Detail:       "RDS instance not found in AWS",
+		}, nil
+	}
+
+	db := out.DBInstances[0]
+	actual := map[string]interface{}{
+		"instance_class":      awssdk.ToString(db.DBInstanceClass),
+		"engine_version":      awssdk.ToString(db.EngineVersion),
+		"multi_az":            fmt.Sprintf("%v", db.MultiAZ),
+		"deletion_protection": fmt.Sprintf("%v", db.DeletionProtection),
+	}
+
+	diffs := drift.CompareAttributes(attrs, actual, []string{"instance_class", "engine_version", "multi_az", "deletion_protection"})
+	if len(diffs) > 0 {
+		return cloud.DriftResult{
+			ResourceType: "aws_db_instance",
+			ResourceID:   resourceID,
+			Status:       cloud.DriftModified,
+			Fields:       diffs,
+		}, nil
+	}
+	return cloud.DriftResult{
+		ResourceType: "aws_db_instance",
+		ResourceID:   resourceID,
+		Status:       cloud.DriftInSync,
+	}, nil
+}
+
+func (p *Provider) checkELBDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
+	client := elasticloadbalancingv2.NewFromConfig(p.cfg)
+	out, err := client.DescribeLoadBalancers(ctx, &elasticloadbalancingv2.DescribeLoadBalancersInput{
+		LoadBalancerArns: []string{resourceID},
+	})
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "LoadBalancerNotFound" {
+			return cloud.DriftResult{
+				ResourceType: "aws_lb",
+				ResourceID:   resourceID,
+				Status:       cloud.DriftDeleted,
+				Detail:       "load balancer not found in AWS",
+			}, nil
+		}
+		return cloud.DriftResult{}, fmt.Errorf("describe load balancer %s: %w", resourceID, err)
+	}
+	if len(out.LoadBalancers) == 0 {
+		return cloud.DriftResult{
+			ResourceType: "aws_lb",
+			ResourceID:   resourceID,
+			Status:       cloud.DriftDeleted,
+			Detail:       "load balancer not found in AWS",
+		}, nil
+	}
+
+	lb := out.LoadBalancers[0]
+	actual := map[string]interface{}{
+		"load_balancer_type": string(lb.Type),
+		"internal":           fmt.Sprintf("%v", lb.Scheme == "internal"),
+	}
+
+	diffs := drift.CompareAttributes(attrs, actual, []string{"load_balancer_type", "internal"})
+	if len(diffs) > 0 {
+		return cloud.DriftResult{
+			ResourceType: "aws_lb",
+			ResourceID:   resourceID,
+			Status:       cloud.DriftModified,
+			Fields:       diffs,
+		}, nil
+	}
+	return cloud.DriftResult{
+		ResourceType: "aws_lb",
+		ResourceID:   resourceID,
 		Status:       cloud.DriftInSync,
 	}, nil
 }
