@@ -7,14 +7,13 @@ import (
 	"github.com/stxkxs/matlock/internal/audit"
 	"github.com/stxkxs/matlock/internal/cloud"
 	"github.com/stxkxs/matlock/internal/compliance"
-	"github.com/stxkxs/matlock/internal/investigate"
 )
 
 type iamReport struct {
-	Findings        []cloud.Finding                `json:"findings"`
-	Total           int                            `json:"total"`
-	Principals      int                            `json:"principals_scanned"`
-	UsedPermissions map[string][]cloud.Permission  `json:"used_permissions,omitempty"`
+	Findings        []cloud.Finding               `json:"findings"`
+	Total           int                           `json:"total"`
+	Principals      int                           `json:"principals_scanned"`
+	UsedPermissions map[string][]cloud.Permission `json:"used_permissions,omitempty"`
 }
 
 type storageReport struct {
@@ -23,9 +22,9 @@ type storageReport struct {
 }
 
 type orphansReport struct {
-	Resources          []cloud.OrphanResource `json:"resources"`
-	Total              int                    `json:"total"`
-	EstimatedMonthlyUSD float64               `json:"estimated_monthly_usd"`
+	Resources           []cloud.OrphanResource `json:"resources"`
+	Total               int                    `json:"total"`
+	EstimatedMonthlyUSD float64                `json:"estimated_monthly_usd"`
 }
 
 type costReport struct {
@@ -57,8 +56,8 @@ func WriteOrphans(w io.Writer, orphans []cloud.OrphanResource) error {
 		total += o.MonthlyCost
 	}
 	return writeJSON(w, orphansReport{
-		Resources:          orphans,
-		Total:              len(orphans),
+		Resources:           orphans,
+		Total:               len(orphans),
 		EstimatedMonthlyUSD: total,
 	})
 }
@@ -70,7 +69,7 @@ func WriteCost(w io.Writer, diffs []cloud.CostDiff) error {
 
 type networkReport struct {
 	Findings []cloud.NetworkFinding `json:"findings"`
-	Total    int                   `json:"total"`
+	Total    int                    `json:"total"`
 }
 
 type certsReport struct {
@@ -121,16 +120,6 @@ func WriteDrift(w io.Writer, results []cloud.DriftResult) error {
 // WriteCompliance marshals a compliance report as JSON to w.
 func WriteCompliance(w io.Writer, report compliance.ComplianceReport) error {
 	return writeJSON(w, report)
-}
-
-// WriteProbe marshals a probe report as JSON to w.
-func WriteProbe(w io.Writer, report *investigate.Report) error {
-	return writeJSON(w, report)
-}
-
-// WriteProbeBatch marshals batch probe results as JSON to w.
-func WriteProbeBatch(w io.Writer, results []investigate.BatchResult) error {
-	return writeJSON(w, investigate.NewBatchReport(results))
 }
 
 // WriteAudit marshals a full audit report as JSON to w.
@@ -185,7 +174,7 @@ type compareReport struct {
 	New       []CompareFindingJSONType `json:"new"`
 	Resolved  []CompareFindingJSONType `json:"resolved"`
 	Unchanged []CompareFindingJSONType `json:"unchanged"`
-	Summary   compareSummary       `json:"summary"`
+	Summary   compareSummary           `json:"summary"`
 }
 
 // CompareFindingJSONType is a finding for JSON comparison output.

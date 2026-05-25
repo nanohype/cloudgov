@@ -31,7 +31,7 @@ func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, err
 func (p *Provider) orphanDisks(ctx context.Context) ([]cloud.OrphanResource, error) {
 	client, err := armcompute.NewDisksClient(p.subscriptionID, p.cred, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("disks client: %w", err)
 	}
 
 	var orphans []cloud.OrphanResource
@@ -39,7 +39,7 @@ func (p *Provider) orphanDisks(ctx context.Context) ([]cloud.OrphanResource, err
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list disks page: %w", err)
 		}
 		for _, disk := range page.Value {
 			if disk.Properties == nil {
@@ -78,7 +78,7 @@ func (p *Provider) orphanDisks(ctx context.Context) ([]cloud.OrphanResource, err
 func (p *Provider) orphanIPs(ctx context.Context) ([]cloud.OrphanResource, error) {
 	client, err := armnetwork.NewPublicIPAddressesClient(p.subscriptionID, p.cred, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("public IPs client: %w", err)
 	}
 
 	var orphans []cloud.OrphanResource
@@ -86,7 +86,7 @@ func (p *Provider) orphanIPs(ctx context.Context) ([]cloud.OrphanResource, error
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("list public IPs page: %w", err)
 		}
 		for _, ip := range page.Value {
 			if ip.Properties == nil {

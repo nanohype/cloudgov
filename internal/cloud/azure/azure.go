@@ -2,6 +2,7 @@ package azure
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
@@ -20,7 +21,7 @@ func New(ctx context.Context, subscriptionID string) (*Provider, error) {
 	}
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("azure default credential: %w", err)
 	}
 	return &Provider{
 		subscriptionID: subscriptionID,

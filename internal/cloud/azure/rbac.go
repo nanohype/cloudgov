@@ -73,11 +73,11 @@ func principalType(pt *armauthorization.PrincipalType) cloud.PrincipalType {
 func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Principal) ([]cloud.Permission, error) {
 	assignClient, err := armauthorization.NewRoleAssignmentsClient(p.subscriptionID, p.cred, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("role assignments client: %w", err)
 	}
 	defsClient, err := armauthorization.NewRoleDefinitionsClient(p.cred, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("role definitions client: %w", err)
 	}
 
 	var perms []cloud.Permission
@@ -155,7 +155,7 @@ func (p *Provider) MinimalPolicy(_ context.Context, principal cloud.Principal, u
 	}
 	raw, err := json.MarshalIndent(role, "", "  ")
 	if err != nil {
-		return cloud.Policy{}, err
+		return cloud.Policy{}, fmt.Errorf("marshal custom role: %w", err)
 	}
 	return cloud.Policy{
 		Provider: "azure",

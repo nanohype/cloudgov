@@ -106,7 +106,7 @@ func (p *Provider) fetchCosts(ctx context.Context, client *armcostmanagement.Que
 		Dataset:    dataset,
 	}, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cost management usage query: %w", err)
 	}
 
 	var entries []cloud.CostEntry
