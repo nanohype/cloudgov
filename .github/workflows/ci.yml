@@ -22,8 +22,44 @@ jobs:
       - name: go build
         run: go build ./...
 
-      - name: go test
-        run: go test ./...
+      - name: go test with coverage
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
 
       - name: go vet
         run: go vet ./...
+
+      - name: enforce coverage floor
+        # Phase 2 lifted aws/gcp/azure from 0% to ~65-85%. The 50% floor is
+        # the floor — it'll ratchet up as more code lands under test.
+        run: |
+          total=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
+          echo "total coverage: ${total}%"
+          # bash arithmetic on decimals via awk
+          if awk "BEGIN {exit !(${total} < 50)}"; then
+            echo "::error::coverage ${total}% is below the 50% floor"
+            exit 1
+          fi
+
+      - name: upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
