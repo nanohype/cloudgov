@@ -11,7 +11,10 @@ import (
 )
 
 type mockBigQuery struct {
-	rows map[string][]*bigqueryv2.TableRow // keyed by date in query
+	// rows is keyed by the period's start date. The mock matches on
+	// `>= 'DATE'` so adjacent windows (where one period's end equals the
+	// next period's start) don't collide.
+	rows map[string][]*bigqueryv2.TableRow
 	err  error
 }
 
@@ -19,8 +22,8 @@ func (m *mockBigQuery) Query(_ context.Context, _, query string) ([]*bigqueryv2.
 	if m.err != nil {
 		return nil, m.err
 	}
-	for k, v := range m.rows {
-		if contains(query, k) {
+	for date, v := range m.rows {
+		if contains(query, ">= '"+date+"'") {
 			return v, nil
 		}
 	}
