@@ -2,16 +2,30 @@ package azure
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/keyvault/armkeyvault"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
+
 	"github.com/stxkxs/matlock/internal/cloud"
 	"github.com/stxkxs/matlock/internal/drift"
 )
+
+// vmsAPI is the narrow Virtual Machines surface used by this package.
+type vmsAPI interface {
+	Get(ctx context.Context, resourceGroup, name string) (*armcompute.VirtualMachine, error)
+}
+
+type vmsAdapter struct {
+	client *armcompute.VirtualMachinesClient
+}
+
+func (a *vmsAdapter) Get(ctx context.Context, rg, name string) (*armcompute.VirtualMachine, error) {
+	resp, err := a.client.Get(ctx, rg, name, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.VirtualMachine, nil
+}
 
 // SupportedResourceTypes returns the Terraform resource types this provider can check for drift.
 func (p *Provider) SupportedResourceTypes() []string {
@@ -45,11 +59,6 @@ func (p *Provider) CheckDrift(ctx context.Context, resourceType, resourceID stri
 }
 
 func (p *Provider) checkNSGDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client, err := armnetwork.NewSecurityGroupsClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create NSG client: %w", err)
-	}
-
 	rg := resourceGroupFromID(&resourceID)
 	name := nameFromAttrs(attrs)
 	if rg == "" || name == "" {
@@ -61,7 +70,7 @@ func (p *Provider) checkNSGDrift(ctx context.Context, resourceID string, attrs m
 		}, nil
 	}
 
-	resp, err := client.Get(ctx, rg, name, nil)
+	nsg, err := p.nsgs.Get(ctx, rg, name)
 	if err != nil {
 		return cloud.DriftResult{
 			ResourceType: "azurerm_network_security_group",
@@ -72,10 +81,10 @@ func (p *Provider) checkNSGDrift(ctx context.Context, resourceID string, attrs m
 	}
 
 	actual := map[string]interface{}{
-		"name": derefString(resp.Name),
+		"name": derefString(nsg.Name),
 	}
-	if resp.Location != nil {
-		actual["location"] = *resp.Location
+	if nsg.Location != nil {
+		actual["location"] = *nsg.Location
 	}
 
 	diffs := drift.CompareAttributes(attrs, actual, []string{"name", "location"})
@@ -95,11 +104,6 @@ func (p *Provider) checkNSGDrift(ctx context.Context, resourceID string, attrs m
 }
 
 func (p *Provider) checkStorageAccountDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client, err := armstorage.NewAccountsClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create storage accounts client: %w", err)
-	}
-
 	rg := resourceGroupFromID(&resourceID)
 	name := nameFromAttrs(attrs)
 	if rg == "" || name == "" {
@@ -111,7 +115,7 @@ func (p *Provider) checkStorageAccountDrift(ctx context.Context, resourceID stri
 		}, nil
 	}
 
-	resp, err := client.GetProperties(ctx, rg, name, nil)
+	acct, err := p.storageAccounts.GetProperties(ctx, rg, name)
 	if err != nil {
 		return cloud.DriftResult{
 			ResourceType: "azurerm_storage_account",
@@ -122,10 +126,10 @@ func (p *Provider) checkStorageAccountDrift(ctx context.Context, resourceID stri
 	}
 
 	actual := map[string]interface{}{
-		"name": derefString(resp.Name),
+		"name": derefString(acct.Name),
 	}
-	if resp.Location != nil {
-		actual["location"] = *resp.Location
+	if acct.Location != nil {
+		actual["location"] = *acct.Location
 	}
 
 	diffs := drift.CompareAttributes(attrs, actual, []string{"name", "location"})
@@ -145,11 +149,6 @@ func (p *Provider) checkStorageAccountDrift(ctx context.Context, resourceID stri
 }
 
 func (p *Provider) checkVirtualMachineDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client, err := armcompute.NewVirtualMachinesClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create VM client: %w", err)
-	}
-
 	rg := resourceGroupFromID(&resourceID)
 	name := nameFromAttrs(attrs)
 	if rg == "" || name == "" {
@@ -161,7 +160,7 @@ func (p *Provider) checkVirtualMachineDrift(ctx context.Context, resourceID stri
 		}, nil
 	}
 
-	resp, err := client.Get(ctx, rg, name, nil)
+	vm, err := p.vms.Get(ctx, rg, name)
 	if err != nil {
 		return cloud.DriftResult{
 			ResourceType: "azurerm_virtual_machine",
@@ -172,13 +171,13 @@ func (p *Provider) checkVirtualMachineDrift(ctx context.Context, resourceID stri
 	}
 
 	actual := map[string]interface{}{
-		"name": derefString(resp.Name),
+		"name": derefString(vm.Name),
 	}
-	if resp.Location != nil {
-		actual["location"] = strings.ToLower(*resp.Location)
+	if vm.Location != nil {
+		actual["location"] = strings.ToLower(*vm.Location)
 	}
-	if resp.Properties != nil && resp.Properties.HardwareProfile != nil {
-		actual["vm_size"] = string(*resp.Properties.HardwareProfile.VMSize)
+	if vm.Properties != nil && vm.Properties.HardwareProfile != nil {
+		actual["vm_size"] = string(*vm.Properties.HardwareProfile.VMSize)
 	}
 
 	diffs := drift.CompareAttributes(attrs, actual, []string{"name", "location", "vm_size"})
@@ -198,11 +197,6 @@ func (p *Provider) checkVirtualMachineDrift(ctx context.Context, resourceID stri
 }
 
 func (p *Provider) checkKeyVaultDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client, err := armkeyvault.NewVaultsClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create key vault client: %w", err)
-	}
-
 	rg := resourceGroupFromID(&resourceID)
 	name := nameFromAttrs(attrs)
 	if rg == "" || name == "" {
@@ -214,7 +208,7 @@ func (p *Provider) checkKeyVaultDrift(ctx context.Context, resourceID string, at
 		}, nil
 	}
 
-	resp, err := client.Get(ctx, rg, name, nil)
+	kv, err := p.keyVaults.Get(ctx, rg, name)
 	if err != nil {
 		return cloud.DriftResult{
 			ResourceType: "azurerm_key_vault",
@@ -225,13 +219,13 @@ func (p *Provider) checkKeyVaultDrift(ctx context.Context, resourceID string, at
 	}
 
 	actual := map[string]interface{}{
-		"name": derefString(resp.Name),
+		"name": derefString(kv.Name),
 	}
-	if resp.Location != nil {
-		actual["location"] = strings.ToLower(*resp.Location)
+	if kv.Location != nil {
+		actual["location"] = strings.ToLower(*kv.Location)
 	}
-	if resp.Properties != nil && resp.Properties.SKU != nil {
-		actual["sku_name"] = string(*resp.Properties.SKU.Name)
+	if kv.Properties != nil && kv.Properties.SKU != nil {
+		actual["sku_name"] = string(*kv.Properties.SKU.Name)
 	}
 
 	diffs := drift.CompareAttributes(attrs, actual, []string{"name", "location", "sku_name"})

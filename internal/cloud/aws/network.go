@@ -16,8 +16,7 @@ var sensitivePortsAWS = []int{22, 3389, 3306, 5432, 1433, 27017, 6379, 9200}
 
 // AuditNetwork checks all EC2 security groups for overly permissive rules.
 func (p *Provider) AuditNetwork(ctx context.Context) ([]cloud.NetworkFinding, error) {
-	client := ec2.NewFromConfig(p.cfg)
-	pager := ec2.NewDescribeSecurityGroupsPaginator(client, &ec2.DescribeSecurityGroupsInput{})
+	pager := ec2.NewDescribeSecurityGroupsPaginator(p.ec2, &ec2.DescribeSecurityGroupsInput{})
 
 	var findings []cloud.NetworkFinding
 	for pager.HasMorePages() {

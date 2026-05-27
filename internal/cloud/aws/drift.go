@@ -58,8 +58,7 @@ func (p *Provider) CheckDrift(ctx context.Context, resourceType, resourceID stri
 }
 
 func (p *Provider) checkSGDrift(ctx context.Context, sgID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := ec2.NewFromConfig(p.cfg)
-	out, err := client.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
+	out, err := p.ec2.DescribeSecurityGroups(ctx, &ec2.DescribeSecurityGroupsInput{
 		Filters: []ec2types.Filter{{
 			Name:   awssdk.String("group-id"),
 			Values: []string{sgID},
@@ -100,8 +99,7 @@ func (p *Provider) checkSGDrift(ctx context.Context, sgID string, attrs map[stri
 }
 
 func (p *Provider) checkIAMPolicyDrift(ctx context.Context, policyARN string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := iam.NewFromConfig(p.cfg)
-	out, err := client.GetPolicy(ctx, &iam.GetPolicyInput{
+	out, err := p.iam.GetPolicy(ctx, &iam.GetPolicyInput{
 		PolicyArn: awssdk.String(policyARN),
 	})
 	if err != nil {
@@ -139,10 +137,8 @@ func (p *Provider) checkIAMPolicyDrift(ctx context.Context, policyARN string, at
 }
 
 func (p *Provider) checkS3BucketDrift(ctx context.Context, bucketName string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := s3.NewFromConfig(p.cfg)
-
 	// Check if bucket exists
-	_, err := client.HeadBucket(ctx, &s3.HeadBucketInput{
+	_, err := p.s3.HeadBucket(ctx, &s3.HeadBucketInput{
 		Bucket: awssdk.String(bucketName),
 	})
 	if err != nil {
@@ -155,7 +151,7 @@ func (p *Provider) checkS3BucketDrift(ctx context.Context, bucketName string, at
 	}
 
 	// Check versioning
-	versionOut, err := client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{
+	versionOut, err := p.s3.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{
 		Bucket: awssdk.String(bucketName),
 	})
 	if err != nil {
@@ -188,8 +184,7 @@ func (p *Provider) checkS3BucketDrift(ctx context.Context, bucketName string, at
 }
 
 func (p *Provider) checkS3PublicAccessBlockDrift(ctx context.Context, bucketName string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := s3.NewFromConfig(p.cfg)
-	out, err := client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
+	out, err := p.s3.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{
 		Bucket: awssdk.String(bucketName),
 	})
 	if err != nil {
@@ -230,8 +225,7 @@ func (p *Provider) checkS3PublicAccessBlockDrift(ctx context.Context, bucketName
 }
 
 func (p *Provider) checkEC2InstanceDrift(ctx context.Context, instanceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := ec2.NewFromConfig(p.cfg)
-	out, err := client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+	out, err := p.ec2.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{instanceID},
 	})
 	if err != nil {
@@ -278,8 +272,6 @@ func (p *Provider) checkEC2InstanceDrift(ctx context.Context, instanceID string,
 }
 
 func (p *Provider) checkRDSInstanceDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := rds.NewFromConfig(p.cfg)
-
 	// resourceID may be the DB identifier or an ARN
 	identifier := resourceID
 	if name, ok := attrs["identifier"]; ok {
@@ -288,7 +280,7 @@ func (p *Provider) checkRDSInstanceDrift(ctx context.Context, resourceID string,
 		}
 	}
 
-	out, err := client.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{
+	out, err := p.rds.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{
 		DBInstanceIdentifier: awssdk.String(identifier),
 	})
 	if err != nil {
@@ -337,8 +329,7 @@ func (p *Provider) checkRDSInstanceDrift(ctx context.Context, resourceID string,
 }
 
 func (p *Provider) checkELBDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	client := elasticloadbalancingv2.NewFromConfig(p.cfg)
-	out, err := client.DescribeLoadBalancers(ctx, &elasticloadbalancingv2.DescribeLoadBalancersInput{
+	out, err := p.elbv2.DescribeLoadBalancers(ctx, &elasticloadbalancingv2.DescribeLoadBalancersInput{
 		LoadBalancerArns: []string{resourceID},
 	})
 	if err != nil {

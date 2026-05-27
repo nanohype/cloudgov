@@ -10,20 +10,32 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// costQueryAPI is the narrow Cost Management Query surface used by this package.
+type costQueryAPI interface {
+	Usage(ctx context.Context, scope string, def armcostmanagement.QueryDefinition) (armcostmanagement.QueryResult, error)
+}
+
+type costQueryAdapter struct {
+	client *armcostmanagement.QueryClient
+}
+
+func (a *costQueryAdapter) Usage(ctx context.Context, scope string, def armcostmanagement.QueryDefinition) (armcostmanagement.QueryResult, error) {
+	resp, err := a.client.Usage(ctx, scope, def, nil)
+	if err != nil {
+		return armcostmanagement.QueryResult{}, err
+	}
+	return resp.QueryResult, nil
+}
+
 // GetCostDiff queries Azure Cost Management for spend in two periods and diffs them.
 func (p *Provider) GetCostDiff(ctx context.Context, beforeStart, beforeEnd, afterStart, afterEnd time.Time) (cloud.CostDiff, error) {
-	client, err := armcostmanagement.NewQueryClient(p.cred, nil)
-	if err != nil {
-		return cloud.CostDiff{}, fmt.Errorf("cost management client: %w", err)
-	}
-
 	scope := "/subscriptions/" + p.subscriptionID
 
-	before, err := p.fetchCosts(ctx, client, scope, beforeStart, beforeEnd)
+	before, err := p.fetchCosts(ctx, scope, beforeStart, beforeEnd)
 	if err != nil {
 		return cloud.CostDiff{}, fmt.Errorf("fetch before period: %w", err)
 	}
-	after, err := p.fetchCosts(ctx, client, scope, afterStart, afterEnd)
+	after, err := p.fetchCosts(ctx, scope, afterStart, afterEnd)
 	if err != nil {
 		return cloud.CostDiff{}, fmt.Errorf("fetch after period: %w", err)
 	}
@@ -80,7 +92,7 @@ func (p *Provider) GetCostDiff(ctx context.Context, beforeStart, beforeEnd, afte
 	}, nil
 }
 
-func (p *Provider) fetchCosts(ctx context.Context, client *armcostmanagement.QueryClient, scope string, start, end time.Time) ([]cloud.CostEntry, error) {
+func (p *Provider) fetchCosts(ctx context.Context, scope string, start, end time.Time) ([]cloud.CostEntry, error) {
 	timePeriod := &armcostmanagement.QueryTimePeriod{
 		From: &start,
 		To:   &end,
@@ -99,14 +111,14 @@ func (p *Provider) fetchCosts(ctx context.Context, client *armcostmanagement.Que
 			},
 		},
 	}
-	out, err := client.Usage(ctx, scope, armcostmanagement.QueryDefinition{
+	out, err := p.costQuery.Usage(ctx, scope, armcostmanagement.QueryDefinition{
 		Type:       toPtr(armcostmanagement.ExportTypeActualCost),
 		Timeframe:  toPtr(armcostmanagement.TimeframeTypeCustom),
 		TimePeriod: timePeriod,
 		Dataset:    dataset,
-	}, nil)
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("cost management usage query: %w", err)
 	}
 
 	var entries []cloud.CostEntry

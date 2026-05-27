@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"cloud.google.com/go/logging"
 	"cloud.google.com/go/logging/logadmin"
 	"google.golang.org/api/iterator"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -13,14 +14,35 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// logAdminAPI is the narrow audit-log surface used by this package. Tests
+// provide a fake iterator via the slice form; production wraps a real
+// *logadmin.Client.
+type logAdminAPI interface {
+	Entries(ctx context.Context, filter string) ([]*logging.Entry, error)
+	Close() error
+}
+
+type logAdminAdapter struct{ client *logadmin.Client }
+
+func (a *logAdminAdapter) Entries(ctx context.Context, filter string) ([]*logging.Entry, error) {
+	var out []*logging.Entry
+	it := a.client.Entries(ctx, logadmin.Filter(filter))
+	for {
+		entry, err := it.Next()
+		if err == iterator.Done {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, entry)
+	}
+}
+
+func (a *logAdminAdapter) Close() error { return a.client.Close() }
+
 // auditLogPermissions queries Cloud Audit Logs for method calls by the principal.
 func (p *Provider) auditLogPermissions(ctx context.Context, principal cloud.Principal, since time.Time) ([]cloud.Permission, error) {
-	client, err := logadmin.NewClient(ctx, p.projectID)
-	if err != nil {
-		return nil, fmt.Errorf("logadmin client: %w", err)
-	}
-	defer client.Close()
-
 	email := principal.Name
 	if principal.Type == cloud.PrincipalServiceAccount {
 		email = principal.Name
@@ -32,18 +54,19 @@ func (p *Provider) auditLogPermissions(ctx context.Context, principal cloud.Prin
 		since.UTC().Format(time.RFC3339),
 	)
 
-	iter := client.Entries(ctx, logadmin.Filter(filter))
+	la, err := p.newLogAdmin(ctx, p.projectID)
+	if err != nil {
+		return nil, fmt.Errorf("logadmin client: %w", err)
+	}
+	defer la.Close()
+
+	entries, err := la.Entries(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("iterate audit logs: %w", err)
+	}
+
 	seen := make(map[string]time.Time)
-
-	for {
-		entry, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("iterate audit logs: %w", err)
-		}
-
+	for _, entry := range entries {
 		// Extract method name from the proto payload
 		method := extractMethod(entry.Payload)
 		if method == "" {

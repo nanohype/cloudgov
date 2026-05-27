@@ -4,10 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	gcpstorage "cloud.google.com/go/storage"
-	"google.golang.org/api/compute/v1"
-	"google.golang.org/api/iterator"
-
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
@@ -38,63 +34,54 @@ func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.Ta
 }
 
 func (p *Provider) auditInstanceLabels(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	svc, err := compute.NewService(ctx, p.opts...)
+	instancesByZone, err := p.compute.AggregatedInstances(ctx, p.projectID)
 	if err != nil {
-		return nil, fmt.Errorf("compute client: %w", err)
+		return nil, fmt.Errorf("list instances: %w", err)
 	}
 
 	var findings []cloud.TagFinding
-	if err := svc.Instances.AggregatedList(p.projectID).Pages(ctx, func(page *compute.InstanceAggregatedList) error {
-		for _, scopedList := range page.Items {
-			for _, inst := range scopedList.Instances {
-				labelMap := make(map[string]struct{})
-				for k := range inst.Labels {
-					labelMap[k] = struct{}{}
-				}
-				missing := gcpMissingLabels(required, labelMap)
-				if len(missing) == 0 {
-					continue
-				}
-				zone := inst.Zone
-				// Extract short zone name from full URL
-				if idx := lastSlash(zone); idx >= 0 {
-					zone = zone[idx+1:]
-				}
-				findings = append(findings, cloud.TagFinding{
-					Severity:     cloud.SeverityMedium,
-					Provider:     "gcp",
-					ResourceID:   inst.Name,
-					ResourceType: "compute:instance",
-					Region:       zone,
-					MissingTags:  missing,
-					Detail:       fmt.Sprintf("instance %s missing labels: %v", inst.Name, missing),
-				})
+	for _, instances := range instancesByZone {
+		for _, inst := range instances {
+			labelMap := make(map[string]struct{})
+			for k := range inst.Labels {
+				labelMap[k] = struct{}{}
 			}
+			missing := gcpMissingLabels(required, labelMap)
+			if len(missing) == 0 {
+				continue
+			}
+			zone := inst.Zone
+			if idx := lastSlash(zone); idx >= 0 {
+				zone = zone[idx+1:]
+			}
+			findings = append(findings, cloud.TagFinding{
+				Severity:     cloud.SeverityMedium,
+				Provider:     "gcp",
+				ResourceID:   inst.Name,
+				ResourceType: "compute:instance",
+				Region:       zone,
+				MissingTags:  missing,
+				Detail:       fmt.Sprintf("instance %s missing labels: %v", inst.Name, missing),
+			})
 		}
-		return nil
-	}); err != nil {
-		return nil, fmt.Errorf("list instances: %w", err)
 	}
 	return findings, nil
 }
 
 func (p *Provider) auditBucketLabels(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	client, err := gcpstorage.NewClient(ctx, p.opts...)
+	gcs, err := p.newGCS(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("storage client: %w", err)
 	}
-	defer client.Close()
+	defer gcs.Close()
+
+	buckets, err := gcs.ListBuckets(ctx, p.projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list buckets: %w", err)
+	}
 
 	var findings []cloud.TagFinding
-	iter := client.Buckets(ctx, p.projectID)
-	for {
-		attrs, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("list buckets: %w", err)
-		}
+	for _, attrs := range buckets {
 		labelMap := make(map[string]struct{})
 		for k := range attrs.Labels {
 			labelMap[k] = struct{}{}

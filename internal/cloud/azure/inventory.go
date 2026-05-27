@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
@@ -15,44 +14,37 @@ func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cl
 		return nil, fmt.Errorf("AZURE_SUBSCRIPTION_ID not set")
 	}
 
-	client, err := armresources.NewClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create resources client: %w", err)
-	}
-
+	all := len(typeFilter) == 0
 	filter := make(map[string]bool)
 	for _, t := range typeFilter {
 		filter[strings.ToLower(t)] = true
 	}
-	all := len(filter) == 0
+
+	resourcesList, err := p.resources.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list resources: %w", err)
+	}
 
 	var resources []cloud.InventoryResource
-	pager := client.NewListPager(nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return resources, fmt.Errorf("list resources: %w", err)
+	for _, r := range resourcesList {
+		resType := derefStr(r.Type)
+		normalType := normalizeAzureType(resType)
+		if !all && !filter[strings.ToLower(normalType)] && !filter[strings.ToLower(resType)] {
+			continue
 		}
-		for _, r := range page.Value {
-			resType := derefStr(r.Type)
-			normalType := normalizeAzureType(resType)
-			if !all && !filter[strings.ToLower(normalType)] && !filter[strings.ToLower(resType)] {
-				continue
-			}
-			tags := azureTagsToMap(r.Tags)
-			id := derefStr(r.ID)
-			name := derefStr(r.Name)
-			location := derefStr(r.Location)
-			resources = append(resources, cloud.InventoryResource{
-				Kind:     azureResourceKind(resType),
-				Type:     normalType,
-				ID:       id,
-				Name:     name,
-				Provider: "azure",
-				Region:   location,
-				Tags:     tags,
-			})
-		}
+		tags := azureTagsToMap(r.Tags)
+		id := derefStr(r.ID)
+		name := derefStr(r.Name)
+		location := derefStr(r.Location)
+		resources = append(resources, cloud.InventoryResource{
+			Kind:     azureResourceKind(resType),
+			Type:     normalType,
+			ID:       id,
+			Name:     name,
+			Provider: "azure",
+			Region:   location,
+			Tags:     tags,
+		})
 	}
 	return resources, nil
 }

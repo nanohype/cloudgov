@@ -22,8 +22,55 @@ jobs:
       - name: go build
         run: go build ./...
 
-      - name: go test
-        run: go test ./...
+      - name: go test with coverage
+        run: go test ./... -coverprofile=coverage.out -covermode=atomic
 
       - name: go vet
         run: go vet ./...
+
+      - name: enforce coverage floor
+        # Phase 2 lifted aws/gcp/azure from 0% to ~65-85%. The 50% floor is
+        # the floor — it'll ratchet up as more code lands under test.
+        run: |
+          total=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
+          echo "total coverage: ${total}%"
+          # bash arithmetic on decimals via awk
+          if awk "BEGIN {exit !(${total} < 50)}"; then
+            echo "::error::coverage ${total}% is below the 50% floor"
+            exit 1
+          fi
+
+      - name: upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+
+  lint:
+    runs-on: ubuntu-latest
+    # Until a golangci-lint release built with Go 1.26+ ships, the lint
+    # job's type-checker panics on packages declaring `go 1.26` in
+    # transitive deps (k8s.io/client-go and friends) even with
+    # run.go: "1.25" set in .golangci.yml. Keep the job running so we
+    # see the signal, but don't gate merges on it. Build/test/vet
+    # (which run in the build-and-test job) still hard-gate as before.
+    # Drop continue-on-error and bump golangci-lint to a v2 release
+    # built with Go 1.26+ when one is available.
+    continue-on-error: true
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          # v2 binary requires action v7. The Go-version mismatch
+          # workaround lives in .golangci.yml (run.go: "1.25") since
+          # v2 dropped the --go CLI flag.
+          version: v2.7.0

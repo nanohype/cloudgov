@@ -8,18 +8,36 @@ Build: `task build`
 
 Production-quality open-source CLI for public release on GitHub.
 Target users: platform engineers, security engineers, DevOps teams.
-Differentiator: single binary, multi-cloud (aws/gcp/azure), four distinct domains.
+Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spanning IAM, cost, infrastructure hygiene, security posture, and operational visibility.
 
 ## commands
 
+**IAM**
 - `matlock iam scan` — unused/overprivileged IAM permissions vs CloudTrail/Audit Logs
 - `matlock iam fix` — generate Terraform fix files from scan report
+
+**Cost**
 - `matlock cost diff` — spend delta between two time windows
+
+**Infrastructure hygiene**
 - `matlock orphans` — unused disks, IPs, load balancers
 - `matlock storage audit` — public buckets, unencrypted storage, versioning, logging
 - `matlock network audit` — overly permissive security groups / firewall rules / NSGs
 - `matlock certs` — TLS certificates expiring within configurable thresholds
 - `matlock tags` — resources missing required tags/labels
+
+**Security posture**
+- `matlock secrets scan` — credential/key leakage in code, env, storage
+- `matlock compliance` — map findings to benchmarks (CIS, etc.) from a scan report
+- `matlock drift` — live cloud state vs Terraform state
+- `matlock audit` — orchestrates all the above into one consolidated run
+
+**Operational visibility & workflow**
+- `matlock inventory` — list all resources across providers
+- `matlock quota` — service quota utilization vs limits
+- `matlock baseline` — save/list/delete named scan baselines
+- `matlock compare` — diff a current report against a saved baseline
+- `matlock report` — generate HTML report from a JSON scan output
 
 ## code conventions
 
@@ -86,9 +104,7 @@ Do not use `gomock`, `testify/mock`, or any mock-generation library. Hand-writte
 
 ## known bugs in the current code
 
-- `internal/cloud/aws/iam.go` line ~200: `var _ iamtypes.AttachedPolicy` is a leftover import-satisfaction hack. Remove it and clean up the unused `iamtypes` import when touching that file.
-- `cmd/iam.go` `runIAMFix`: calls `MinimalPolicy(ctx, principal, nil)` — passing nil for used permissions means every generated policy will be empty. The fix is described in section 2 of the backlog.
-- `internal/cloud/gcp/auditlogs.go` `extractMethod`: only handles `map[string]interface{}` but the Cloud Logging SDK returns `*structpb.Struct`. Currently returns empty string for all real log entries.
+(none currently outstanding — the three previous bugs are fixed and verified)
 
 ## backlog
 
@@ -137,6 +153,21 @@ When all items in a section are done, move to the next section.
 - [x] Add `matlock cost diff --threshold 20` flag: only show services with >20% change.
 - [x] `internal/cloud/gcp/cost.go`: implement using the Cloud Billing Budget API or BigQuery export. Add a note in the error if `GOOGLE_BILLING_ACCOUNT_ID` env var is not set.
 - [x] Add `--profile` flag to `iam scan` for AWS named profiles (pass through to `config.LoadDefaultConfig` with `config.WithSharedConfigProfile`).
+
+### section 6 — coverage (Phase 2 of maintenance plan)
+
+Goal: get `internal/cloud/{aws,gcp,azure}` from 0% to meaningful coverage by extracting per-domain SDK interfaces and injecting them. Reference pattern: `internal/orphans/scanner_test.go:11-22`.
+
+- [ ] `internal/cloud/aws/iam.go` — extract narrow `iamAPI` interface, hold it on `Provider`, add `aws/iam_test.go` with hand-written mock. This is the reference implementation; update this section with the proven pattern before fanning out.
+- [ ] Repeat for every file in `internal/cloud/aws/` (cloudtrail, cost, orphans, storage, network, certs, tags, drift, inventory, quota, secrets).
+- [ ] Repeat for every file in `internal/cloud/gcp/` (auditlogs + same domain list).
+- [ ] Repeat for every file in `internal/cloud/azure/` (rbac, activitylog + same domain list).
+- [ ] `internal/output/table.go` — add `table_test.go` with golden-file tests for each report renderer under `testdata/*.golden`.
+- [ ] `internal/output/sarif.go` — add `sarif_test.go` for SARIF round-trip.
+- [ ] `internal/cloud/provider_test.go` — small unit test for `SeverityRank` and constant tables.
+- [ ] `internal/config/*_test.go` — add tests for configuration loading.
+- [ ] `internal/cost/*_test.go` — add tests for cost-domain logic.
+- [ ] `.github/workflows/ci.yml` — add `-cover -coverprofile=coverage.out`, add a coverage floor check (start 50%, ratchet up), add `golangci-lint run`.
 
 ## how to run a single improvement pass (headless)
 

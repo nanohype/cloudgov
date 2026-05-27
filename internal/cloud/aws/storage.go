@@ -6,17 +6,27 @@ import (
 	"fmt"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
-	smithy "github.com/aws/smithy-go"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// s3API is the narrow S3 surface used by this package.
+type s3API interface {
+	ListBuckets(ctx context.Context, params *s3.ListBucketsInput, optFns ...func(*s3.Options)) (*s3.ListBucketsOutput, error)
+	GetBucketLocation(ctx context.Context, params *s3.GetBucketLocationInput, optFns ...func(*s3.Options)) (*s3.GetBucketLocationOutput, error)
+	GetPublicAccessBlock(ctx context.Context, params *s3.GetPublicAccessBlockInput, optFns ...func(*s3.Options)) (*s3.GetPublicAccessBlockOutput, error)
+	GetBucketEncryption(ctx context.Context, params *s3.GetBucketEncryptionInput, optFns ...func(*s3.Options)) (*s3.GetBucketEncryptionOutput, error)
+	GetBucketVersioning(ctx context.Context, params *s3.GetBucketVersioningInput, optFns ...func(*s3.Options)) (*s3.GetBucketVersioningOutput, error)
+	GetBucketLogging(ctx context.Context, params *s3.GetBucketLoggingInput, optFns ...func(*s3.Options)) (*s3.GetBucketLoggingOutput, error)
+	GetBucketTagging(ctx context.Context, params *s3.GetBucketTaggingInput, optFns ...func(*s3.Options)) (*s3.GetBucketTaggingOutput, error)
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+}
+
 // AuditStorage checks every S3 bucket for public access, encryption, versioning, and logging.
 func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, error) {
-	client := s3.NewFromConfig(p.cfg)
-
-	listOut, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	listOut, err := p.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("list buckets: %w", err)
 	}
@@ -24,14 +34,12 @@ func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, err
 	var findings []cloud.BucketFinding
 	for _, bucket := range listOut.Buckets {
 		name := awssdk.ToString(bucket.Name)
-		region, err := p.bucketRegion(ctx, client, name)
+		region, err := p.bucketRegion(ctx, p.s3, name)
 		if err != nil {
 			region = p.cfg.Region
 		}
 
-		regionalClient := s3.NewFromConfig(p.cfg, func(o *s3.Options) {
-			o.Region = region
-		})
+		regionalClient := p.s3ForRegion(region)
 
 		findings = append(findings, p.checkPublicAccessBlock(ctx, regionalClient, name, region)...)
 		findings = append(findings, p.checkEncryption(ctx, regionalClient, name, region)...)
@@ -41,10 +49,10 @@ func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, err
 	return findings, nil
 }
 
-func (p *Provider) bucketRegion(ctx context.Context, client *s3.Client, bucket string) (string, error) {
+func (p *Provider) bucketRegion(ctx context.Context, client s3API, bucket string) (string, error) {
 	out, err := client.GetBucketLocation(ctx, &s3.GetBucketLocationInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get bucket location: %w", err)
 	}
 	if out.LocationConstraint == "" {
 		return "us-east-1", nil
@@ -52,7 +60,7 @@ func (p *Provider) bucketRegion(ctx context.Context, client *s3.Client, bucket s
 	return string(out.LocationConstraint), nil
 }
 
-func (p *Provider) checkPublicAccessBlock(ctx context.Context, client *s3.Client, bucket, region string) []cloud.BucketFinding {
+func (p *Provider) checkPublicAccessBlock(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	out, err := client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
 		if isS3ErrorCode(err, "NoSuchPublicAccessBlockConfiguration") {
@@ -87,7 +95,7 @@ func (p *Provider) checkPublicAccessBlock(ctx context.Context, client *s3.Client
 	return nil
 }
 
-func (p *Provider) checkEncryption(ctx context.Context, client *s3.Client, bucket, region string) []cloud.BucketFinding {
+func (p *Provider) checkEncryption(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	_, err := client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
 		if isS3ErrorCode(err, "ServerSideEncryptionConfigurationNotFoundError") {
@@ -105,7 +113,7 @@ func (p *Provider) checkEncryption(ctx context.Context, client *s3.Client, bucke
 	return nil
 }
 
-func (p *Provider) checkVersioning(ctx context.Context, client *s3.Client, bucket, region string) []cloud.BucketFinding {
+func (p *Provider) checkVersioning(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	out, err := client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
 		return nil
@@ -124,7 +132,7 @@ func (p *Provider) checkVersioning(ctx context.Context, client *s3.Client, bucke
 	return nil
 }
 
-func (p *Provider) checkLogging(ctx context.Context, client *s3.Client, bucket, region string) []cloud.BucketFinding {
+func (p *Provider) checkLogging(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	out, err := client.GetBucketLogging(ctx, &s3.GetBucketLoggingInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
 		return nil

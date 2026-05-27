@@ -13,11 +13,14 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// cloudtrailAPI is the narrow CloudTrail surface used by this package.
+type cloudtrailAPI interface {
+	LookupEvents(ctx context.Context, params *cloudtrail.LookupEventsInput, optFns ...func(*cloudtrail.Options)) (*cloudtrail.LookupEventsOutput, error)
+}
+
 // cloudtrailUsedPermissions queries CloudTrail for events attributed to principal
 // between since and now, returning the unique set of service:Action pairs used.
 func (p *Provider) cloudtrailUsedPermissions(ctx context.Context, principal cloud.Principal, since time.Time) ([]cloud.Permission, error) {
-	client := cloudtrail.NewFromConfig(p.cfg)
-
 	// Build lookup attributes: filter by username or ARN
 	attrs := []cttypes.LookupAttribute{}
 	if arn, ok := principal.Metadata["arn"]; ok && arn != "" {
@@ -35,7 +38,7 @@ func (p *Provider) cloudtrailUsedPermissions(ctx context.Context, principal clou
 	now := time.Now()
 	seen := make(map[string]time.Time) // action|resource → last used
 
-	pager := cloudtrail.NewLookupEventsPaginator(client, &cloudtrail.LookupEventsInput{
+	pager := cloudtrail.NewLookupEventsPaginator(p.cloudtrail, &cloudtrail.LookupEventsInput{
 		LookupAttributes: attrs,
 		StartTime:        awssdk.Time(since),
 		EndTime:          awssdk.Time(now),

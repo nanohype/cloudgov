@@ -16,19 +16,13 @@ func (p *Provider) AuditNetwork(ctx context.Context) ([]cloud.NetworkFinding, er
 	if p.projectID == "" {
 		return nil, fmt.Errorf("GCP project ID is required")
 	}
-	svc, err := compute.NewService(ctx, p.opts...)
+	fws, err := p.compute.ListFirewalls(ctx, p.projectID)
 	if err != nil {
-		return nil, fmt.Errorf("compute client: %w", err)
-	}
-
-	var findings []cloud.NetworkFinding
-	if err := svc.Firewalls.List(p.projectID).Pages(ctx, func(page *compute.FirewallList) error {
-		for _, fw := range page.Items {
-			findings = append(findings, classifyFirewall(fw)...)
-		}
-		return nil
-	}); err != nil {
 		return nil, fmt.Errorf("list firewalls: %w", err)
+	}
+	var findings []cloud.NetworkFinding
+	for _, fw := range fws {
+		findings = append(findings, classifyFirewall(fw)...)
 	}
 	return findings, nil
 }

@@ -12,6 +12,18 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// rdsAPI is the narrow RDS surface used by this package.
+type rdsAPI interface {
+	DescribeDBInstances(ctx context.Context, params *rds.DescribeDBInstancesInput, optFns ...func(*rds.Options)) (*rds.DescribeDBInstancesOutput, error)
+}
+
+// lambdaAPI is the narrow Lambda surface used by this package.
+type lambdaAPI interface {
+	ListFunctions(ctx context.Context, params *lambda.ListFunctionsInput, optFns ...func(*lambda.Options)) (*lambda.ListFunctionsOutput, error)
+	ListTags(ctx context.Context, params *lambda.ListTagsInput, optFns ...func(*lambda.Options)) (*lambda.ListTagsOutput, error)
+	GetAccountSettings(ctx context.Context, params *lambda.GetAccountSettingsInput, optFns ...func(*lambda.Options)) (*lambda.GetAccountSettingsOutput, error)
+}
+
 // AuditTags checks EC2 instances, S3 buckets, RDS instances, and Lambda functions
 // for missing required tags.
 func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
@@ -49,8 +61,7 @@ func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.Ta
 }
 
 func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	client := ec2.NewFromConfig(p.cfg)
-	pager := ec2.NewDescribeInstancesPaginator(client, &ec2.DescribeInstancesInput{})
+	pager := ec2.NewDescribeInstancesPaginator(p.ec2, &ec2.DescribeInstancesInput{})
 
 	var findings []cloud.TagFinding
 	for pager.HasMorePages() {
@@ -85,8 +96,7 @@ func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud
 }
 
 func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	client := s3.NewFromConfig(p.cfg)
-	listOut, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	listOut, err := p.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("list buckets: %w", err)
 	}
@@ -94,14 +104,12 @@ func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.
 	var findings []cloud.TagFinding
 	for _, bucket := range listOut.Buckets {
 		name := awssdk.ToString(bucket.Name)
-		region, err := p.bucketRegion(ctx, client, name)
+		region, err := p.bucketRegion(ctx, p.s3, name)
 		if err != nil {
 			region = p.cfg.Region
 		}
 
-		regionalClient := s3.NewFromConfig(p.cfg, func(o *s3.Options) {
-			o.Region = region
-		})
+		regionalClient := p.s3ForRegion(region)
 
 		tagMap := make(map[string]struct{})
 		tagging, err := regionalClient.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{Bucket: awssdk.String(name)})
@@ -129,8 +137,7 @@ func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.
 }
 
 func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	client := rds.NewFromConfig(p.cfg)
-	pager := rds.NewDescribeDBInstancesPaginator(client, &rds.DescribeDBInstancesInput{})
+	pager := rds.NewDescribeDBInstancesPaginator(p.rds, &rds.DescribeDBInstancesInput{})
 
 	var findings []cloud.TagFinding
 	for pager.HasMorePages() {
@@ -163,12 +170,10 @@ func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud
 }
 
 func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	client := lambda.NewFromConfig(p.cfg)
-
 	var findings []cloud.TagFinding
 	var marker *string
 	for {
-		page, err := client.ListFunctions(ctx, &lambda.ListFunctionsInput{
+		page, err := p.lambda.ListFunctions(ctx, &lambda.ListFunctionsInput{
 			Marker: marker,
 		})
 		if err != nil {
@@ -178,7 +183,7 @@ func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cl
 			if fn.FunctionArn == nil {
 				continue
 			}
-			tagsOut, err := client.ListTags(ctx, &lambda.ListTagsInput{
+			tagsOut, err := p.lambda.ListTags(ctx, &lambda.ListTagsInput{
 				Resource: fn.FunctionArn,
 			})
 			if err != nil {

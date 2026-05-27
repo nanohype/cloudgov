@@ -13,6 +13,26 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// bigqueryAPI is the narrow BigQuery surface used by this package.
+type bigqueryAPI interface {
+	Query(ctx context.Context, projectID, query string) ([]*bigqueryv2.TableRow, error)
+}
+
+type bigqueryAdapter struct{ svc *bigqueryv2.Service }
+
+func (a *bigqueryAdapter) Query(ctx context.Context, projectID, query string) ([]*bigqueryv2.TableRow, error) {
+	useLegacySQL := false
+	resp, err := a.svc.Jobs.Query(projectID, &bigqueryv2.QueryRequest{
+		Query:        query,
+		UseLegacySql: &useLegacySQL,
+		TimeoutMs:    60000,
+	}).Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	return resp.Rows, nil
+}
+
 // GetCostDiff queries GCP billing export data via BigQuery for two time windows
 // and computes the per-service cost delta.
 //
@@ -43,16 +63,11 @@ func (p *Provider) GetCostDiff(ctx context.Context, beforeStart, beforeEnd, afte
 	// Standard GCP billing export table name uses underscores in place of dashes.
 	tableID := "gcp_billing_export_v1_" + strings.ReplaceAll(billingAccountID, "-", "_")
 
-	bqSvc, err := bigqueryv2.NewService(ctx, p.opts...)
-	if err != nil {
-		return cloud.CostDiff{}, fmt.Errorf("bigquery client: %w", err)
-	}
-
-	before, err := p.fetchBQCosts(ctx, bqSvc, p.projectID, dataset, tableID, beforeStart, beforeEnd)
+	before, err := p.fetchBQCosts(ctx, p.projectID, dataset, tableID, beforeStart, beforeEnd)
 	if err != nil {
 		return cloud.CostDiff{}, fmt.Errorf("fetch before period: %w", err)
 	}
-	after, err := p.fetchBQCosts(ctx, bqSvc, p.projectID, dataset, tableID, afterStart, afterEnd)
+	after, err := p.fetchBQCosts(ctx, p.projectID, dataset, tableID, afterStart, afterEnd)
 	if err != nil {
 		return cloud.CostDiff{}, fmt.Errorf("fetch after period: %w", err)
 	}
@@ -109,7 +124,7 @@ func (p *Provider) GetCostDiff(ctx context.Context, beforeStart, beforeEnd, afte
 	}, nil
 }
 
-func (p *Provider) fetchBQCosts(ctx context.Context, bqSvc *bigqueryv2.Service, projectID, dataset, tableID string, start, end time.Time) ([]cloud.CostEntry, error) {
+func (p *Provider) fetchBQCosts(ctx context.Context, projectID, dataset, tableID string, start, end time.Time) ([]cloud.CostEntry, error) {
 	// Columns returned: service (string), total_cost (float), currency (string)
 	query := fmt.Sprintf(
 		"SELECT service.description AS service, SUM(cost) AS total_cost, currency "+
@@ -122,18 +137,13 @@ func (p *Provider) fetchBQCosts(ctx context.Context, bqSvc *bigqueryv2.Service, 
 		end.Format("2006-01-02"),
 	)
 
-	useLegacySQL := false
-	resp, err := bqSvc.Jobs.Query(projectID, &bigqueryv2.QueryRequest{
-		Query:        query,
-		UseLegacySql: &useLegacySQL,
-		TimeoutMs:    60000,
-	}).Context(ctx).Do()
+	rows, err := p.bigquery.Query(ctx, projectID, query)
 	if err != nil {
 		return nil, fmt.Errorf("bigquery query: %w", err)
 	}
 
 	var entries []cloud.CostEntry
-	for _, row := range resp.Rows {
+	for _, row := range rows {
 		if len(row.F) < 3 {
 			continue
 		}

@@ -12,16 +12,19 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// costExplorerAPI is the narrow Cost Explorer surface used by this package.
+type costExplorerAPI interface {
+	GetCostAndUsage(ctx context.Context, params *costexplorer.GetCostAndUsageInput, optFns ...func(*costexplorer.Options)) (*costexplorer.GetCostAndUsageOutput, error)
+}
+
 // GetCostDiff fetches blended cost grouped by service for two time windows and
 // computes the per-service delta.
 func (p *Provider) GetCostDiff(ctx context.Context, beforeStart, beforeEnd, afterStart, afterEnd time.Time) (cloud.CostDiff, error) {
-	client := costexplorer.NewFromConfig(p.cfg)
-
-	before, err := p.fetchCosts(ctx, client, beforeStart, beforeEnd)
+	before, err := p.fetchCosts(ctx, beforeStart, beforeEnd)
 	if err != nil {
 		return cloud.CostDiff{}, fmt.Errorf("fetch before period: %w", err)
 	}
-	after, err := p.fetchCosts(ctx, client, afterStart, afterEnd)
+	after, err := p.fetchCosts(ctx, afterStart, afterEnd)
 	if err != nil {
 		return cloud.CostDiff{}, fmt.Errorf("fetch after period: %w", err)
 	}
@@ -81,8 +84,8 @@ func (p *Provider) GetCostDiff(ctx context.Context, beforeStart, beforeEnd, afte
 	}, nil
 }
 
-func (p *Provider) fetchCosts(ctx context.Context, client *costexplorer.Client, start, end time.Time) ([]cloud.CostEntry, error) {
-	out, err := client.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
+func (p *Provider) fetchCosts(ctx context.Context, start, end time.Time) ([]cloud.CostEntry, error) {
+	out, err := p.costexplorer.GetCostAndUsage(ctx, &costexplorer.GetCostAndUsageInput{
 		TimePeriod: &cetypes.DateInterval{
 			Start: awssdk.String(start.Format("2006-01-02")),
 			End:   awssdk.String(end.Format("2006-01-02")),
@@ -95,7 +98,7 @@ func (p *Provider) fetchCosts(ctx context.Context, client *costexplorer.Client, 
 		}},
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get cost and usage: %w", err)
 	}
 
 	var entries []cloud.CostEntry

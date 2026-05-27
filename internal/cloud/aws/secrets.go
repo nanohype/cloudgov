@@ -18,6 +18,18 @@ import (
 	"github.com/stxkxs/matlock/internal/secrets"
 )
 
+// ssmAPI is the narrow SSM Parameter Store surface used by this package.
+type ssmAPI interface {
+	DescribeParameters(ctx context.Context, params *ssm.DescribeParametersInput, optFns ...func(*ssm.Options)) (*ssm.DescribeParametersOutput, error)
+	GetParameter(ctx context.Context, params *ssm.GetParameterInput, optFns ...func(*ssm.Options)) (*ssm.GetParameterOutput, error)
+}
+
+// cloudFormationAPI is the narrow CloudFormation surface used by this package.
+type cloudFormationAPI interface {
+	ListStacks(ctx context.Context, params *cloudformation.ListStacksInput, optFns ...func(*cloudformation.Options)) (*cloudformation.ListStacksOutput, error)
+	DescribeStacks(ctx context.Context, params *cloudformation.DescribeStacksInput, optFns ...func(*cloudformation.Options)) (*cloudformation.DescribeStacksOutput, error)
+}
+
 // ScanSecrets checks Lambda env vars, ECS task definitions, EC2 user data,
 // SSM non-SecureString parameters, and CloudFormation outputs for leaked secrets.
 func (p *Provider) ScanSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
@@ -57,10 +69,9 @@ func (p *Provider) ScanSecrets(ctx context.Context) ([]cloud.SecretFinding, erro
 }
 
 func (p *Provider) scanLambdaSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
-	client := lambda.NewFromConfig(p.cfg)
 	var findings []cloud.SecretFinding
 
-	paginator := lambda.NewListFunctionsPaginator(client, &lambda.ListFunctionsInput{})
+	paginator := lambda.NewListFunctionsPaginator(p.lambda, &lambda.ListFunctionsInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -93,10 +104,9 @@ func (p *Provider) scanLambdaSecrets(ctx context.Context) ([]cloud.SecretFinding
 }
 
 func (p *Provider) scanECSSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
-	client := ecs.NewFromConfig(p.cfg)
 	var findings []cloud.SecretFinding
 
-	paginator := ecs.NewListTaskDefinitionsPaginator(client, &ecs.ListTaskDefinitionsInput{
+	paginator := ecs.NewListTaskDefinitionsPaginator(p.ecs, &ecs.ListTaskDefinitionsInput{
 		Status: ecstypes.TaskDefinitionStatusActive,
 	})
 	for paginator.HasMorePages() {
@@ -105,7 +115,7 @@ func (p *Provider) scanECSSecrets(ctx context.Context) ([]cloud.SecretFinding, e
 			return findings, fmt.Errorf("list task definitions: %w", err)
 		}
 		for _, arn := range page.TaskDefinitionArns {
-			descOut, err := client.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
+			descOut, err := p.ecs.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
 				TaskDefinition: awssdk.String(arn),
 			})
 			if err != nil {
@@ -143,10 +153,9 @@ func (p *Provider) scanECSSecrets(ctx context.Context) ([]cloud.SecretFinding, e
 }
 
 func (p *Provider) scanEC2UserDataSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
-	client := ec2.NewFromConfig(p.cfg)
 	var findings []cloud.SecretFinding
 
-	paginator := ec2.NewDescribeInstancesPaginator(client, &ec2.DescribeInstancesInput{})
+	paginator := ec2.NewDescribeInstancesPaginator(p.ec2, &ec2.DescribeInstancesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -155,7 +164,7 @@ func (p *Provider) scanEC2UserDataSecrets(ctx context.Context) ([]cloud.SecretFi
 		for _, res := range page.Reservations {
 			for _, inst := range res.Instances {
 				instID := awssdk.ToString(inst.InstanceId)
-				attrOut, err := client.DescribeInstanceAttribute(ctx, &ec2.DescribeInstanceAttributeInput{
+				attrOut, err := p.ec2.DescribeInstanceAttribute(ctx, &ec2.DescribeInstanceAttributeInput{
 					InstanceId: awssdk.String(instID),
 					Attribute:  ec2types.InstanceAttributeNameUserData,
 				})
@@ -191,10 +200,9 @@ func (p *Provider) scanEC2UserDataSecrets(ctx context.Context) ([]cloud.SecretFi
 }
 
 func (p *Provider) scanSSMSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
-	client := ssm.NewFromConfig(p.cfg)
 	var findings []cloud.SecretFinding
 
-	paginator := ssm.NewDescribeParametersPaginator(client, &ssm.DescribeParametersInput{})
+	paginator := ssm.NewDescribeParametersPaginator(p.ssm, &ssm.DescribeParametersInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -205,7 +213,7 @@ func (p *Provider) scanSSMSecrets(ctx context.Context) ([]cloud.SecretFinding, e
 				continue
 			}
 			name := awssdk.ToString(param.Name)
-			getOut, err := client.GetParameter(ctx, &ssm.GetParameterInput{
+			getOut, err := p.ssm.GetParameter(ctx, &ssm.GetParameterInput{
 				Name: awssdk.String(name),
 			})
 			if err != nil {
@@ -232,10 +240,9 @@ func (p *Provider) scanSSMSecrets(ctx context.Context) ([]cloud.SecretFinding, e
 }
 
 func (p *Provider) scanCloudFormationSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
-	client := cloudformation.NewFromConfig(p.cfg)
 	var findings []cloud.SecretFinding
 
-	paginator := cloudformation.NewListStacksPaginator(client, &cloudformation.ListStacksInput{})
+	paginator := cloudformation.NewListStacksPaginator(p.cloudformation, &cloudformation.ListStacksInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -243,7 +250,7 @@ func (p *Provider) scanCloudFormationSecrets(ctx context.Context) ([]cloud.Secre
 		}
 		for _, summary := range page.StackSummaries {
 			stackName := awssdk.ToString(summary.StackName)
-			descOut, err := client.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{
+			descOut, err := p.cloudformation.DescribeStacks(ctx, &cloudformation.DescribeStacksInput{
 				StackName: awssdk.String(stackName),
 			})
 			if err != nil {

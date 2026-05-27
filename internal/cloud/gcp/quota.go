@@ -4,10 +4,25 @@ import (
 	"context"
 	"fmt"
 
+	googleiam "google.golang.org/api/iam/v1"
+
 	"github.com/stxkxs/matlock/internal/cloud"
-	"google.golang.org/api/compute/v1"
-	adminv1 "google.golang.org/api/iam/v1"
 )
+
+// iamServiceAccountsAPI is the narrow GCP IAM service-account surface used here.
+type iamServiceAccountsAPI interface {
+	ListServiceAccounts(ctx context.Context, parent string) ([]*googleiam.ServiceAccount, error)
+}
+
+type iamServiceAccountsAdapter struct{ svc *googleiam.Service }
+
+func (a *iamServiceAccountsAdapter) ListServiceAccounts(ctx context.Context, parent string) ([]*googleiam.ServiceAccount, error) {
+	resp, err := a.svc.Projects.ServiceAccounts.List(parent).Context(ctx).Do()
+	if err != nil {
+		return nil, err
+	}
+	return resp.Accounts, nil
+}
 
 // ListQuotas returns project-level quota utilization from Compute Engine and IAM.
 func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
@@ -33,12 +48,7 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 }
 
 func (p *Provider) computeQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	svc, err := compute.NewService(ctx, p.opts...)
-	if err != nil {
-		return nil, fmt.Errorf("create compute service: %w", err)
-	}
-
-	project, err := svc.Projects.Get(p.projectID).Context(ctx).Do()
+	project, err := p.compute.GetProject(ctx, p.projectID)
 	if err != nil {
 		return nil, fmt.Errorf("get project: %w", err)
 	}
@@ -63,17 +73,12 @@ func (p *Provider) computeQuotas(ctx context.Context) ([]cloud.QuotaUsage, error
 }
 
 func (p *Provider) iamServiceAccountQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	svc, err := adminv1.NewService(ctx, p.opts...)
-	if err != nil {
-		return nil, fmt.Errorf("create iam service: %w", err)
-	}
-
-	resp, err := svc.Projects.ServiceAccounts.List("projects/" + p.projectID).Context(ctx).Do()
+	accounts, err := p.iamServiceAccounts.ListServiceAccounts(ctx, "projects/"+p.projectID)
 	if err != nil {
 		return nil, fmt.Errorf("list service accounts: %w", err)
 	}
 
-	used := float64(len(resp.Accounts))
+	used := float64(len(accounts))
 	limit := float64(100) // Default GCP service account limit per project
 
 	return []cloud.QuotaUsage{{

@@ -5,15 +5,25 @@ import (
 	"fmt"
 	"strings"
 
-	compute "google.golang.org/api/compute/v1"
-	"google.golang.org/api/container/v1"
 	"google.golang.org/api/googleapi"
-	"google.golang.org/api/sqladmin/v1beta4"
 	cstorage "google.golang.org/api/storage/v1"
 
 	"github.com/stxkxs/matlock/internal/cloud"
 	"github.com/stxkxs/matlock/internal/drift"
 )
+
+// gcsRESTAPI is the narrow GCS v1 REST surface used by drift checks. Distinct
+// from gcsAPI (which wraps cloud.google.com/go/storage) because drift needs
+// Get-by-name on bucket metadata, which the REST client exposes more directly.
+type gcsRESTAPI interface {
+	GetBucket(ctx context.Context, name string) (*cstorage.Bucket, error)
+}
+
+type gcsRESTAdapter struct{ svc *cstorage.Service }
+
+func (a *gcsRESTAdapter) GetBucket(ctx context.Context, name string) (*cstorage.Bucket, error) {
+	return a.svc.Buckets.Get(name).Context(ctx).Do()
+}
 
 // SupportedResourceTypes returns the Terraform resource types this provider can check for drift.
 func (p *Provider) SupportedResourceTypes() []string {
@@ -50,18 +60,13 @@ func (p *Provider) CheckDrift(ctx context.Context, resourceType, resourceID stri
 }
 
 func (p *Provider) checkFirewallDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	svc, err := compute.NewService(ctx, p.opts...)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create compute client: %w", err)
-	}
-
 	// Extract firewall name from ID (projects/proj/global/firewalls/name or just name)
 	name := resourceID
 	if parts := strings.Split(resourceID, "/"); len(parts) > 0 {
 		name = parts[len(parts)-1]
 	}
 
-	fw, err := svc.Firewalls.Get(p.projectID, name).Context(ctx).Do()
+	fw, err := p.compute.GetFirewall(ctx, p.projectID, name)
 	if err != nil {
 		if isGoogleNotFound(err) {
 			return cloud.DriftResult{
@@ -99,12 +104,7 @@ func (p *Provider) checkFirewallDrift(ctx context.Context, resourceID string, at
 }
 
 func (p *Provider) checkStorageBucketDrift(ctx context.Context, bucketName string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	svc, err := cstorage.NewService(ctx, p.opts...)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create storage client: %w", err)
-	}
-
-	bucket, err := svc.Buckets.Get(bucketName).Context(ctx).Do()
+	bucket, err := p.gcsREST.GetBucket(ctx, bucketName)
 	if err != nil {
 		if isGoogleNotFound(err) {
 			return cloud.DriftResult{
@@ -140,11 +140,6 @@ func (p *Provider) checkStorageBucketDrift(ctx context.Context, bucketName strin
 }
 
 func (p *Provider) checkComputeInstanceDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	svc, err := compute.NewService(ctx, p.opts...)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create compute client: %w", err)
-	}
-
 	// Extract zone and name from resourceID or attrs
 	zone := ""
 	name := resourceID
@@ -169,7 +164,7 @@ func (p *Provider) checkComputeInstanceDrift(ctx context.Context, resourceID str
 		}, nil
 	}
 
-	inst, err := svc.Instances.Get(p.projectID, zone, name).Context(ctx).Do()
+	inst, err := p.compute.GetInstance(ctx, p.projectID, zone, name)
 	if err != nil {
 		if isGoogleNotFound(err) {
 			return cloud.DriftResult{
@@ -210,17 +205,12 @@ func (p *Provider) checkComputeInstanceDrift(ctx context.Context, resourceID str
 }
 
 func (p *Provider) checkSQLInstanceDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	svc, err := sqladmin.NewService(ctx, p.opts...)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create sqladmin client: %w", err)
-	}
-
 	name := resourceID
 	if parts := strings.Split(resourceID, "/"); len(parts) > 0 {
 		name = parts[len(parts)-1]
 	}
 
-	inst, err := svc.Instances.Get(p.projectID, name).Context(ctx).Do()
+	inst, err := p.sqladmin.GetInstance(ctx, p.projectID, name)
 	if err != nil {
 		if isGoogleNotFound(err) {
 			return cloud.DriftResult{
@@ -257,11 +247,6 @@ func (p *Provider) checkSQLInstanceDrift(ctx context.Context, resourceID string,
 }
 
 func (p *Provider) checkGKEClusterDrift(ctx context.Context, resourceID string, attrs map[string]interface{}) (cloud.DriftResult, error) {
-	svc, err := container.NewService(ctx, p.opts...)
-	if err != nil {
-		return cloud.DriftResult{}, fmt.Errorf("create container client: %w", err)
-	}
-
 	// Extract location and name from resourceID or attrs
 	location := ""
 	name := resourceID
@@ -283,7 +268,7 @@ func (p *Provider) checkGKEClusterDrift(ctx context.Context, resourceID string, 
 	}
 
 	parent := fmt.Sprintf("projects/%s/locations/%s/clusters/%s", p.projectID, location, name)
-	cluster, err := svc.Projects.Locations.Clusters.Get(parent).Context(ctx).Do()
+	cluster, err := p.container.GetCluster(ctx, parent)
 	if err != nil {
 		if isGoogleNotFound(err) {
 			return cloud.DriftResult{

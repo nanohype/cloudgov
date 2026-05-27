@@ -16,13 +16,30 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// iamAPI is the narrow IAM client surface used by this package. The concrete
+// *iam.Client from aws-sdk-go-v2 satisfies it; tests pass a hand-written mock.
+// Each method signature mirrors the SDK exactly so the per-operation paginator
+// interfaces (iam.ListRolesAPIClient, etc.) are satisfied implicitly.
+type iamAPI interface {
+	ListRoles(ctx context.Context, params *iam.ListRolesInput, optFns ...func(*iam.Options)) (*iam.ListRolesOutput, error)
+	ListUsers(ctx context.Context, params *iam.ListUsersInput, optFns ...func(*iam.Options)) (*iam.ListUsersOutput, error)
+	ListAttachedRolePolicies(ctx context.Context, params *iam.ListAttachedRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListAttachedRolePoliciesOutput, error)
+	ListRolePolicies(ctx context.Context, params *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
+	GetRolePolicy(ctx context.Context, params *iam.GetRolePolicyInput, optFns ...func(*iam.Options)) (*iam.GetRolePolicyOutput, error)
+	ListAttachedUserPolicies(ctx context.Context, params *iam.ListAttachedUserPoliciesInput, optFns ...func(*iam.Options)) (*iam.ListAttachedUserPoliciesOutput, error)
+	ListUserPolicies(ctx context.Context, params *iam.ListUserPoliciesInput, optFns ...func(*iam.Options)) (*iam.ListUserPoliciesOutput, error)
+	GetUserPolicy(ctx context.Context, params *iam.GetUserPolicyInput, optFns ...func(*iam.Options)) (*iam.GetUserPolicyOutput, error)
+	GetPolicy(ctx context.Context, params *iam.GetPolicyInput, optFns ...func(*iam.Options)) (*iam.GetPolicyOutput, error)
+	GetPolicyVersion(ctx context.Context, params *iam.GetPolicyVersionInput, optFns ...func(*iam.Options)) (*iam.GetPolicyVersionOutput, error)
+	GetAccountSummary(ctx context.Context, params *iam.GetAccountSummaryInput, optFns ...func(*iam.Options)) (*iam.GetAccountSummaryOutput, error)
+}
+
 // ListPrincipals returns all IAM roles and users in the account.
 func (p *Provider) ListPrincipals(ctx context.Context) ([]cloud.Principal, error) {
-	client := iam.NewFromConfig(p.cfg)
 	var principals []cloud.Principal
 
 	// Roles
-	rolePager := iam.NewListRolesPaginator(client, &iam.ListRolesInput{})
+	rolePager := iam.NewListRolesPaginator(p.iam, &iam.ListRolesInput{})
 	for rolePager.HasMorePages() {
 		page, err := rolePager.NextPage(ctx)
 		if err != nil {
@@ -45,7 +62,7 @@ func (p *Provider) ListPrincipals(ctx context.Context) ([]cloud.Principal, error
 	}
 
 	// Users
-	userPager := iam.NewListUsersPaginator(client, &iam.ListUsersInput{})
+	userPager := iam.NewListUsersPaginator(p.iam, &iam.ListUsersInput{})
 	for userPager.HasMorePages() {
 		page, err := userPager.NextPage(ctx)
 		if err != nil {
@@ -128,13 +145,12 @@ func documentToPermissions(doc *policyDocument) []cloud.Permission {
 
 // GrantedPermissions returns all effective permissions for an IAM principal.
 func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Principal) ([]cloud.Permission, error) {
-	client := iam.NewFromConfig(p.cfg)
 	var perms []cloud.Permission
 
 	switch principal.Type {
 	case cloud.PrincipalRole:
 		// Managed policies
-		attachedPager := iam.NewListAttachedRolePoliciesPaginator(client, &iam.ListAttachedRolePoliciesInput{
+		attachedPager := iam.NewListAttachedRolePoliciesPaginator(p.iam, &iam.ListAttachedRolePoliciesInput{
 			RoleName: awssdk.String(principal.Name),
 		})
 		for attachedPager.HasMorePages() {
@@ -144,7 +160,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 				break
 			}
 			for _, ap := range page.AttachedPolicies {
-				ps, err := p.getManagedPolicyPermissions(ctx, client, awssdk.ToString(ap.PolicyArn))
+				ps, err := p.getManagedPolicyPermissions(ctx, awssdk.ToString(ap.PolicyArn))
 				if err != nil {
 					continue // best-effort
 				}
@@ -152,7 +168,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 			}
 		}
 		// Inline policies
-		inlinePager := iam.NewListRolePoliciesPaginator(client, &iam.ListRolePoliciesInput{
+		inlinePager := iam.NewListRolePoliciesPaginator(p.iam, &iam.ListRolePoliciesInput{
 			RoleName: awssdk.String(principal.Name),
 		})
 		for inlinePager.HasMorePages() {
@@ -162,7 +178,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 				break
 			}
 			for _, policyName := range page.PolicyNames {
-				out, err := client.GetRolePolicy(ctx, &iam.GetRolePolicyInput{
+				out, err := p.iam.GetRolePolicy(ctx, &iam.GetRolePolicyInput{
 					RoleName:   awssdk.String(principal.Name),
 					PolicyName: awssdk.String(policyName),
 				})
@@ -179,7 +195,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 
 	case cloud.PrincipalUser:
 		// Managed policies
-		attachedPager := iam.NewListAttachedUserPoliciesPaginator(client, &iam.ListAttachedUserPoliciesInput{
+		attachedPager := iam.NewListAttachedUserPoliciesPaginator(p.iam, &iam.ListAttachedUserPoliciesInput{
 			UserName: awssdk.String(principal.Name),
 		})
 		for attachedPager.HasMorePages() {
@@ -189,7 +205,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 				break
 			}
 			for _, ap := range page.AttachedPolicies {
-				ps, err := p.getManagedPolicyPermissions(ctx, client, awssdk.ToString(ap.PolicyArn))
+				ps, err := p.getManagedPolicyPermissions(ctx, awssdk.ToString(ap.PolicyArn))
 				if err != nil {
 					continue
 				}
@@ -197,7 +213,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 			}
 		}
 		// Inline policies
-		inlinePager := iam.NewListUserPoliciesPaginator(client, &iam.ListUserPoliciesInput{
+		inlinePager := iam.NewListUserPoliciesPaginator(p.iam, &iam.ListUserPoliciesInput{
 			UserName: awssdk.String(principal.Name),
 		})
 		for inlinePager.HasMorePages() {
@@ -207,7 +223,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 				break
 			}
 			for _, policyName := range page.PolicyNames {
-				out, err := client.GetUserPolicy(ctx, &iam.GetUserPolicyInput{
+				out, err := p.iam.GetUserPolicy(ctx, &iam.GetUserPolicyInput{
 					UserName:   awssdk.String(principal.Name),
 					PolicyName: awssdk.String(policyName),
 				})
@@ -226,8 +242,8 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 	return dedupPermissions(perms), nil
 }
 
-func (p *Provider) getManagedPolicyPermissions(ctx context.Context, client *iam.Client, policyArn string) ([]cloud.Permission, error) {
-	policyOut, err := client.GetPolicy(ctx, &iam.GetPolicyInput{
+func (p *Provider) getManagedPolicyPermissions(ctx context.Context, policyArn string) ([]cloud.Permission, error) {
+	policyOut, err := p.iam.GetPolicy(ctx, &iam.GetPolicyInput{
 		PolicyArn: awssdk.String(policyArn),
 	})
 	if err != nil {
@@ -241,7 +257,7 @@ func (p *Provider) getManagedPolicyPermissions(ctx context.Context, client *iam.
 	if policyOut.Policy == nil {
 		return nil, nil
 	}
-	versionOut, err := client.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
+	versionOut, err := p.iam.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
 		PolicyArn: awssdk.String(policyArn),
 		VersionId: policyOut.Policy.DefaultVersionId,
 	})
@@ -341,4 +357,3 @@ func accountIDFromPrincipal(p cloud.Principal) string {
 	}
 	return ""
 }
-

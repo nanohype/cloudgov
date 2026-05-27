@@ -9,29 +9,53 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
-// AuditNetwork checks Azure Network Security Groups for overly permissive rules.
-func (p *Provider) AuditNetwork(ctx context.Context) ([]cloud.NetworkFinding, error) {
-	client, err := armnetwork.NewSecurityGroupsClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return nil, fmt.Errorf("nsg client: %w", err)
-	}
+// nsgAPI is the narrow Network Security Groups surface used here.
+type nsgAPI interface {
+	ListAll(ctx context.Context) ([]*armnetwork.SecurityGroup, error)
+	Get(ctx context.Context, resourceGroup, name string) (*armnetwork.SecurityGroup, error)
+}
 
-	var findings []cloud.NetworkFinding
-	pager := client.NewListAllPager(nil)
+type nsgAdapter struct {
+	client *armnetwork.SecurityGroupsClient
+}
+
+func (a *nsgAdapter) ListAll(ctx context.Context) ([]*armnetwork.SecurityGroup, error) {
+	var out []*armnetwork.SecurityGroup
+	pager := a.client.NewListAllPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("list nsgs: %w", err)
+			return out, err
 		}
-		for _, nsg := range page.Value {
-			if nsg.Properties == nil {
-				continue
-			}
-			name := ptrStr(nsg.Name)
-			region := ptrStr(nsg.Location)
-			for _, rule := range nsg.Properties.SecurityRules {
-				findings = append(findings, classifyNSGRule(name, region, rule)...)
-			}
+		out = append(out, page.Value...)
+	}
+	return out, nil
+}
+
+func (a *nsgAdapter) Get(ctx context.Context, rg, name string) (*armnetwork.SecurityGroup, error) {
+	resp, err := a.client.Get(ctx, rg, name, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.SecurityGroup, nil
+}
+
+// AuditNetwork checks Azure Network Security Groups for overly permissive rules.
+func (p *Provider) AuditNetwork(ctx context.Context) ([]cloud.NetworkFinding, error) {
+	nsgs, err := p.nsgs.ListAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list nsgs: %w", err)
+	}
+
+	var findings []cloud.NetworkFinding
+	for _, nsg := range nsgs {
+		if nsg.Properties == nil {
+			continue
+		}
+		name := ptrStr(nsg.Name)
+		region := ptrStr(nsg.Location)
+		for _, rule := range nsg.Properties.SecurityRules {
+			findings = append(findings, classifyNSGRule(name, region, rule)...)
 		}
 	}
 	return findings, nil

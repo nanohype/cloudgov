@@ -10,25 +10,47 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// gcsAPI is the narrow GCS surface used by this package. Extend it when
+// other files need additional methods.
+type gcsAPI interface {
+	ListBuckets(ctx context.Context, projectID string) ([]*storage.BucketAttrs, error)
+	Close() error
+}
+
+type gcsAdapter struct{ client *storage.Client }
+
+func (a *gcsAdapter) ListBuckets(ctx context.Context, projectID string) ([]*storage.BucketAttrs, error) {
+	var out []*storage.BucketAttrs
+	it := a.client.Buckets(ctx, projectID)
+	for {
+		attrs, err := it.Next()
+		if err == iterator.Done {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
+		}
+		out = append(out, attrs)
+	}
+}
+
+func (a *gcsAdapter) Close() error { return a.client.Close() }
+
 // AuditStorage checks GCS buckets for public access and encryption settings.
 func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, error) {
-	client, err := storage.NewClient(ctx)
+	gcs, err := p.newGCS(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("storage client: %w", err)
 	}
-	defer client.Close()
+	defer gcs.Close()
+
+	buckets, err := gcs.ListBuckets(ctx, p.projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list buckets: %w", err)
+	}
 
 	var findings []cloud.BucketFinding
-	iter := client.Buckets(ctx, p.projectID)
-	for {
-		attrs, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("list buckets: %w", err)
-		}
-
+	for _, attrs := range buckets {
 		findings = append(findings, p.checkGCSPublicAccess(attrs)...)
 		findings = append(findings, p.checkGCSVersioning(attrs)...)
 		findings = append(findings, p.checkGCSLogging(attrs)...)

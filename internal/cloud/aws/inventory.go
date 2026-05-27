@@ -17,6 +17,14 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// ecsAPI is the narrow ECS surface used by this package.
+type ecsAPI interface {
+	ListClusters(ctx context.Context, params *ecs.ListClustersInput, optFns ...func(*ecs.Options)) (*ecs.ListClustersOutput, error)
+	DescribeClusters(ctx context.Context, params *ecs.DescribeClustersInput, optFns ...func(*ecs.Options)) (*ecs.DescribeClustersOutput, error)
+	ListTaskDefinitions(ctx context.Context, params *ecs.ListTaskDefinitionsInput, optFns ...func(*ecs.Options)) (*ecs.ListTaskDefinitionsOutput, error)
+	DescribeTaskDefinition(ctx context.Context, params *ecs.DescribeTaskDefinitionInput, optFns ...func(*ecs.Options)) (*ecs.DescribeTaskDefinitionOutput, error)
+}
+
 // ListResources lists AWS resources for inventory.
 func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cloud.InventoryResource, error) {
 	filter := make(map[string]bool)
@@ -95,10 +103,9 @@ func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cl
 }
 
 func (p *Provider) listEC2Instances(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := ec2.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
-	paginator := ec2.NewDescribeInstancesPaginator(client, &ec2.DescribeInstancesInput{})
+	paginator := ec2.NewDescribeInstancesPaginator(p.ec2, &ec2.DescribeInstancesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -132,8 +139,7 @@ func (p *Provider) listEC2Instances(ctx context.Context) ([]cloud.InventoryResou
 }
 
 func (p *Provider) listS3Buckets(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := s3.NewFromConfig(p.cfg)
-	out, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	out, err := p.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("list buckets: %w", err)
 	}
@@ -159,12 +165,11 @@ func (p *Provider) listS3Buckets(ctx context.Context) ([]cloud.InventoryResource
 }
 
 func (p *Provider) listLambdaFunctions(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := lambda.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
 	var marker *string
 	for {
-		out, err := client.ListFunctions(ctx, &lambda.ListFunctionsInput{Marker: marker})
+		out, err := p.lambda.ListFunctions(ctx, &lambda.ListFunctionsInput{Marker: marker})
 		if err != nil {
 			return resources, fmt.Errorf("list functions: %w", err)
 		}
@@ -189,10 +194,9 @@ func (p *Provider) listLambdaFunctions(ctx context.Context) ([]cloud.InventoryRe
 }
 
 func (p *Provider) listEBSVolumes(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := ec2.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
-	paginator := ec2.NewDescribeVolumesPaginator(client, &ec2.DescribeVolumesInput{})
+	paginator := ec2.NewDescribeVolumesPaginator(p.ec2, &ec2.DescribeVolumesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -222,10 +226,9 @@ func (p *Provider) listEBSVolumes(ctx context.Context) ([]cloud.InventoryResourc
 }
 
 func (p *Provider) listRDSInstances(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := rds.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
-	paginator := rds.NewDescribeDBInstancesPaginator(client, &rds.DescribeDBInstancesInput{})
+	paginator := rds.NewDescribeDBInstancesPaginator(p.rds, &rds.DescribeDBInstancesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -253,12 +256,11 @@ func (p *Provider) listRDSInstances(ctx context.Context) ([]cloud.InventoryResou
 }
 
 func (p *Provider) listECSClusters(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := ecs.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
 	var nextToken *string
 	for {
-		listOut, err := client.ListClusters(ctx, &ecs.ListClustersInput{NextToken: nextToken})
+		listOut, err := p.ecs.ListClusters(ctx, &ecs.ListClustersInput{NextToken: nextToken})
 		if err != nil {
 			return resources, fmt.Errorf("list ecs clusters: %w", err)
 		}
@@ -266,7 +268,7 @@ func (p *Provider) listECSClusters(ctx context.Context) ([]cloud.InventoryResour
 			break
 		}
 
-		descOut, err := client.DescribeClusters(ctx, &ecs.DescribeClustersInput{
+		descOut, err := p.ecs.DescribeClusters(ctx, &ecs.DescribeClustersInput{
 			Clusters: listOut.ClusterArns,
 		})
 		if err != nil {
@@ -295,10 +297,9 @@ func (p *Provider) listECSClusters(ctx context.Context) ([]cloud.InventoryResour
 }
 
 func (p *Provider) listELBLoadBalancers(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := elasticloadbalancingv2.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
-	paginator := elasticloadbalancingv2.NewDescribeLoadBalancersPaginator(client, &elasticloadbalancingv2.DescribeLoadBalancersInput{})
+	paginator := elasticloadbalancingv2.NewDescribeLoadBalancersPaginator(p.elbv2, &elasticloadbalancingv2.DescribeLoadBalancersInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -327,10 +328,9 @@ func (p *Provider) listELBLoadBalancers(ctx context.Context) ([]cloud.InventoryR
 }
 
 func (p *Provider) listIAMRoles(ctx context.Context) ([]cloud.InventoryResource, error) {
-	client := iam.NewFromConfig(p.cfg)
 	var resources []cloud.InventoryResource
 
-	paginator := iam.NewListRolesPaginator(client, &iam.ListRolesInput{})
+	paginator := iam.NewListRolesPaginator(p.iam, &iam.ListRolesInput{})
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {

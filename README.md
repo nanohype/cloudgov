@@ -426,6 +426,94 @@ matlock tags --require owner,env --output json --output-file tags.json
 
 ---
 
+### `matlock secrets scan` — leaked credentials in cloud resources
+
+Scans Lambda environment variables, ECS task definitions, EC2 user data (AWS), Cloud Functions environment, App Service settings (Azure), and similar runtime configuration for embedded secrets — AWS keys, Slack tokens, private keys, GitHub tokens, generic high-entropy strings.
+
+```sh
+# Scan all auto-detected providers
+matlock secrets scan
+
+# AWS only, HIGH and above
+matlock secrets scan --provider aws --severity HIGH
+
+# SARIF output for GitHub Advanced Security
+matlock secrets scan --output sarif --output-file secrets.sarif
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider` | auto | Cloud providers to scan: `aws`, `gcp`, `azure` |
+| `--severity` | `LOW` | Minimum severity to report |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
+### `matlock compliance <benchmark>` — map findings to compliance controls
+
+Loads JSON scan reports from prior matlock runs and maps the findings to controls in a named benchmark, producing a pass/fail evaluation per control.
+
+Available benchmarks: `cis-aws-v3`, `cis-gcp-v2`, `cis-azure-v2`, `soc2`.
+
+```sh
+# Produce JSON reports first
+matlock iam scan --output json --output-file iam.json
+matlock storage audit --output json --output-file storage.json
+
+# Then evaluate against a benchmark
+matlock compliance cis-aws-v3 --iam-report iam.json --storage-report storage.json
+
+# JSON output for ingest into a dashboard
+matlock compliance soc2 --iam-report iam.json --output json --output-file soc2.json
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--iam-report` | | Path to JSON report from `iam scan` |
+| `--storage-report` | | Path to JSON report from `storage audit` |
+| `--network-report` | | Path to JSON report from `network audit` |
+| `--certs-report` | | Path to JSON report from `certs` |
+| `--tags-report` | | Path to JSON report from `tags` |
+| `--output` | `table` | Output format: `table`, `json` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
+### `matlock drift <tfstate>` — Terraform state vs live cloud
+
+Reads a `terraform.tfstate` file and checks each managed resource against the cloud API to detect modifications or deletions outside Terraform. Supports AWS security groups / IAM policies / S3 buckets, GCP firewalls / storage buckets, Azure NSGs / storage accounts.
+
+```sh
+# Local state file
+matlock drift terraform.tfstate
+
+# Filter to a single resource type
+matlock drift terraform.tfstate --resource-type aws_security_group
+
+# Limit to a specific provider, lower concurrency
+matlock drift terraform.tfstate --provider aws --concurrency 5
+
+# JSON output
+matlock drift terraform.tfstate --output json --output-file drift.json
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider` | auto from state | Cloud providers to query: `aws`, `gcp`, `azure` |
+| `--resource-type` | | Filter to a single Terraform resource type |
+| `--concurrency` | `10` | Max concurrent API calls |
+| `--output` | `table` | Output format: `table`, `json` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
 ### `matlock audit` — unified full-spectrum audit
 
 Runs all security and cost scans (IAM, storage, network, orphans, certs, tags, secrets) in one shot and produces a single combined report. Skip specific domains with `--skip`.
@@ -778,4 +866,4 @@ matlock --version
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

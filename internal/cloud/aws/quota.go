@@ -56,8 +56,7 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 }
 
 func (p *Provider) iamQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	client := iam.NewFromConfig(p.cfg)
-	out, err := client.GetAccountSummary(ctx, &iam.GetAccountSummaryInput{})
+	out, err := p.iam.GetAccountSummary(ctx, &iam.GetAccountSummaryInput{})
 	if err != nil {
 		return nil, fmt.Errorf("get account summary: %w", err)
 	}
@@ -97,10 +96,8 @@ func (p *Provider) iamQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 }
 
 func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	client := ec2.NewFromConfig(p.cfg)
-
 	// EIPs
-	addrOut, err := client.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{})
+	addrOut, err := p.ec2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{})
 	if err != nil {
 		return nil, fmt.Errorf("describe addresses: %w", err)
 	}
@@ -110,7 +107,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 	eipLimit := float64(5)
 
 	// VPCs
-	vpcOut, err := client.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{})
+	vpcOut, err := p.ec2.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("describe vpcs: %w", err)
 	}
@@ -119,7 +116,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 
 	// Security Groups
 	var sgCount int
-	sgPager := ec2.NewDescribeSecurityGroupsPaginator(client, &ec2.DescribeSecurityGroupsInput{})
+	sgPager := ec2.NewDescribeSecurityGroupsPaginator(p.ec2, &ec2.DescribeSecurityGroupsInput{})
 	for sgPager.HasMorePages() {
 		page, err := sgPager.NextPage(ctx)
 		if err != nil {
@@ -132,7 +129,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 	sgLimit := float64(2500) // Default per region
 
 	// Internet Gateways
-	igwOut, err := client.DescribeInternetGateways(ctx, &ec2.DescribeInternetGatewaysInput{})
+	igwOut, err := p.ec2.DescribeInternetGateways(ctx, &ec2.DescribeInternetGatewaysInput{})
 	if err != nil {
 		return nil, fmt.Errorf("describe internet gateways: %w", err)
 	}
@@ -150,8 +147,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 }
 
 func (p *Provider) s3Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	client := s3.NewFromConfig(p.cfg)
-	out, err := client.ListBuckets(ctx, &s3.ListBucketsInput{})
+	out, err := p.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("list buckets: %w", err)
 	}
@@ -170,9 +166,7 @@ func (p *Provider) s3Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 }
 
 func (p *Provider) lambdaQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	client := lambda.NewFromConfig(p.cfg)
-
-	settings, err := client.GetAccountSettings(ctx, &lambda.GetAccountSettingsInput{})
+	settings, err := p.lambda.GetAccountSettings(ctx, &lambda.GetAccountSettingsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("get account settings: %w", err)
 	}
@@ -186,7 +180,7 @@ func (p *Provider) lambdaQuotas(ctx context.Context) ([]cloud.QuotaUsage, error)
 		if limit > 0 {
 			// Count functions
 			var fnCount int
-			pager := lambda.NewListFunctionsPaginator(client, &lambda.ListFunctionsInput{})
+			pager := lambda.NewListFunctionsPaginator(p.lambda, &lambda.ListFunctionsInput{})
 			for pager.HasMorePages() {
 				page, err := pager.NextPage(ctx)
 				if err != nil {
@@ -226,8 +220,7 @@ func (p *Provider) lambdaQuotas(ctx context.Context) ([]cloud.QuotaUsage, error)
 }
 
 func (p *Provider) rdsQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	client := rds.NewFromConfig(p.cfg)
-	pager := rds.NewDescribeDBInstancesPaginator(client, &rds.DescribeDBInstancesInput{})
+	pager := rds.NewDescribeDBInstancesPaginator(p.rds, &rds.DescribeDBInstancesInput{})
 
 	var count int
 	for pager.HasMorePages() {

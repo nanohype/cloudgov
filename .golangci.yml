@@ -1,0 +1,12 @@
+version: "2"
+
+# go.mod targets Go 1.26.0 (pulled in by k8s.io/client-go transitively).
+# golangci-lint v2.7.0 is built with Go 1.25 and refuses to load a config
+# with a higher targeted version, so we tell it to analyze as 1.25. The
+# 1.25 lens catches every issue this codebase actually hits — no
+# 1.26-specific stdlib features are used in any meaningful way.
+# Drop this and bump golangci-lint when a v2 release built with Go 1.26
+# is available.
+run:
+  go: "1.25"
+  timeout: 5m

@@ -8,31 +8,53 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
-// AuditStorage checks Azure Blob storage accounts for security misconfigurations.
-func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, error) {
-	client, err := armstorage.NewAccountsClient(p.subscriptionID, p.cred, nil)
-	if err != nil {
-		return nil, fmt.Errorf("storage accounts client: %w", err)
-	}
+// storageAccountsAPI is the narrow Storage Accounts surface used by this package.
+type storageAccountsAPI interface {
+	List(ctx context.Context) ([]*armstorage.Account, error)
+	GetProperties(ctx context.Context, resourceGroup, name string) (*armstorage.Account, error)
+}
 
-	var findings []cloud.BucketFinding
-	pager := client.NewListPager(nil)
+type storageAccountsAdapter struct{ client *armstorage.AccountsClient }
+
+func (a *storageAccountsAdapter) List(ctx context.Context) ([]*armstorage.Account, error) {
+	var out []*armstorage.Account
+	pager := a.client.NewListPager(nil)
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("list storage accounts: %w", err)
+			return out, err
 		}
-		for _, acct := range page.Value {
-			if acct.Properties == nil {
-				continue
-			}
-			name := ptrStr(acct.Name)
-			region := ptrStr(acct.Location)
+		out = append(out, page.Value...)
+	}
+	return out, nil
+}
 
-			findings = append(findings, p.checkAzurePublicAccess(acct, name, region)...)
-			findings = append(findings, p.checkAzureEncryption(acct, name, region)...)
-			findings = append(findings, p.checkAzureHTTPS(acct, name, region)...)
+func (a *storageAccountsAdapter) GetProperties(ctx context.Context, rg, name string) (*armstorage.Account, error) {
+	resp, err := a.client.GetProperties(ctx, rg, name, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.Account, nil
+}
+
+// AuditStorage checks Azure Blob storage accounts for security misconfigurations.
+func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, error) {
+	accounts, err := p.storageAccounts.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list storage accounts: %w", err)
+	}
+
+	var findings []cloud.BucketFinding
+	for _, acct := range accounts {
+		if acct.Properties == nil {
+			continue
 		}
+		name := ptrStr(acct.Name)
+		region := ptrStr(acct.Location)
+
+		findings = append(findings, p.checkAzurePublicAccess(acct, name, region)...)
+		findings = append(findings, p.checkAzureEncryption(acct, name, region)...)
+		findings = append(findings, p.checkAzureHTTPS(acct, name, region)...)
 	}
 	return findings, nil
 }

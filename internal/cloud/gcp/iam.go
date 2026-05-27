@@ -9,19 +9,44 @@ import (
 
 	"google.golang.org/api/cloudresourcemanager/v1"
 	googleiam "google.golang.org/api/iam/v1"
-	"google.golang.org/api/option"
 
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// crmAPI is the narrow Cloud Resource Manager surface used by this package.
+// Production: wraps *cloudresourcemanager.Service via crmAdapter.
+type crmAPI interface {
+	GetIAMPolicy(ctx context.Context, projectID string) (*cloudresourcemanager.Policy, error)
+}
+
+// googleIAMAPI is the narrow GCP IAM surface used by this package.
+// Production: wraps *iam.Service via googleIAMAdapter.
+type googleIAMAPI interface {
+	GetRole(ctx context.Context, roleName string) (*googleiam.Role, error)
+}
+
+type crmAdapter struct{ svc *cloudresourcemanager.Service }
+
+func (a *crmAdapter) GetIAMPolicy(ctx context.Context, projectID string) (*cloudresourcemanager.Policy, error) {
+	return a.svc.Projects.GetIamPolicy(projectID, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
+}
+
+type googleIAMAdapter struct{ svc *googleiam.Service }
+
+func (a *googleIAMAdapter) GetRole(ctx context.Context, roleName string) (*googleiam.Role, error) {
+	role, err := a.svc.Roles.Get(roleName).Context(ctx).Do()
+	if err != nil {
+		role, err = a.svc.Projects.Roles.Get(roleName).Context(ctx).Do()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return role, nil
+}
+
 // ListPrincipals returns all unique members from the project's IAM policy.
 func (p *Provider) ListPrincipals(ctx context.Context) ([]cloud.Principal, error) {
-	svc, err := cloudresourcemanager.NewService(ctx, p.opts...)
-	if err != nil {
-		return nil, fmt.Errorf("cloudresourcemanager client: %w", err)
-	}
-
-	policy, err := svc.Projects.GetIamPolicy(p.projectID, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
+	policy, err := p.crm.GetIAMPolicy(ctx, p.projectID)
 	if err != nil {
 		return nil, fmt.Errorf("get IAM policy: %w", err)
 	}
@@ -66,21 +91,12 @@ func parseMember(member string) (cloud.PrincipalType, string) {
 
 // GrantedPermissions resolves all role bindings for a member to a flat permission list.
 func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Principal) ([]cloud.Permission, error) {
-	crmSvc, err := cloudresourcemanager.NewService(ctx, p.opts...)
-	if err != nil {
-		return nil, fmt.Errorf("cloudresourcemanager client: %w", err)
-	}
-	iamSvc, err := googleiam.NewService(ctx, option.WithScopes("https://www.googleapis.com/auth/cloud-platform"))
-	if err != nil {
-		return nil, fmt.Errorf("iam client: %w", err)
-	}
-
 	member := principal.Metadata["member"]
 	if member == "" {
 		member = principal.ID
 	}
 
-	policy, err := crmSvc.Projects.GetIamPolicy(p.projectID, &cloudresourcemanager.GetIamPolicyRequest{}).Context(ctx).Do()
+	policy, err := p.crm.GetIAMPolicy(ctx, p.projectID)
 	if err != nil {
 		return nil, fmt.Errorf("get IAM policy: %w", err)
 	}
@@ -91,11 +107,11 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 			if m != member {
 				continue
 			}
-			perms, err := p.roleToPermissions(ctx, iamSvc, binding.Role)
+			role, err := p.googleIAM.GetRole(ctx, binding.Role)
 			if err != nil {
 				continue // best-effort
 			}
-			for _, perm := range perms {
+			for _, perm := range role.IncludedPermissions {
 				allPerms = append(allPerms, cloud.Permission{
 					Action:   perm,
 					Resource: "projects/" + p.projectID,
@@ -104,19 +120,6 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 		}
 	}
 	return allPerms, nil
-}
-
-// roleToPermissions fetches the included permissions for a role name.
-func (p *Provider) roleToPermissions(ctx context.Context, svc *googleiam.Service, roleName string) ([]string, error) {
-	role, err := svc.Roles.Get(roleName).Context(ctx).Do()
-	if err != nil {
-		// Try as a project-level custom role
-		role, err = svc.Projects.Roles.Get(roleName).Context(ctx).Do()
-		if err != nil {
-			return nil, err
-		}
-	}
-	return role.IncludedPermissions, nil
 }
 
 // UsedPermissions queries Cloud Audit Logs for actions taken by the principal.

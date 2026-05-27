@@ -19,9 +19,12 @@ var quiet bool
 
 var rootCmd = &cobra.Command{
 	Use:   "matlock",
-	Short: "Multi-cloud security and cost investigator",
-	Long: `matlock investigates your cloud infrastructure for IAM over-privilege,
-cost anomalies, orphaned resources, and storage misconfigurations.
+	Short: "Multi-cloud security and cost swiss army knife",
+	Long: `matlock audits cloud infrastructure across five domains: IAM
+over-privilege, cost anomalies, infrastructure hygiene (orphans,
+storage, network, certs, tags), security posture (secrets, compliance,
+drift, full audit), and operational visibility (inventory, quotas,
+baselines, diffs, reports).
 
 Supported providers: aws, gcp, azure`,
 	SilenceUsage: true,
@@ -46,7 +49,6 @@ func init() {
 	rootCmd.AddCommand(networkCmd)
 	rootCmd.AddCommand(certsCmd)
 	rootCmd.AddCommand(tagsCmd)
-	rootCmd.AddCommand(probeCmd)
 	rootCmd.AddCommand(secretsCmd)
 	rootCmd.AddCommand(complianceCmd)
 	rootCmd.AddCommand(driftCmd)

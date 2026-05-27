@@ -12,47 +12,83 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// roleAssignmentsAPI is the narrow RBAC role-assignments surface used here.
+type roleAssignmentsAPI interface {
+	ListForSubscription(ctx context.Context, filter string) ([]*armauthorization.RoleAssignment, error)
+}
+
+// roleDefinitionsAPI is the narrow RBAC role-definitions surface used here.
+type roleDefinitionsAPI interface {
+	GetByID(ctx context.Context, id string) (*armauthorization.RoleDefinition, error)
+}
+
+type roleAssignmentsAdapter struct {
+	client *armauthorization.RoleAssignmentsClient
+}
+
+func (a *roleAssignmentsAdapter) ListForSubscription(ctx context.Context, filter string) ([]*armauthorization.RoleAssignment, error) {
+	var opts *armauthorization.RoleAssignmentsClientListForSubscriptionOptions
+	if filter != "" {
+		opts = &armauthorization.RoleAssignmentsClientListForSubscriptionOptions{Filter: to.Ptr(filter)}
+	}
+	var out []*armauthorization.RoleAssignment
+	pager := a.client.NewListForSubscriptionPager(opts)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, page.Value...)
+	}
+	return out, nil
+}
+
+type roleDefinitionsAdapter struct {
+	client *armauthorization.RoleDefinitionsClient
+}
+
+func (a *roleDefinitionsAdapter) GetByID(ctx context.Context, id string) (*armauthorization.RoleDefinition, error) {
+	resp, err := a.client.GetByID(ctx, id, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.RoleDefinition, nil
+}
+
 // ListPrincipals returns all unique principals from role assignments in the subscription.
 func (p *Provider) ListPrincipals(ctx context.Context) ([]cloud.Principal, error) {
-	client, err := armauthorization.NewRoleAssignmentsClient(p.subscriptionID, p.cred, nil)
+	assignments, err := p.roleAssignments.ListForSubscription(ctx, "")
 	if err != nil {
-		return nil, fmt.Errorf("role assignments client: %w", err)
+		return nil, fmt.Errorf("list role assignments: %w", err)
 	}
 
 	seen := make(map[string]bool)
 	var principals []cloud.Principal
 
-	pager := client.NewListForSubscriptionPager(nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list role assignments: %w", err)
+	for _, ra := range assignments {
+		if ra.Properties == nil || ra.Properties.PrincipalID == nil {
+			continue
 		}
-		for _, ra := range page.Value {
-			if ra.Properties == nil || ra.Properties.PrincipalID == nil {
-				continue
-			}
-			pid := *ra.Properties.PrincipalID
-			if seen[pid] {
-				continue
-			}
-			seen[pid] = true
+		pid := *ra.Properties.PrincipalID
+		if seen[pid] {
+			continue
+		}
+		seen[pid] = true
 
-			pt := principalType(ra.Properties.PrincipalType)
-			name := pid
-			if ra.Properties.PrincipalID != nil {
-				name = *ra.Properties.PrincipalID
-			}
-			principals = append(principals, cloud.Principal{
-				ID:       pid,
-				Name:     name,
-				Type:     pt,
-				Provider: "azure",
-				Metadata: map[string]string{
-					"subscription": p.subscriptionID,
-				},
-			})
+		pt := principalType(ra.Properties.PrincipalType)
+		name := pid
+		if ra.Properties.PrincipalID != nil {
+			name = *ra.Properties.PrincipalID
 		}
+		principals = append(principals, cloud.Principal{
+			ID:       pid,
+			Name:     name,
+			Type:     pt,
+			Provider: "azure",
+			Metadata: map[string]string{
+				"subscription": p.subscriptionID,
+			},
+		})
 	}
 	return principals, nil
 }
@@ -71,51 +107,38 @@ func principalType(pt *armauthorization.PrincipalType) cloud.PrincipalType {
 
 // GrantedPermissions resolves all role definitions for the principal's assignments.
 func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Principal) ([]cloud.Permission, error) {
-	assignClient, err := armauthorization.NewRoleAssignmentsClient(p.subscriptionID, p.cred, nil)
+	filter := fmt.Sprintf("principalId eq '%s'", principal.ID)
+	assignments, err := p.roleAssignments.ListForSubscription(ctx, filter)
 	if err != nil {
-		return nil, err
-	}
-	defsClient, err := armauthorization.NewRoleDefinitionsClient(p.cred, nil)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list assignments for principal: %w", err)
 	}
 
 	var perms []cloud.Permission
-	filter := to.Ptr(fmt.Sprintf("principalId eq '%s'", principal.ID))
-	pager := assignClient.NewListForSubscriptionPager(&armauthorization.RoleAssignmentsClientListForSubscriptionOptions{
-		Filter: filter,
-	})
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list assignments for principal: %w", err)
+	for _, ra := range assignments {
+		if ra.Properties == nil || ra.Properties.RoleDefinitionID == nil {
+			continue
 		}
-		for _, ra := range page.Value {
-			if ra.Properties == nil || ra.Properties.RoleDefinitionID == nil {
-				continue
-			}
-			scope := ""
-			if ra.Properties.Scope != nil {
-				scope = *ra.Properties.Scope
-			}
-			roleDefID := *ra.Properties.RoleDefinitionID
-			roleDef, err := defsClient.GetByID(ctx, roleDefID, nil)
-			if err != nil {
-				continue
-			}
-			if roleDef.Properties == nil {
-				continue
-			}
-			for _, perm := range roleDef.Properties.Permissions {
-				for _, action := range perm.Actions {
-					if action != nil {
-						perms = append(perms, cloud.Permission{Action: *action, Resource: scope})
-					}
+		scope := ""
+		if ra.Properties.Scope != nil {
+			scope = *ra.Properties.Scope
+		}
+		roleDefID := *ra.Properties.RoleDefinitionID
+		roleDef, err := p.roleDefinitions.GetByID(ctx, roleDefID)
+		if err != nil {
+			continue
+		}
+		if roleDef.Properties == nil {
+			continue
+		}
+		for _, perm := range roleDef.Properties.Permissions {
+			for _, action := range perm.Actions {
+				if action != nil {
+					perms = append(perms, cloud.Permission{Action: *action, Resource: scope})
 				}
-				for _, action := range perm.DataActions {
-					if action != nil {
-						perms = append(perms, cloud.Permission{Action: *action, Resource: scope})
-					}
+			}
+			for _, action := range perm.DataActions {
+				if action != nil {
+					perms = append(perms, cloud.Permission{Action: *action, Resource: scope})
 				}
 			}
 		}
@@ -155,7 +178,7 @@ func (p *Provider) MinimalPolicy(_ context.Context, principal cloud.Principal, u
 	}
 	raw, err := json.MarshalIndent(role, "", "  ")
 	if err != nil {
-		return cloud.Policy{}, err
+		return cloud.Policy{}, fmt.Errorf("marshal custom role: %w", err)
 	}
 	return cloud.Policy{
 		Provider: "azure",

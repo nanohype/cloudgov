@@ -12,6 +12,25 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// ec2API is the narrow EC2 surface used by this package. Extend it (do not
+// declare a parallel interface) when other files need additional methods.
+type ec2API interface {
+	DescribeVolumes(ctx context.Context, params *ec2.DescribeVolumesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error)
+	DescribeAddresses(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error)
+	DescribeSecurityGroups(ctx context.Context, params *ec2.DescribeSecurityGroupsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSecurityGroupsOutput, error)
+	DescribeInstances(ctx context.Context, params *ec2.DescribeInstancesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error)
+	DescribeInstanceAttribute(ctx context.Context, params *ec2.DescribeInstanceAttributeInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInstanceAttributeOutput, error)
+	DescribeVpcs(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
+	DescribeInternetGateways(ctx context.Context, params *ec2.DescribeInternetGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
+}
+
+// elbv2API is the narrow ELBv2 surface used by this package.
+type elbv2API interface {
+	DescribeLoadBalancers(ctx context.Context, params *elasticloadbalancingv2.DescribeLoadBalancersInput, optFns ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error)
+	DescribeTargetGroups(ctx context.Context, params *elasticloadbalancingv2.DescribeTargetGroupsInput, optFns ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetGroupsOutput, error)
+	DescribeTargetHealth(ctx context.Context, params *elasticloadbalancingv2.DescribeTargetHealthInput, optFns ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error)
+}
+
 // ListOrphans returns unused AWS resources across the configured region.
 func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, error) {
 	var orphans []cloud.OrphanResource
@@ -39,8 +58,7 @@ func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, err
 
 // orphanDisks finds EBS volumes that are not attached to any instance.
 func (p *Provider) orphanDisks(ctx context.Context) ([]cloud.OrphanResource, error) {
-	client := ec2.NewFromConfig(p.cfg)
-	pager := ec2.NewDescribeVolumesPaginator(client, &ec2.DescribeVolumesInput{
+	pager := ec2.NewDescribeVolumesPaginator(p.ec2, &ec2.DescribeVolumesInput{
 		Filters: []ec2types.Filter{{
 			Name:   awssdk.String("status"),
 			Values: []string{"available"},
@@ -87,10 +105,9 @@ func volumeName(v ec2types.Volume) string {
 
 // orphanIPs finds Elastic IPs that are not associated with any resource.
 func (p *Provider) orphanIPs(ctx context.Context) ([]cloud.OrphanResource, error) {
-	client := ec2.NewFromConfig(p.cfg)
-	out, err := client.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{})
+	out, err := p.ec2.DescribeAddresses(ctx, &ec2.DescribeAddressesInput{})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("describe addresses: %w", err)
 	}
 
 	var orphans []cloud.OrphanResource
@@ -113,9 +130,7 @@ func (p *Provider) orphanIPs(ctx context.Context) ([]cloud.OrphanResource, error
 
 // orphanLoadBalancers finds ALBs/NLBs with no registered targets.
 func (p *Provider) orphanLoadBalancers(ctx context.Context) ([]cloud.OrphanResource, error) {
-	client := elasticloadbalancingv2.NewFromConfig(p.cfg)
-
-	lbPager := elasticloadbalancingv2.NewDescribeLoadBalancersPaginator(client, &elasticloadbalancingv2.DescribeLoadBalancersInput{})
+	lbPager := elasticloadbalancingv2.NewDescribeLoadBalancersPaginator(p.elbv2, &elasticloadbalancingv2.DescribeLoadBalancersInput{})
 	var orphans []cloud.OrphanResource
 
 	for lbPager.HasMorePages() {
@@ -128,7 +143,7 @@ func (p *Provider) orphanLoadBalancers(ctx context.Context) ([]cloud.OrphanResou
 			if lb.LoadBalancerArn == nil {
 				continue
 			}
-			empty, err := p.lbHasNoTargets(ctx, client, awssdk.ToString(lb.LoadBalancerArn))
+			empty, err := p.lbHasNoTargets(ctx, awssdk.ToString(lb.LoadBalancerArn))
 			if err != nil || !empty {
 				continue
 			}
@@ -146,18 +161,18 @@ func (p *Provider) orphanLoadBalancers(ctx context.Context) ([]cloud.OrphanResou
 	return orphans, nil
 }
 
-func (p *Provider) lbHasNoTargets(ctx context.Context, client *elasticloadbalancingv2.Client, lbArn string) (bool, error) {
-	out, err := client.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{
+func (p *Provider) lbHasNoTargets(ctx context.Context, lbArn string) (bool, error) {
+	out, err := p.elbv2.DescribeTargetGroups(ctx, &elasticloadbalancingv2.DescribeTargetGroupsInput{
 		LoadBalancerArn: awssdk.String(lbArn),
 	})
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("describe target groups: %w", err)
 	}
 	if len(out.TargetGroups) == 0 {
 		return true, nil
 	}
 	for _, tg := range out.TargetGroups {
-		health, err := client.DescribeTargetHealth(ctx, &elasticloadbalancingv2.DescribeTargetHealthInput{
+		health, err := p.elbv2.DescribeTargetHealth(ctx, &elasticloadbalancingv2.DescribeTargetHealthInput{
 			TargetGroupArn: tg.TargetGroupArn,
 		})
 		if err != nil {

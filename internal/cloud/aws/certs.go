@@ -12,10 +12,15 @@ import (
 	"github.com/stxkxs/matlock/internal/cloud"
 )
 
+// acmAPI is the narrow ACM surface used by this package.
+type acmAPI interface {
+	ListCertificates(ctx context.Context, params *acm.ListCertificatesInput, optFns ...func(*acm.Options)) (*acm.ListCertificatesOutput, error)
+	DescribeCertificate(ctx context.Context, params *acm.DescribeCertificateInput, optFns ...func(*acm.Options)) (*acm.DescribeCertificateOutput, error)
+}
+
 // ListCertificates returns ACM certificates expiring within 180 days or already expired.
 func (p *Provider) ListCertificates(ctx context.Context) ([]cloud.CertFinding, error) {
-	client := acm.NewFromConfig(p.cfg)
-	pager := acm.NewListCertificatesPaginator(client, &acm.ListCertificatesInput{
+	pager := acm.NewListCertificatesPaginator(p.acm, &acm.ListCertificatesInput{
 		CertificateStatuses: []acmtypes.CertificateStatus{acmtypes.CertificateStatusIssued},
 	})
 
@@ -29,7 +34,7 @@ func (p *Provider) ListCertificates(ctx context.Context) ([]cloud.CertFinding, e
 		}
 		for _, summary := range page.CertificateSummaryList {
 			arn := awssdk.ToString(summary.CertificateArn)
-			detail, err := client.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
+			detail, err := p.acm.DescribeCertificate(ctx, &acm.DescribeCertificateInput{
 				CertificateArn: awssdk.String(arn),
 			})
 			if err != nil {

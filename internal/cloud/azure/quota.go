@@ -7,9 +7,48 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/compute/armcompute/v6"
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork/v6"
-	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/storage/armstorage"
 	"github.com/stxkxs/matlock/internal/cloud"
 )
+
+// computeUsageAPI is the narrow Compute Usage surface used by this package.
+type computeUsageAPI interface {
+	List(ctx context.Context, location string) ([]*armcompute.Usage, error)
+}
+
+type computeUsageAdapter struct{ client *armcompute.UsageClient }
+
+func (a *computeUsageAdapter) List(ctx context.Context, location string) ([]*armcompute.Usage, error) {
+	var out []*armcompute.Usage
+	pager := a.client.NewListPager(location, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, page.Value...)
+	}
+	return out, nil
+}
+
+// networkUsageAPI is the narrow Network Usage surface used by this package.
+type networkUsageAPI interface {
+	List(ctx context.Context, location string) ([]*armnetwork.Usage, error)
+}
+
+type networkUsageAdapter struct{ client *armnetwork.UsagesClient }
+
+func (a *networkUsageAdapter) List(ctx context.Context, location string) ([]*armnetwork.Usage, error) {
+	var out []*armnetwork.Usage
+	pager := a.client.NewListPager(location, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return out, err
+		}
+		out = append(out, page.Value...)
+	}
+	return out, nil
+}
 
 // ListQuotas returns compute, network, and storage quota utilization.
 func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
@@ -45,94 +84,71 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 }
 
 func (p *Provider) computeQuotas(ctx context.Context, location string) ([]cloud.QuotaUsage, error) {
-	client, err := armcompute.NewUsageClient(p.subscriptionID, p.cred, nil)
+	usages, err := p.computeUsage.List(ctx, location)
 	if err != nil {
-		return nil, fmt.Errorf("create compute usage client: %w", err)
+		return nil, fmt.Errorf("list compute usage: %w", err)
 	}
 
 	var quotas []cloud.QuotaUsage
-	pager := client.NewListPager(location, nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return quotas, fmt.Errorf("list compute usage: %w", err)
+	for _, u := range usages {
+		if u.Limit == nil || *u.Limit == 0 {
+			continue
 		}
-		for _, u := range page.Value {
-			if u.Limit == nil || *u.Limit == 0 {
-				continue
-			}
-			used := float64(int32PtrVal(u.CurrentValue))
-			limit := float64(*u.Limit)
-			name := ""
-			if u.Name != nil && u.Name.LocalizedValue != nil {
-				name = *u.Name.LocalizedValue
-			}
-			quotas = append(quotas, cloud.QuotaUsage{
-				Provider:    "azure",
-				Service:     "Compute",
-				QuotaName:   name,
-				Used:        used,
-				Limit:       limit,
-				Utilization: pctAzure(used, limit),
-				Region:      location,
-			})
+		used := float64(int32PtrVal(u.CurrentValue))
+		limit := float64(*u.Limit)
+		name := ""
+		if u.Name != nil && u.Name.LocalizedValue != nil {
+			name = *u.Name.LocalizedValue
 		}
+		quotas = append(quotas, cloud.QuotaUsage{
+			Provider:    "azure",
+			Service:     "Compute",
+			QuotaName:   name,
+			Used:        used,
+			Limit:       limit,
+			Utilization: pctAzure(used, limit),
+			Region:      location,
+		})
 	}
 	return quotas, nil
 }
 
 func (p *Provider) networkQuotas(ctx context.Context, location string) ([]cloud.QuotaUsage, error) {
-	client, err := armnetwork.NewUsagesClient(p.subscriptionID, p.cred, nil)
+	usages, err := p.networkUsage.List(ctx, location)
 	if err != nil {
-		return nil, fmt.Errorf("create network usage client: %w", err)
+		return nil, fmt.Errorf("list network usage: %w", err)
 	}
 
 	var quotas []cloud.QuotaUsage
-	pager := client.NewListPager(location, nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return quotas, fmt.Errorf("list network usage: %w", err)
+	for _, u := range usages {
+		if u.Limit == nil || *u.Limit == 0 {
+			continue
 		}
-		for _, u := range page.Value {
-			if u.Limit == nil || *u.Limit == 0 {
-				continue
-			}
-			used := float64(int64PtrVal(u.CurrentValue))
-			limit := float64(*u.Limit)
-			name := ""
-			if u.Name != nil && u.Name.LocalizedValue != nil {
-				name = *u.Name.LocalizedValue
-			}
-			quotas = append(quotas, cloud.QuotaUsage{
-				Provider:    "azure",
-				Service:     "Network",
-				QuotaName:   name,
-				Used:        used,
-				Limit:       limit,
-				Utilization: pctAzure(used, limit),
-				Region:      location,
-			})
+		used := float64(int64PtrVal(u.CurrentValue))
+		limit := float64(*u.Limit)
+		name := ""
+		if u.Name != nil && u.Name.LocalizedValue != nil {
+			name = *u.Name.LocalizedValue
 		}
+		quotas = append(quotas, cloud.QuotaUsage{
+			Provider:    "azure",
+			Service:     "Network",
+			QuotaName:   name,
+			Used:        used,
+			Limit:       limit,
+			Utilization: pctAzure(used, limit),
+			Region:      location,
+		})
 	}
 	return quotas, nil
 }
 
 func (p *Provider) storageQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
-	client, err := armstorage.NewAccountsClient(p.subscriptionID, p.cred, nil)
+	accounts, err := p.storageAccounts.List(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("create storage accounts client: %w", err)
+		return nil, fmt.Errorf("list storage accounts: %w", err)
 	}
-
-	var count int
-	pager := client.NewListPager(nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list storage accounts: %w", err)
-		}
-		count += len(page.Value)
-	}
+	count := len(accounts)
 
 	used := float64(count)
 	limit := float64(250) // Default Azure storage account limit per subscription
