@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/network"
-	"github.com/stxkxs/matlock/internal/storage"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/network"
+	"github.com/nanohype/cloudgov/internal/storage"
 )
 
 var remediateCmd = &cobra.Command{
@@ -22,10 +22,10 @@ remediate each finding. This is the offline equivalent of "<domain> audit --fix"
 review, or apply a subset.
 
 The expected JSON shape is whatever the corresponding scan emits via
-"--output json", e.g. ` + "`matlock storage audit --output json --output-file storage.json`" + `.
+"--output json", e.g. ` + "`cloudgov storage audit --output json --output-file storage.json`" + `.
 
 Supported report types: storage, network. Each finding in the report must carry
-a Remediation string (matlock scans populate this by default).`,
+a Remediation string (cloudgov scans populate this by default).`,
 	RunE: runRemediate,
 }
 

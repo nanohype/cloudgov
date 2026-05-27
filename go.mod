@@ -1,4 +1,4 @@
-module github.com/stxkxs/matlock
+module github.com/nanohype/cloudgov
 
 go 1.26.0
 

@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stxkxs/matlock/internal/cloud"
-	cloudk8s "github.com/stxkxs/matlock/internal/cloud/k8s"
-	"github.com/stxkxs/matlock/internal/output"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudk8s "github.com/nanohype/cloudgov/internal/cloud/k8s"
+	"github.com/nanohype/cloudgov/internal/output"
 )
 
 var k8sCmd = &cobra.Command{

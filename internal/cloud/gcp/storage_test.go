@@ -7,7 +7,7 @@ import (
 
 	"cloud.google.com/go/storage"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type mockGCS struct {

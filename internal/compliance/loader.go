@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // LoadIAMReport reads an IAM scan JSON report from disk.

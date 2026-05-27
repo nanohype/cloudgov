@@ -7,7 +7,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
-	"github.com/stxkxs/matlock/internal/baseline"
+	"github.com/nanohype/cloudgov/internal/baseline"
 )
 
 var baselineCmd = &cobra.Command{

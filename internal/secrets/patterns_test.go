@@ -3,7 +3,7 @@ package secrets
 import (
 	"testing"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 func TestPatterns(t *testing.T) {

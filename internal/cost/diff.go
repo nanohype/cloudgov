@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // ScanOptions controls cost diff behavior.

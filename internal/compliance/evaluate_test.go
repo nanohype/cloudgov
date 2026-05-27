@@ -3,7 +3,7 @@ package compliance
 import (
 	"testing"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 func TestEvaluateAdminAccess(t *testing.T) {

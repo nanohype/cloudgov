@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // roundTrip encodes via fn into a buffer, then decodes into T.

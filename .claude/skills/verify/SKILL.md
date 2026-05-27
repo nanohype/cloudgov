@@ -3,7 +3,7 @@ name: verify
 description: Run full build, test, and lint checks to verify code changes are correct
 ---
 
-Run the full verification pipeline for the matlock project. Execute these commands in order and report results:
+Run the full verification pipeline for the cloudgov project. Execute these commands in order and report results:
 
 1. `task build` — compile the binary with ldflags
 2. `task test` — run all tests (`go test ./...`)

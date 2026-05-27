@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stxkxs/matlock/internal/audit"
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/compliance"
+	"github.com/nanohype/cloudgov/internal/audit"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/compliance"
 )
 
 // renderedContains is the standard assertion for these renderer smoke tests:

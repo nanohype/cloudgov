@@ -8,9 +8,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/stxkxs/matlock/internal/cloud"
-	cloudaws "github.com/stxkxs/matlock/internal/cloud/aws"
-	"github.com/stxkxs/matlock/internal/output"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+	"github.com/nanohype/cloudgov/internal/output"
 )
 
 var lambdaCmd = &cobra.Command{
@@ -31,7 +31,7 @@ patterns that produce real incidents:
     SourceArn condition                                    → HIGH confused-deputy risk
   - Action: "*" or "lambda:*"                              → HIGH wildcard
 
-This complements the identity-based IAM scan: ` + "`matlock iam scan`" + ` checks who
+This complements the identity-based IAM scan: ` + "`cloudgov iam scan`" + ` checks who
 can do what *from* identities; this checks who can invoke *into* functions.
 
 Currently AWS only.`,

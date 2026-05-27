@@ -18,7 +18,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azcertificates"
 )
 
-// Provider implements Matlock provider interfaces for Azure.
+// Provider implements CloudGov provider interfaces for Azure.
 //
 // Per-domain SDK clients are wrapped behind narrow adapter interfaces declared
 // in the file that first uses them (roleAssignmentsAPI in rbac.go, etc.).

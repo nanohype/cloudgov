@@ -1,4 +1,4 @@
-// Package k8s implements the matlock provider interfaces for Kubernetes clusters.
+// Package k8s implements the cloudgov provider interfaces for Kubernetes clusters.
 //
 // Detection works against any cluster reachable via the standard kubeconfig
 // chain ($KUBECONFIG → ~/.kube/config → in-cluster service-account token).
@@ -20,7 +20,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Provider implements Matlock's Kubernetes provider interfaces.
+// Provider implements CloudGov's Kubernetes provider interfaces.
 type Provider struct {
 	clientset   *kubernetes.Clientset
 	contextName string

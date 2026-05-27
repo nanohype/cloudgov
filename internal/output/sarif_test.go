@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/stxkxs/matlock/internal/audit"
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/audit"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 func TestWriteSARIF_StructureValid(t *testing.T) {

@@ -3,7 +3,7 @@ package iam
 import (
 	"sort"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // BuildMinimalPermissions deduplicates and sorts used permissions.

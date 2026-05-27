@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/stxkxs/matlock/internal/baseline"
-	"github.com/stxkxs/matlock/internal/compare"
-	"github.com/stxkxs/matlock/internal/output"
+	"github.com/nanohype/cloudgov/internal/baseline"
+	"github.com/nanohype/cloudgov/internal/compare"
+	"github.com/nanohype/cloudgov/internal/output"
 )
 
 var compareCmd = &cobra.Command{

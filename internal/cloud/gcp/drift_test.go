@@ -11,7 +11,7 @@ import (
 	"google.golang.org/api/sqladmin/v1beta4"
 	cstorage "google.golang.org/api/storage/v1"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type mockGCSRest struct {

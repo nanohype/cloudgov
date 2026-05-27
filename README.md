@@ -1,11 +1,11 @@
-# matlock
+# cloudgov
 
 Multi-cloud security and cost swiss army knife — single binary, zero dependencies.
 
 Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecure storage, detect overly permissive firewall rules, monitor TLS certificate expiry, enforce resource tagging, check service quota utilization, save and compare scan baselines, generate HTML reports, and more — across AWS, GCP, and Azure.
 
 <!-- screenshot placeholder -->
-<!-- ![matlock iam scan output](docs/screenshots/iam-scan.png) -->
+<!-- ![cloudgov iam scan output](docs/screenshots/iam-scan.png) -->
 
 ---
 
@@ -14,30 +14,30 @@ Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecu
 ### Homebrew (macOS / Linux)
 
 ```sh
-brew install stxkxs/tap/matlock
+brew install nanohype/tap/cloudgov
 ```
 
 ### go install
 
 ```sh
-go install github.com/stxkxs/matlock@latest
+go install github.com/nanohype/cloudgov@latest
 ```
 
 ### Direct download
 
-Pre-built binaries for Linux, macOS, and Windows are attached to every [GitHub release](https://github.com/stxkxs/matlock/releases).
+Pre-built binaries for Linux, macOS, and Windows are attached to every [GitHub release](https://github.com/nanohype/cloudgov/releases).
 
 ```sh
 # macOS arm64 example
-curl -sSL https://github.com/stxkxs/matlock/releases/latest/download/matlock_Darwin_arm64.tar.gz \
-  | tar -xz matlock
-sudo mv matlock /usr/local/bin/
+curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Darwin_arm64.tar.gz \
+  | tar -xz cloudgov
+sudo mv cloudgov /usr/local/bin/
 ```
 
 Verify the download against the published SHA256 checksums:
 
 ```sh
-curl -sSL https://github.com/stxkxs/matlock/releases/latest/download/checksums.txt | sha256sum --check --ignore-missing
+curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/checksums.txt | sha256sum --check --ignore-missing
 ```
 
 ### Build from source
@@ -45,8 +45,8 @@ curl -sSL https://github.com/stxkxs/matlock/releases/latest/download/checksums.t
 Requires Go 1.26+ and [Task](https://taskfile.dev).
 
 ```sh
-git clone https://github.com/stxkxs/matlock.git
-cd matlock
+git clone https://github.com/nanohype/cloudgov.git
+cd cloudgov
 task build
 ```
 
@@ -54,11 +54,11 @@ task build
 
 ## Credentials setup
 
-matlock auto-detects available providers from environment variables and credential files. You only need to configure the providers you actually use.
+cloudgov auto-detects available providers from environment variables and credential files. You only need to configure the providers you actually use.
 
 ### AWS
 
-matlock uses the standard AWS SDK credential chain.
+cloudgov uses the standard AWS SDK credential chain.
 
 ```sh
 # Option 1 — environment variables
@@ -132,8 +132,8 @@ Required IAM roles for the service account:
 - `roles/billing.viewer`
 - `roles/storage.objectViewer`
 - `roles/compute.viewer`
-- `roles/certificatemanager.viewer` (for `matlock certs`)
-- `compute.projects.get` permission (for `matlock quota`)
+- `roles/certificatemanager.viewer` (for `cloudgov certs`)
+- `compute.projects.get` permission (for `cloudgov quota`)
 
 ### Azure
 
@@ -152,34 +152,34 @@ export AZURE_SUBSCRIPTION_ID=...
 Required role assignments:
 - `Reader` on the subscription
 - `Cost Management Reader` on the subscription
-- `Key Vault Reader` + `Key Vault Certificates Officer` (or `Key Vault Reader` if using RBAC-enabled vaults) for `matlock certs`
+- `Key Vault Reader` + `Key Vault Certificates Officer` (or `Key Vault Reader` if using RBAC-enabled vaults) for `cloudgov certs`
 
 ---
 
 ## Commands
 
-### `matlock iam scan` — unused and overprivileged IAM
+### `cloudgov iam scan` — unused and overprivileged IAM
 
 Compares granted permissions against CloudTrail / Audit Log activity over the lookback window and reports unused, admin, and cross-account risks.
 
 ```sh
 # Scan all auto-detected providers (90-day lookback)
-matlock iam scan
+cloudgov iam scan
 
 # AWS only, last 30 days, show CRITICAL and HIGH only
-matlock iam scan --provider aws --days 30 --severity HIGH
+cloudgov iam scan --provider aws --days 30 --severity HIGH
 
 # Scan a specific principal
-matlock iam scan --provider gcp --principal serviceAccount:scanner@my-project.iam.gserviceaccount.com
+cloudgov iam scan --provider gcp --principal serviceAccount:scanner@my-project.iam.gserviceaccount.com
 
 # JSON output for downstream tooling
-matlock iam scan --output json --output-file report.json
+cloudgov iam scan --output json --output-file report.json
 
 # SARIF output for GitHub Advanced Security
-matlock iam scan --output sarif --output-file results.sarif
+cloudgov iam scan --output sarif --output-file results.sarif
 
 # Increase parallelism for large accounts
-matlock iam scan --concurrency 20
+cloudgov iam scan --concurrency 20
 ```
 
 <!-- screenshot placeholder -->
@@ -200,26 +200,26 @@ matlock iam scan --concurrency 20
 
 ---
 
-### `matlock iam fix` — generate Terraform remediations
+### `cloudgov iam fix` — generate Terraform remediations
 
 Reads a JSON scan report and generates least-privilege Terraform policy files for each flagged principal.
 
 ```sh
 # Generate fixes for all HIGH+ findings
-matlock iam fix --from report.json
+cloudgov iam fix --from report.json
 
 # Write fixes to a custom directory
-matlock iam fix --from report.json --out ./tf-fixes
+cloudgov iam fix --from report.json --out ./tf-fixes
 
 # Include MEDIUM severity fixes too
-matlock iam fix --from report.json --severity MEDIUM
+cloudgov iam fix --from report.json --severity MEDIUM
 ```
 
 **Workflow**
 
 ```sh
-matlock iam scan --output json --output-file report.json
-matlock iam fix --from report.json --out ./fixes
+cloudgov iam scan --output json --output-file report.json
+cloudgov iam fix --from report.json --out ./fixes
 ls ./fixes/
 # minimal_lambda_executor.tf
 # minimal_my_project_scanner_at_my_project_iam_gserviceaccount_com.tf
@@ -229,26 +229,26 @@ ls ./fixes/
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--from` | (required) | Path to JSON report from `matlock iam scan --output json` |
+| `--from` | (required) | Path to JSON report from `cloudgov iam scan --output json` |
 | `--format` | `terraform` | Output format: `terraform`, `json` |
-| `--out` | `./matlock-fixes` | Output directory for generated files |
+| `--out` | `./cloudgov-fixes` | Output directory for generated files |
 | `--severity` | `HIGH` | Minimum severity to generate fixes for |
 
 ---
 
-### `matlock cost diff` — spend delta between time windows
+### `cloudgov cost diff` — spend delta between time windows
 
 Compares cloud spend between the last N days and the N days before that, surfacing unexpected increases service by service.
 
 ```sh
 # Compare last 30 days vs the 30 days before
-matlock cost diff
+cloudgov cost diff
 
 # 7-day comparison, AWS only
-matlock cost diff --provider aws --days 7
+cloudgov cost diff --provider aws --days 7
 
 # JSON output for alerting pipelines
-matlock cost diff --output json
+cloudgov cost diff --output json
 ```
 
 <!-- screenshot placeholder -->
@@ -268,19 +268,19 @@ Cost increases >10% are shown in red; decreases are shown in green.
 
 ---
 
-### `matlock orphans` — unused disks, IPs, and load balancers
+### `cloudgov orphans` — unused disks, IPs, and load balancers
 
 Finds unattached disks, reserved IPs with no instance, and idle load balancers. Reports estimated monthly cost.
 
 ```sh
 # All providers
-matlock orphans
+cloudgov orphans
 
 # Only report resources costing more than $5/month
-matlock orphans --min-cost 5
+cloudgov orphans --min-cost 5
 
 # JSON for Slack/PagerDuty integration
-matlock orphans --output json
+cloudgov orphans --output json
 ```
 
 <!-- screenshot placeholder -->
@@ -299,19 +299,19 @@ The table includes a TOTAL row summing all monthly costs.
 
 ---
 
-### `matlock storage audit` — public buckets and encryption gaps
+### `cloudgov storage audit` — public buckets and encryption gaps
 
 Audits object storage for public access, missing encryption, disabled versioning, and missing access logging.
 
 ```sh
 # All providers
-matlock storage audit
+cloudgov storage audit
 
 # HIGH and CRITICAL findings only
-matlock storage audit --severity HIGH
+cloudgov storage audit --severity HIGH
 
 # JSON for SIEM ingestion
-matlock storage audit --output json --output-file storage-findings.json
+cloudgov storage audit --output json --output-file storage-findings.json
 ```
 
 <!-- screenshot placeholder -->
@@ -328,7 +328,7 @@ matlock storage audit --output json --output-file storage-findings.json
 
 ---
 
-### `matlock network audit` — overly permissive firewall rules
+### `cloudgov network audit` — overly permissive firewall rules
 
 Checks security groups (AWS), firewall rules (GCP), and network security groups (Azure) for rules that expose sensitive ports to the internet.
 
@@ -339,16 +339,16 @@ Severity rules:
 
 ```sh
 # All providers
-matlock network audit
+cloudgov network audit
 
 # AWS only, show CRITICAL findings
-matlock network audit --provider aws --severity CRITICAL
+cloudgov network audit --provider aws --severity CRITICAL
 
 # JSON output
-matlock network audit --output json --output-file network-findings.json
+cloudgov network audit --output json --output-file network-findings.json
 
 # Generate shell remediation scripts (one per provider) alongside the table
-matlock network audit --fix --out fixes/
+cloudgov network audit --fix --out fixes/
 ```
 
 **Flags**
@@ -364,7 +364,7 @@ matlock network audit --fix --out fixes/
 
 ---
 
-### `matlock remediate` — generate fix scripts from a saved scan report
+### `cloudgov remediate` — generate fix scripts from a saved scan report
 
 Read a previously-saved JSON scan report and emit shell scripts that remediate each finding. The offline equivalent of `<domain> audit --fix` — useful when you want to review findings first, gate remediation behind code review, or apply a subset by severity.
 
@@ -372,12 +372,12 @@ Supported report types: `storage`, `network`. Reports are read from files writte
 
 ```sh
 # Generate fix scripts from a saved storage scan
-matlock storage audit --output json --output-file storage.json
-matlock remediate --type storage --from storage.json --out fixes/
+cloudgov storage audit --output json --output-file storage.json
+cloudgov remediate --type storage --from storage.json --out fixes/
 
 # Same for network, only CRITICAL findings
-matlock network audit --output json --output-file network.json
-matlock remediate --type network --from network.json --severity CRITICAL --out fixes/
+cloudgov network audit --output json --output-file network.json
+cloudgov remediate --type network --from network.json --severity CRITICAL --out fixes/
 ```
 
 **Flags**
@@ -391,7 +391,7 @@ matlock remediate --type network --from network.json --severity CRITICAL --out f
 
 ---
 
-### `matlock certs` — TLS certificate expiry
+### `cloudgov certs` — TLS certificate expiry
 
 Lists TLS certificates from ACM (AWS), Certificate Manager (GCP), and Azure Key Vault that are expired or expiring soon.
 
@@ -403,16 +403,16 @@ Severity rules:
 
 ```sh
 # All providers, warn on certs expiring within 90 days (default)
-matlock certs
+cloudgov certs
 
 # Only show certs expiring within 30 days
-matlock certs --days 30
+cloudgov certs --days 30
 
 # AWS only, CRITICAL and HIGH only
-matlock certs --provider aws --severity HIGH
+cloudgov certs --provider aws --severity HIGH
 
 # JSON output
-matlock certs --output json --output-file certs.json
+cloudgov certs --output json --output-file certs.json
 ```
 
 **Flags**
@@ -425,11 +425,11 @@ matlock certs --output json --output-file certs.json
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
 
-> **GCP note:** Certificate Manager must be enabled in your project (`gcloud services enable certificatemanager.googleapis.com`). If the API is not enabled, `matlock certs` skips GCP with a warning.
+> **GCP note:** Certificate Manager must be enabled in your project (`gcloud services enable certificatemanager.googleapis.com`). If the API is not enabled, `cloudgov certs` skips GCP with a warning.
 
 ---
 
-### `matlock tags` — missing resource tags/labels
+### `cloudgov tags` — missing resource tags/labels
 
 Audits EC2 instances, S3 buckets, RDS databases, Lambda functions (AWS), compute instances and GCS buckets (GCP), and all resource types (Azure) for missing required tags or labels.
 
@@ -437,13 +437,13 @@ All findings are **MEDIUM** severity.
 
 ```sh
 # Require owner, env, and cost-center tags across all providers
-matlock tags --require owner,env,cost-center
+cloudgov tags --require owner,env,cost-center
 
 # AWS only
-matlock tags --provider aws --require owner,env
+cloudgov tags --provider aws --require owner,env
 
 # JSON output
-matlock tags --require owner,env --output json --output-file tags.json
+cloudgov tags --require owner,env --output json --output-file tags.json
 ```
 
 **Flags**
@@ -458,9 +458,9 @@ matlock tags --require owner,env --output json --output-file tags.json
 
 ---
 
-### `matlock lambda audit` — Lambda resource-policy exposure (AWS)
+### `cloudgov lambda audit` — Lambda resource-policy exposure (AWS)
 
-Inspects each AWS Lambda function's resource-based policy (`lambda:GetPolicy`) for patterns that grant invoke permission too widely. This is the *resource-based* counterpart to `matlock iam scan` — that one checks what identities can do *from* the inside; this one checks who can invoke *into* the function from the outside.
+Inspects each AWS Lambda function's resource-based policy (`lambda:GetPolicy`) for patterns that grant invoke permission too widely. This is the *resource-based* counterpart to `cloudgov iam scan` — that one checks what identities can do *from* the inside; this one checks who can invoke *into* the function from the outside.
 
 Severity rules:
 - **CRITICAL** — `Principal: "*"` or `Principal: {"AWS": "*"}` (anyone can invoke)
@@ -472,10 +472,10 @@ Functions without a resource policy are silently skipped — they're only reacha
 
 ```sh
 # Audit all Lambda resource policies in the current AWS account
-matlock lambda audit
+cloudgov lambda audit
 
 # CRITICAL only, JSON output
-matlock lambda audit --severity CRITICAL --output json --output-file lambda.json
+cloudgov lambda audit --severity CRITICAL --output json --output-file lambda.json
 ```
 
 **Flags**
@@ -489,7 +489,7 @@ matlock lambda audit --severity CRITICAL --output json --output-file lambda.json
 
 ---
 
-### `matlock k8s rbac` — over-privileged Kubernetes RBAC
+### `cloudgov k8s rbac` — over-privileged Kubernetes RBAC
 
 Scans cluster-scoped ClusterRoles and ClusterRoleBindings for the patterns that produce real incidents: wildcard verbs/resources, dangerous verbs (create/update/patch/delete) on wildcard resources, and bindings to broad subject groups (`system:authenticated`, `system:unauthenticated`, `system:masters`). Built-in default roles (`cluster-admin`, `admin`, `edit`, `view`, `system:*`, `kubeadm:*`) are skipped so the output focuses on user-introduced risk.
 
@@ -497,16 +497,16 @@ Connection uses the standard kubeconfig chain: `--kubeconfig` flag → `$KUBECON
 
 ```sh
 # Scan the cluster of the current kubeconfig context
-matlock k8s rbac
+cloudgov k8s rbac
 
 # Use a specific kubeconfig
-matlock k8s rbac --kubeconfig /path/to/kubeconfig
+cloudgov k8s rbac --kubeconfig /path/to/kubeconfig
 
 # JSON output for CI
-matlock k8s rbac --output json --output-file rbac.json
+cloudgov k8s rbac --output json --output-file rbac.json
 
 # HIGH and above only
-matlock k8s rbac --severity HIGH
+cloudgov k8s rbac --severity HIGH
 ```
 
 **Flags**
@@ -520,19 +520,19 @@ matlock k8s rbac --severity HIGH
 
 ---
 
-### `matlock secrets scan` — leaked credentials in cloud resources
+### `cloudgov secrets scan` — leaked credentials in cloud resources
 
 Scans Lambda environment variables, ECS task definitions, EC2 user data (AWS), Cloud Functions environment, App Service settings (Azure), and similar runtime configuration for embedded secrets — AWS keys, Slack tokens, private keys, GitHub tokens, generic high-entropy strings.
 
 ```sh
 # Scan all auto-detected providers
-matlock secrets scan
+cloudgov secrets scan
 
 # AWS only, HIGH and above
-matlock secrets scan --provider aws --severity HIGH
+cloudgov secrets scan --provider aws --severity HIGH
 
 # SARIF output for GitHub Advanced Security
-matlock secrets scan --output sarif --output-file secrets.sarif
+cloudgov secrets scan --output sarif --output-file secrets.sarif
 ```
 
 **Flags**
@@ -546,22 +546,22 @@ matlock secrets scan --output sarif --output-file secrets.sarif
 
 ---
 
-### `matlock compliance <benchmark>` — map findings to compliance controls
+### `cloudgov compliance <benchmark>` — map findings to compliance controls
 
-Loads JSON scan reports from prior matlock runs and maps the findings to controls in a named benchmark, producing a pass/fail evaluation per control.
+Loads JSON scan reports from prior cloudgov runs and maps the findings to controls in a named benchmark, producing a pass/fail evaluation per control.
 
 Available benchmarks: `cis-aws-v3`, `cis-gcp-v2`, `cis-azure-v2`, `soc2`.
 
 ```sh
 # Produce JSON reports first
-matlock iam scan --output json --output-file iam.json
-matlock storage audit --output json --output-file storage.json
+cloudgov iam scan --output json --output-file iam.json
+cloudgov storage audit --output json --output-file storage.json
 
 # Then evaluate against a benchmark
-matlock compliance cis-aws-v3 --iam-report iam.json --storage-report storage.json
+cloudgov compliance cis-aws-v3 --iam-report iam.json --storage-report storage.json
 
 # JSON output for ingest into a dashboard
-matlock compliance soc2 --iam-report iam.json --output json --output-file soc2.json
+cloudgov compliance soc2 --iam-report iam.json --output json --output-file soc2.json
 ```
 
 **Flags**
@@ -578,22 +578,22 @@ matlock compliance soc2 --iam-report iam.json --output json --output-file soc2.j
 
 ---
 
-### `matlock drift <tfstate>` — Terraform state vs live cloud
+### `cloudgov drift <tfstate>` — Terraform state vs live cloud
 
 Reads a `terraform.tfstate` file and checks each managed resource against the cloud API to detect modifications or deletions outside Terraform. Supports AWS security groups / IAM policies / S3 buckets, GCP firewalls / storage buckets, Azure NSGs / storage accounts.
 
 ```sh
 # Local state file
-matlock drift terraform.tfstate
+cloudgov drift terraform.tfstate
 
 # Filter to a single resource type
-matlock drift terraform.tfstate --resource-type aws_security_group
+cloudgov drift terraform.tfstate --resource-type aws_security_group
 
 # Limit to a specific provider, lower concurrency
-matlock drift terraform.tfstate --provider aws --concurrency 5
+cloudgov drift terraform.tfstate --provider aws --concurrency 5
 
 # JSON output
-matlock drift terraform.tfstate --output json --output-file drift.json
+cloudgov drift terraform.tfstate --output json --output-file drift.json
 ```
 
 **Flags**
@@ -608,25 +608,25 @@ matlock drift terraform.tfstate --output json --output-file drift.json
 
 ---
 
-### `matlock audit` — unified full-spectrum audit
+### `cloudgov audit` — unified full-spectrum audit
 
 Runs all security and cost scans (IAM, storage, network, orphans, certs, tags, secrets) in one shot and produces a single combined report. Skip specific domains with `--skip`.
 
 ```sh
 # Full audit across all auto-detected providers
-matlock audit
+cloudgov audit
 
 # Skip IAM and certs domains
-matlock audit --skip iam,certs
+cloudgov audit --skip iam,certs
 
 # HIGH and CRITICAL findings only, JSON output
-matlock audit --severity HIGH --output json --output-file audit.json
+cloudgov audit --severity HIGH --output json --output-file audit.json
 
 # SARIF output for GitHub Advanced Security
-matlock audit --output sarif --output-file audit.sarif
+cloudgov audit --output sarif --output-file audit.sarif
 
 # AWS only with custom thresholds
-matlock audit --provider aws --iam-days 30 --cert-days 60 --require-tags owner,env
+cloudgov audit --provider aws --iam-days 30 --cert-days 60 --require-tags owner,env
 ```
 
 **Flags**
@@ -647,7 +647,7 @@ matlock audit --provider aws --iam-days 30 --cert-days 60 --require-tags owner,e
 
 #### Notification sinks
 
-`matlock audit --sink <spec>` posts a digest of the run to an external system after the scan completes. Sinks fire on a best-effort basis — one bad sink does not block the others, and audit exit code is unaffected. The flag is repeatable, so you can deliver to several destinations at once.
+`cloudgov audit --sink <spec>` posts a digest of the run to an external system after the scan completes. Sinks fire on a best-effort basis — one bad sink does not block the others, and audit exit code is unaffected. The flag is repeatable, so you can deliver to several destinations at once.
 
 | Spec form | What it does |
 |---|---|
@@ -657,31 +657,31 @@ matlock audit --provider aws --iam-days 30 --cert-days 60 --require-tags owner,e
 
 ```sh
 # Post a Slack notification on every audit run
-matlock audit --sink slack:https://hooks.slack.com/services/T00/B00/XXX
+cloudgov audit --sink slack:https://hooks.slack.com/services/T00/B00/XXX
 
 # Page on-call AND notify Slack AND forward to a custom collector
-matlock audit \
+cloudgov audit \
   --sink slack:https://hooks.slack.com/services/T00/B00/XXX \
   --sink pagerduty:my-pd-routing-key \
-  --sink webhook:https://collector.example.com/matlock \
+  --sink webhook:https://collector.example.com/cloudgov \
   --report-url https://reports.example.com/audit-$(date +%F).html
 ```
 
 ---
 
-### `matlock inventory` — list all cloud resources
+### `cloudgov inventory` — list all cloud resources
 
 Lists all cloud resources across providers with type, region, tags, and creation date. Groups by type and region for a complete asset overview.
 
 ```sh
 # List all resources across auto-detected providers
-matlock inventory
+cloudgov inventory
 
 # Filter to specific resource types
-matlock inventory --type ec2,s3,lambda
+cloudgov inventory --type ec2,s3,lambda
 
 # AWS only, JSON output
-matlock inventory --provider aws --output json --output-file inventory.json
+cloudgov inventory --provider aws --output json --output-file inventory.json
 ```
 
 **Flags**
@@ -695,19 +695,19 @@ matlock inventory --provider aws --output json --output-file inventory.json
 
 ---
 
-### `matlock quota` — service quota utilization
+### `cloudgov quota` — service quota utilization
 
 Checks service quota usage across cloud providers to prevent outages from silently hitting limits. Reports IAM, EC2, S3, Lambda, RDS quotas (AWS), compute project quotas (GCP), and compute/network/storage quotas (Azure).
 
 ```sh
 # All providers, all quotas
-matlock quota
+cloudgov quota
 
 # Only quotas above 50% utilization
-matlock quota --threshold 50
+cloudgov quota --threshold 50
 
 # AWS only, JSON output
-matlock quota --provider aws --output json --output-file quotas.json
+cloudgov quota --provider aws --output json --output-file quotas.json
 ```
 
 **Flags**
@@ -723,23 +723,23 @@ Utilization is color-coded: green (<50%), yellow (50-80%), red (>80%).
 
 ---
 
-### `matlock baseline` — save and manage scan baselines
+### `cloudgov baseline` — save and manage scan baselines
 
-Save any scan report as a named baseline for later comparison with `matlock compare`.
+Save any scan report as a named baseline for later comparison with `cloudgov compare`.
 
 ```sh
 # Save a baseline from a scan report
-matlock iam scan --output json --output-file scan.json
-matlock baseline save --from scan.json --name pre-deploy
+cloudgov iam scan --output json --output-file scan.json
+cloudgov baseline save --from scan.json --name pre-deploy
 
 # List saved baselines
-matlock baseline list
+cloudgov baseline list
 
 # Delete a baseline
-matlock baseline delete --name old-scan
+cloudgov baseline delete --name old-scan
 ```
 
-Baselines are stored in `~/.matlock/baselines/`.
+Baselines are stored in `~/.cloudgov/baselines/`.
 
 **Subcommands**
 
@@ -751,19 +751,19 @@ Baselines are stored in `~/.matlock/baselines/`.
 
 ---
 
-### `matlock compare` — diff two scan reports
+### `cloudgov compare` — diff two scan reports
 
 Compares two scan reports (or a saved baseline against a current report) and classifies each finding as new, resolved, or unchanged.
 
 ```sh
 # Compare a saved baseline against a new scan
-matlock compare --baseline pre-deploy --current scan-after.json
+cloudgov compare --baseline pre-deploy --current scan-after.json
 
 # Compare two report files directly
-matlock compare --from old-report.json --to new-report.json
+cloudgov compare --from old-report.json --to new-report.json
 
 # JSON output
-matlock compare --from old.json --to new.json --output json
+cloudgov compare --from old.json --to new.json --output json
 ```
 
 **Flags**
@@ -783,12 +783,12 @@ Use `--baseline` + `--current` or `--from` + `--to` (not both). Supports all rep
 
 ```sh
 # Before a deploy: scan and save a baseline
-matlock audit --output json --output-file audit.json
-matlock baseline save --from audit.json --name pre-deploy-v2
+cloudgov audit --output json --output-file audit.json
+cloudgov baseline save --from audit.json --name pre-deploy-v2
 
 # After the deploy: scan again and compare
-matlock audit --output json --output-file audit-after.json
-matlock compare --baseline pre-deploy-v2 --current audit-after.json
+cloudgov audit --output json --output-file audit-after.json
+cloudgov compare --baseline pre-deploy-v2 --current audit-after.json
 
 # Output shows:
 #   +NEW        findings introduced since the baseline
@@ -799,25 +799,25 @@ matlock compare --baseline pre-deploy-v2 --current audit-after.json
 You can also skip baselines and compare any two JSON files directly:
 
 ```sh
-matlock compare --from monday-scan.json --to friday-scan.json --output json
+cloudgov compare --from monday-scan.json --to friday-scan.json --output json
 ```
 
 ---
 
-### `matlock report` — generate HTML executive summary
+### `cloudgov report` — generate HTML executive summary
 
 Generates a standalone, self-contained HTML report from any JSON scan output. Includes summary cards, severity breakdown, domain-specific tables, and client-side table sorting. Supports light and dark mode via `prefers-color-scheme`.
 
 ```sh
 # Generate from an audit report
-matlock audit --output json --output-file audit.json
-matlock report --from audit.json --out report.html --open
+cloudgov audit --output json --output-file audit.json
+cloudgov report --from audit.json --out report.html --open
 
 # Generate from any scan report
-matlock report --from iam-scan.json --out iam-report.html
+cloudgov report --from iam-scan.json --out iam-report.html
 
 # Explicit type override
-matlock report --from data.json --type orphans --out orphans.html
+cloudgov report --from data.json --type orphans --out orphans.html
 ```
 
 **Flags**
@@ -847,7 +847,7 @@ matlock report --from data.json --type orphans --out orphans.html
 Upload IAM findings to GitHub Advanced Security (requires `security-events: write` permission):
 
 ```yaml
-name: matlock security scan
+name: cloudgov security scan
 
 on:
   schedule:
@@ -863,18 +863,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install matlock
+      - name: Install cloudgov
         run: |
-          curl -sSL https://github.com/stxkxs/matlock/releases/latest/download/matlock_Linux_amd64.tar.gz \
-            | tar -xz matlock
-          sudo mv matlock /usr/local/bin/
+          curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Linux_amd64.tar.gz \
+            | tar -xz cloudgov
+          sudo mv cloudgov /usr/local/bin/
 
       - name: Run IAM scan
         env:
-          AWS_ROLE_ARN: ${{ secrets.MATLOCK_ROLE_ARN }}
+          AWS_ROLE_ARN: ${{ secrets.CLOUDGOV_ROLE_ARN }}
           AWS_REGION: us-east-1
         run: |
-          matlock iam scan \
+          cloudgov iam scan \
             --provider aws \
             --severity HIGH \
             --output sarif \
@@ -892,7 +892,7 @@ jobs:
 Run a unified audit across all domains in CI:
 
 ```yaml
-name: matlock full audit
+name: cloudgov full audit
 
 on:
   schedule:
@@ -908,18 +908,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install matlock
+      - name: Install cloudgov
         run: |
-          curl -sSL https://github.com/stxkxs/matlock/releases/latest/download/matlock_Linux_amd64.tar.gz \
-            | tar -xz matlock
-          sudo mv matlock /usr/local/bin/
+          curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Linux_amd64.tar.gz \
+            | tar -xz cloudgov
+          sudo mv cloudgov /usr/local/bin/
 
       - name: Run full audit
         env:
-          AWS_ROLE_ARN: ${{ secrets.MATLOCK_ROLE_ARN }}
+          AWS_ROLE_ARN: ${{ secrets.CLOUDGOV_ROLE_ARN }}
           AWS_REGION: us-east-1
         run: |
-          matlock audit \
+          cloudgov audit \
             --provider aws \
             --severity HIGH \
             --output sarif \
@@ -935,15 +935,15 @@ jobs:
 ### GitLab CI — JSON report artifact
 
 ```yaml
-matlock:
+cloudgov:
   image: ubuntu:24.04
   before_script:
-    - curl -sSL https://github.com/stxkxs/matlock/releases/latest/download/matlock_Linux_amd64.tar.gz
-        | tar -xz matlock
-    - mv matlock /usr/local/bin/
+    - curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Linux_amd64.tar.gz
+        | tar -xz cloudgov
+    - mv cloudgov /usr/local/bin/
   script:
-    - matlock iam scan --output json --output-file report.json --quiet
-    - matlock storage audit --severity HIGH --output json --output-file storage.json --quiet
+    - cloudgov iam scan --output json --output-file report.json --quiet
+    - cloudgov storage audit --severity HIGH --output json --output-file storage.json --quiet
   artifacts:
     paths:
       - report.json
@@ -955,7 +955,7 @@ matlock:
 
 ```sh
 # Exit non-zero if any CRITICAL findings exist
-matlock iam scan --severity CRITICAL --output json --quiet | \
+cloudgov iam scan --severity CRITICAL --output json --quiet | \
   jq -e '.findings | length == 0'
 ```
 
@@ -976,7 +976,7 @@ All formats can be written to a file with `--output-file path/to/file`.
 ## Version
 
 ```sh
-matlock --version
+cloudgov --version
 # v0.1.0 (commit abc1234, built 2026-03-01T12:00:00Z)
 ```
 

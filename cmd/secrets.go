@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	cloudaws "github.com/stxkxs/matlock/internal/cloud/aws"
-	cloudazure "github.com/stxkxs/matlock/internal/cloud/azure"
-	cloudgcp "github.com/stxkxs/matlock/internal/cloud/gcp"
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/output"
-	"github.com/stxkxs/matlock/internal/secrets"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
+	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/secrets"
 )
 
 var secretsCmd = &cobra.Command{

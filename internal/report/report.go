@@ -9,10 +9,10 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/stxkxs/matlock/internal/audit"
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/compare"
-	orphanscanner "github.com/stxkxs/matlock/internal/orphans"
+	"github.com/nanohype/cloudgov/internal/audit"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/compare"
+	orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
 )
 
 // Options controls report generation.
@@ -119,7 +119,7 @@ func Render(w io.Writer, data []byte, reportType, version string) error {
 
 func buildTemplateData(data []byte, reportType, version string) (*TemplateData, error) {
 	td := &TemplateData{
-		Title:       "Matlock Security Report",
+		Title:       "CloudGov Security Report",
 		ReportType:  reportType,
 		GeneratedAt: time.Now().UTC().Format("2006-01-02 15:04:05 UTC"),
 		Version:     version,
@@ -158,7 +158,7 @@ func buildAuditReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse audit report: %w", err)
 	}
 
-	td.Title = "Matlock Audit Report"
+	td.Title = "CloudGov Audit Report"
 	td.Duration = report.Duration
 	td.Summary = &report.Summary
 	td.IAMFindings = report.IAM
@@ -193,7 +193,7 @@ func buildIAMReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse IAM report: %w", err)
 	}
 
-	td.Title = "Matlock IAM Report"
+	td.Title = "CloudGov IAM Report"
 	td.IAMFindings = report.Findings
 	td.TotalFindings = report.Total
 	td.ByDomain["iam"] = report.Total
@@ -211,7 +211,7 @@ func buildStorageReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse storage report: %w", err)
 	}
 
-	td.Title = "Matlock Storage Report"
+	td.Title = "CloudGov Storage Report"
 	td.StorageFindings = report.Findings
 	td.TotalFindings = report.Total
 	td.ByDomain["storage"] = report.Total
@@ -229,7 +229,7 @@ func buildNetworkReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse network report: %w", err)
 	}
 
-	td.Title = "Matlock Network Report"
+	td.Title = "CloudGov Network Report"
 	td.NetworkFindings = report.Findings
 	td.TotalFindings = report.Total
 	td.ByDomain["network"] = report.Total
@@ -247,7 +247,7 @@ func buildOrphansReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse orphans report: %w", err)
 	}
 
-	td.Title = "Matlock Orphans Report"
+	td.Title = "CloudGov Orphans Report"
 	td.OrphanResources = report.Resources
 	td.TotalFindings = report.Total
 	td.ByDomain["orphans"] = report.Total
@@ -265,7 +265,7 @@ func buildCertsReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse certs report: %w", err)
 	}
 
-	td.Title = "Matlock Certificates Report"
+	td.Title = "CloudGov Certificates Report"
 	td.CertFindings = report.Findings
 	td.TotalFindings = report.Total
 	td.ByDomain["certs"] = report.Total
@@ -283,7 +283,7 @@ func buildTagsReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse tags report: %w", err)
 	}
 
-	td.Title = "Matlock Tags Report"
+	td.Title = "CloudGov Tags Report"
 	td.TagFindings = report.Findings
 	td.TotalFindings = report.Total
 	td.ByDomain["tags"] = report.Total
@@ -301,7 +301,7 @@ func buildSecretsReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse secrets report: %w", err)
 	}
 
-	td.Title = "Matlock Secrets Report"
+	td.Title = "CloudGov Secrets Report"
 	td.SecretFindings = report.Findings
 	td.TotalFindings = report.Total
 	td.ByDomain["secrets"] = report.Total
@@ -318,7 +318,7 @@ func buildCostReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse cost report: %w", err)
 	}
 
-	td.Title = "Matlock Cost Report"
+	td.Title = "CloudGov Cost Report"
 	td.CostDiffs = report.Diffs
 
 	return td, nil
@@ -333,7 +333,7 @@ func buildQuotasReport(data []byte, td *TemplateData) (*TemplateData, error) {
 		return nil, fmt.Errorf("parse quotas report: %w", err)
 	}
 
-	td.Title = "Matlock Quota Report"
+	td.Title = "CloudGov Quota Report"
 	td.QuotaUsages = report.Quotas
 	td.TotalFindings = report.Total
 	td.ByDomain["quotas"] = report.Total

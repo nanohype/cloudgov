@@ -23,13 +23,13 @@ func NewStore(dir string) *Store {
 	return &Store{dir: dir}
 }
 
-// DefaultStore creates a store at ~/.matlock/baselines.
+// DefaultStore creates a store at ~/.cloudgov/baselines.
 func DefaultStore() (*Store, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("home directory: %w", err)
 	}
-	dir := filepath.Join(home, ".matlock", "baselines")
+	dir := filepath.Join(home, ".cloudgov", "baselines")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("create baselines dir: %w", err)
 	}

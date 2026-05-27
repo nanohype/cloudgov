@@ -7,14 +7,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/stxkxs/matlock/internal/certs"
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/iam"
-	"github.com/stxkxs/matlock/internal/network"
-	orphanscanner "github.com/stxkxs/matlock/internal/orphans"
-	"github.com/stxkxs/matlock/internal/secrets"
-	"github.com/stxkxs/matlock/internal/storage"
-	"github.com/stxkxs/matlock/internal/tags"
+	"github.com/nanohype/cloudgov/internal/certs"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/iam"
+	"github.com/nanohype/cloudgov/internal/network"
+	orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
+	"github.com/nanohype/cloudgov/internal/secrets"
+	"github.com/nanohype/cloudgov/internal/storage"
+	"github.com/nanohype/cloudgov/internal/tags"
 )
 
 // Providers holds provider slices for each scan domain.

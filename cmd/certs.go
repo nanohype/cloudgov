@@ -7,12 +7,12 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/stxkxs/matlock/internal/certs"
-	"github.com/stxkxs/matlock/internal/cloud"
-	cloudaws "github.com/stxkxs/matlock/internal/cloud/aws"
-	cloudazure "github.com/stxkxs/matlock/internal/cloud/azure"
-	cloudgcp "github.com/stxkxs/matlock/internal/cloud/gcp"
-	"github.com/stxkxs/matlock/internal/output"
+	"github.com/nanohype/cloudgov/internal/certs"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
+	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
+	"github.com/nanohype/cloudgov/internal/output"
 )
 
 var certsCmd = &cobra.Command{

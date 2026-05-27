@@ -1,23 +1,23 @@
 version: "3"
 
 vars:
-  BINARY: matlock
+  BINARY: cloudgov
   VERSION:
     sh: git describe --tags --always --dirty 2>/dev/null || echo "dev"
   COMMIT:
     sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
   BUILD_DATE:
     sh: date -u +%Y-%m-%dT%H:%M:%SZ
-  LDFLAGS: -ldflags "-X github.com/stxkxs/matlock/cmd.Version={{.VERSION}} -X github.com/stxkxs/matlock/cmd.Commit={{.COMMIT}} -X github.com/stxkxs/matlock/cmd.BuildDate={{.BUILD_DATE}}"
+  LDFLAGS: -ldflags "-X github.com/nanohype/cloudgov/cmd.Version={{.VERSION}} -X github.com/nanohype/cloudgov/cmd.Commit={{.COMMIT}} -X github.com/nanohype/cloudgov/cmd.BuildDate={{.BUILD_DATE}}"
 
 tasks:
   build:
-    desc: Build the matlock binary
+    desc: Build the cloudgov binary
     cmds:
       - go build {{.LDFLAGS}} -o {{.BINARY}} .
 
   install:
-    desc: Install matlock to $GOPATH/bin
+    desc: Install cloudgov to $GOPATH/bin
     cmds:
       - go install {{.LDFLAGS}} .
 
@@ -48,6 +48,6 @@ tasks:
       - rm -f {{.BINARY}} coverage.out coverage.html
 
   run:
-    desc: Build and run matlock (pass args with -- e.g. task run -- iam scan)
+    desc: Build and run cloudgov (pass args with -- e.g. task run -- iam scan)
     cmds:
       - go run {{.LDFLAGS}} . {{.CLI_ARGS}}

@@ -11,7 +11,7 @@ import (
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	smithy "github.com/aws/smithy-go"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // lambdaResourcePolicy is the JSON shape returned by lambda:GetPolicy.

@@ -1,6 +1,6 @@
 package compliance
 
-import "github.com/stxkxs/matlock/internal/cloud"
+import "github.com/nanohype/cloudgov/internal/cloud"
 
 func soc2TypeIIBenchmark() *Benchmark {
 	return &Benchmark{

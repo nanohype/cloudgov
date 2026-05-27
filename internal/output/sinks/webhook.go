@@ -38,7 +38,7 @@ func (s *WebhookSink) Send(ctx context.Context, d Digest) error {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "matlock-sink")
+	req.Header.Set("User-Agent", "cloudgov-sink")
 
 	client := s.HTTPClient
 	if client == nil {

@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/stxkxs/matlock/internal/audit"
-	"github.com/stxkxs/matlock/internal/cloud"
-	cloudaws "github.com/stxkxs/matlock/internal/cloud/aws"
-	cloudazure "github.com/stxkxs/matlock/internal/cloud/azure"
-	cloudgcp "github.com/stxkxs/matlock/internal/cloud/gcp"
-	"github.com/stxkxs/matlock/internal/output"
-	"github.com/stxkxs/matlock/internal/output/sinks"
+	"github.com/nanohype/cloudgov/internal/audit"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
+	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
+	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/output/sinks"
 )
 
 var auditCmd = &cobra.Command{
@@ -133,7 +133,7 @@ func notifySinks(ctx context.Context, report *audit.Report) error {
 func auditDigest(r *audit.Report) sinks.Digest {
 	s := r.Summary
 	d := sinks.Digest{
-		Source:        "matlock audit",
+		Source:        "cloudgov audit",
 		Timestamp:     time.Now(),
 		TotalFindings: s.TotalFindings,
 		Critical:      s.BySeverity["CRITICAL"],

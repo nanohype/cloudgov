@@ -9,7 +9,7 @@ import (
 	"cloud.google.com/go/logging"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type mockLogAdmin struct {

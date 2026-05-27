@@ -1,7 +1,7 @@
-# matlock — development brief
+# cloudgov — development brief
 
 Multi-cloud security and cost swiss army knife CLI. Written in Go 1.26.
-Module: `github.com/stxkxs/matlock`
+Module: `github.com/nanohype/cloudgov`
 Build: `task build`
 
 ## project goal
@@ -13,31 +13,31 @@ Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spannin
 ## commands
 
 **IAM**
-- `matlock iam scan` — unused/overprivileged IAM permissions vs CloudTrail/Audit Logs
-- `matlock iam fix` — generate Terraform fix files from scan report
+- `cloudgov iam scan` — unused/overprivileged IAM permissions vs CloudTrail/Audit Logs
+- `cloudgov iam fix` — generate Terraform fix files from scan report
 
 **Cost**
-- `matlock cost diff` — spend delta between two time windows
+- `cloudgov cost diff` — spend delta between two time windows
 
 **Infrastructure hygiene**
-- `matlock orphans` — unused disks, IPs, load balancers
-- `matlock storage audit` — public buckets, unencrypted storage, versioning, logging
-- `matlock network audit` — overly permissive security groups / firewall rules / NSGs
-- `matlock certs` — TLS certificates expiring within configurable thresholds
-- `matlock tags` — resources missing required tags/labels
+- `cloudgov orphans` — unused disks, IPs, load balancers
+- `cloudgov storage audit` — public buckets, unencrypted storage, versioning, logging
+- `cloudgov network audit` — overly permissive security groups / firewall rules / NSGs
+- `cloudgov certs` — TLS certificates expiring within configurable thresholds
+- `cloudgov tags` — resources missing required tags/labels
 
 **Security posture**
-- `matlock secrets scan` — credential/key leakage in code, env, storage
-- `matlock compliance` — map findings to benchmarks (CIS, etc.) from a scan report
-- `matlock drift` — live cloud state vs Terraform state
-- `matlock audit` — orchestrates all the above into one consolidated run
+- `cloudgov secrets scan` — credential/key leakage in code, env, storage
+- `cloudgov compliance` — map findings to benchmarks (CIS, etc.) from a scan report
+- `cloudgov drift` — live cloud state vs Terraform state
+- `cloudgov audit` — orchestrates all the above into one consolidated run
 
 **Operational visibility & workflow**
-- `matlock inventory` — list all resources across providers
-- `matlock quota` — service quota utilization vs limits
-- `matlock baseline` — save/list/delete named scan baselines
-- `matlock compare` — diff a current report against a saved baseline
-- `matlock report` — generate HTML report from a JSON scan output
+- `cloudgov inventory` — list all resources across providers
+- `cloudgov quota` — service quota utilization vs limits
+- `cloudgov baseline` — save/list/delete named scan baselines
+- `cloudgov compare` — diff a current report against a saved baseline
+- `cloudgov report` — generate HTML report from a JSON scan output
 
 ## code conventions
 
@@ -53,10 +53,10 @@ Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spannin
 
 ```go
 awssdk   "github.com/aws/aws-sdk-go-v2/aws"
-cloudaws "github.com/stxkxs/matlock/internal/cloud/aws"
-cloudgcp "github.com/stxkxs/matlock/internal/cloud/gcp"
-cloudazure "github.com/stxkxs/matlock/internal/cloud/azure"
-orphanscanner "github.com/stxkxs/matlock/internal/orphans"
+cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
+cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
+orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
 ```
 
 ## guardrails — do not do these
@@ -133,8 +133,8 @@ When all items in a section are done, move to the next section.
 
 - [x] Add `--version` output that includes build date and git commit hash (already have Version ldflags, add `BuildDate` and `Commit` vars, set in Taskfile).
 - [x] Add progress output to stderr during long scans: "scanning aws: 12/47 principals..." using a simple counter, not a spinner.
-- [x] `matlock iam scan` table output: add a summary line at the bottom: "X critical, Y high, Z medium across N principals".
-- [x] `matlock orphans` table: add a TOTAL row at the bottom showing sum of monthly cost.
+- [x] `cloudgov iam scan` table output: add a summary line at the bottom: "X critical, Y high, Z medium across N principals".
+- [x] `cloudgov orphans` table: add a TOTAL row at the bottom showing sum of monthly cost.
 - [x] Add `--quiet` flag to root command that suppresses all stderr progress/summary output (for use in scripts).
 - [x] Color-code the cost diff table: red for cost increases >10%, green for decreases.
 
@@ -148,9 +148,9 @@ When all items in a section are done, move to the next section.
 
 ### section 5 — completeness
 
-- [x] `matlock iam scan --output sarif`: currently only works for IAM findings. Route storage findings through SARIF too (add `WriteStorageSARIF` to output package).
-- [x] Add `matlock storage audit --fix`: generate remediation scripts (shell, not Terraform) for each finding. Write to `--out` directory.
-- [x] Add `matlock cost diff --threshold 20` flag: only show services with >20% change.
+- [x] `cloudgov iam scan --output sarif`: currently only works for IAM findings. Route storage findings through SARIF too (add `WriteStorageSARIF` to output package).
+- [x] Add `cloudgov storage audit --fix`: generate remediation scripts (shell, not Terraform) for each finding. Write to `--out` directory.
+- [x] Add `cloudgov cost diff --threshold 20` flag: only show services with >20% change.
 - [x] `internal/cloud/gcp/cost.go`: implement using the Cloud Billing Budget API or BigQuery export. Add a note in the error if `GOOGLE_BILLING_ACCOUNT_ID` env var is not set.
 - [x] Add `--profile` flag to `iam scan` for AWS named profiles (pass through to `config.LoadDefaultConfig` with `config.WithSharedConfigProfile`).
 

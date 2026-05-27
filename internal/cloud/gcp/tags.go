@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // AuditTags checks GCP compute instances and GCS buckets for missing required labels.

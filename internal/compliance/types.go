@@ -1,6 +1,6 @@
 package compliance
 
-import "github.com/stxkxs/matlock/internal/cloud"
+import "github.com/nanohype/cloudgov/internal/cloud"
 
 // ControlStatus describes the evaluation result of a control.
 type ControlStatus string
@@ -43,7 +43,7 @@ type ComplianceReport struct {
 	Results   []ControlResult    `json:"results"`
 }
 
-// InputFindings holds all finding types loaded from matlock scan JSON reports.
+// InputFindings holds all finding types loaded from cloudgov scan JSON reports.
 type InputFindings struct {
 	IAM     []cloud.Finding
 	Storage []cloud.BucketFinding

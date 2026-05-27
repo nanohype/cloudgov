@@ -10,7 +10,7 @@ import (
 
 	bigqueryv2 "google.golang.org/api/bigquery/v2"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // bigqueryAPI is the narrow BigQuery surface used by this package.

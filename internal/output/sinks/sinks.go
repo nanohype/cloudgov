@@ -21,7 +21,7 @@ import (
 // Digest is the canonical payload format passed to every Sink. Sinks adapt
 // it to whatever the target system expects.
 type Digest struct {
-	Source        string // "matlock audit" / "matlock iam scan"
+	Source        string // "cloudgov audit" / "cloudgov iam scan"
 	Provider      string // "aws" / "gcp" / "azure" / "multi"
 	Timestamp     time.Time
 	TotalFindings int

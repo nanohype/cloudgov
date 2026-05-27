@@ -89,7 +89,7 @@ func TestGenerate_IAM(t *testing.T) {
 
 	content := string(html)
 	checks := []string{
-		"Matlock IAM Report",
+		"CloudGov IAM Report",
 		"ADMIN_ACCESS",
 		"has admin access",
 		"v1.0.0-test",
@@ -131,7 +131,7 @@ func TestGenerate_Audit(t *testing.T) {
 	}
 
 	content := string(html)
-	if !strings.Contains(content, "Matlock Audit Report") {
+	if !strings.Contains(content, "CloudGov Audit Report") {
 		t.Error("missing audit report title")
 	}
 	if !strings.Contains(content, "2.5s") {

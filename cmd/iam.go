@@ -8,13 +8,13 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	cloudaws "github.com/stxkxs/matlock/internal/cloud/aws"
-	cloudazure "github.com/stxkxs/matlock/internal/cloud/azure"
-	cloudgcp "github.com/stxkxs/matlock/internal/cloud/gcp"
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/fix"
-	"github.com/stxkxs/matlock/internal/iam"
-	"github.com/stxkxs/matlock/internal/output"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
+	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/fix"
+	"github.com/nanohype/cloudgov/internal/iam"
+	"github.com/nanohype/cloudgov/internal/output"
 )
 
 var iamCmd = &cobra.Command{
@@ -59,9 +59,9 @@ func init() {
 	iamScanCmd.Flags().IntVar(&iamConcurrency, "concurrency", 10, "max parallel goroutines for scanning principals")
 	iamScanCmd.Flags().StringVar(&iamProfile, "profile", "", "AWS named profile to use for credentials")
 
-	iamFixCmd.Flags().StringVar(&iamFromFile, "from", "", "path to JSON report from 'matlock iam scan --output json'")
+	iamFixCmd.Flags().StringVar(&iamFromFile, "from", "", "path to JSON report from 'cloudgov iam scan --output json'")
 	iamFixCmd.Flags().StringVar(&iamFixFormat, "format", "terraform", "fix format: terraform, json")
-	iamFixCmd.Flags().StringVar(&iamFixOut, "out", "./matlock-fixes", "output directory")
+	iamFixCmd.Flags().StringVar(&iamFixOut, "out", "./cloudgov-fixes", "output directory")
 	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", "minimum severity to generate fixes for")
 	_ = iamFixCmd.MarkFlagRequired("from")
 

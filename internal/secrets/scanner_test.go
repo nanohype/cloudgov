@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type mockSecretsProvider struct {

@@ -179,7 +179,7 @@ func TestListEmptyDir(t *testing.T) {
 }
 
 func TestListNonexistentDir(t *testing.T) {
-	store := NewStore("/tmp/matlock-test-nonexistent-" + t.Name())
+	store := NewStore("/tmp/cloudgov-test-nonexistent-" + t.Name())
 
 	metas, err := store.List()
 	if err != nil {

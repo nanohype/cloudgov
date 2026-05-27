@@ -1,6 +1,6 @@
 package compliance
 
-import "github.com/stxkxs/matlock/internal/cloud"
+import "github.com/nanohype/cloudgov/internal/cloud"
 
 // Evaluate runs all controls in a benchmark against the provided findings.
 func Evaluate(benchmark *Benchmark, input InputFindings) ComplianceReport {

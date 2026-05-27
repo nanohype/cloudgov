@@ -18,9 +18,9 @@ var (
 var quiet bool
 
 var rootCmd = &cobra.Command{
-	Use:   "matlock",
+	Use:   "cloudgov",
 	Short: "Multi-cloud security and cost swiss army knife",
-	Long: `matlock audits cloud infrastructure across five domains: IAM
+	Long: `cloudgov audits cloud infrastructure across five domains: IAM
 over-privilege, cost anomalies, infrastructure hygiene (orphans,
 storage, network, certs, tags), security posture (secrets, compliance,
 drift, full audit), and operational visibility (inventory, quotas,

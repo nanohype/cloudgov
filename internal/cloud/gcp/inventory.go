@@ -9,7 +9,7 @@ import (
 	"google.golang.org/api/run/v2"
 	"google.golang.org/api/sqladmin/v1beta4"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // sqladminAPI is the narrow Cloud SQL Admin surface used by this package.

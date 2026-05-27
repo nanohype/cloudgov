@@ -3,7 +3,7 @@ package secrets
 import (
 	"regexp"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // Pattern defines a regex-based secret detection rule.

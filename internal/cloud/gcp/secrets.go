@@ -7,8 +7,8 @@ import (
 	cloudfunctions "google.golang.org/api/cloudfunctions/v1"
 	run "google.golang.org/api/run/v1"
 
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/secrets"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/secrets"
 )
 
 // cloudFunctionsAPI is the narrow Cloud Functions surface used by this package.

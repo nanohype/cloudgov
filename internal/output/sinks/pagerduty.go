@@ -44,14 +44,14 @@ func (s *PagerDutySink) Send(ctx context.Context, d Digest) error {
 	payload := map[string]interface{}{
 		"routing_key":  s.RoutingKey,
 		"event_action": "trigger",
-		"dedup_key":    fmt.Sprintf("matlock-%s-%s", d.Source, d.Provider),
+		"dedup_key":    fmt.Sprintf("cloudgov-%s-%s", d.Source, d.Provider),
 		"payload": map[string]interface{}{
 			"summary":   fmt.Sprintf("%s: %d findings on %s (%d critical, %d high)", d.Source, d.TotalFindings, d.Provider, d.Critical, d.High),
 			"source":    d.Source,
 			"severity":  severity,
 			"timestamp": d.Timestamp.UTC().Format(time.RFC3339),
 			"component": d.Provider,
-			"group":     "matlock",
+			"group":     "cloudgov",
 			"class":     strings.Join(d.Domains, ","),
 			"custom_details": map[string]interface{}{
 				"critical": d.Critical,

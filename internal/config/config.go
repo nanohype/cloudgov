@@ -4,7 +4,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-// Config holds the values loaded from .matlock.yaml and environment.
+// Config holds the values loaded from .cloudgov.yaml and environment.
 type Config struct {
 	DefaultProviders []string `mapstructure:"providers"`
 	DefaultDays      int      `mapstructure:"days"`
@@ -26,14 +26,14 @@ type AzureConfig struct {
 	SubscriptionID string `mapstructure:"subscription_id"`
 }
 
-// Load reads .matlock.yaml from the current directory or home directory.
+// Load reads .cloudgov.yaml from the current directory or home directory.
 func Load() (*Config, error) {
 	v := viper.New()
-	v.SetConfigName(".matlock")
+	v.SetConfigName(".cloudgov")
 	v.SetConfigType("yaml")
 	v.AddConfigPath(".")
 	v.AddConfigPath("$HOME")
-	v.SetEnvPrefix("MATLOCK")
+	v.SetEnvPrefix("CLOUDGOV")
 	v.AutomaticEnv()
 
 	// Defaults

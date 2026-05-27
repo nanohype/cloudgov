@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // CompareAttributes compares expected attributes (from tfstate) against actual

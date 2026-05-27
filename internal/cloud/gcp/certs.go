@@ -9,7 +9,7 @@ import (
 
 	"google.golang.org/api/certificatemanager/v1"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // certManagerAPI is the narrow Certificate Manager surface used by this package.

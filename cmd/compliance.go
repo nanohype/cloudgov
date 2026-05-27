@@ -6,18 +6,18 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/stxkxs/matlock/internal/compliance"
-	"github.com/stxkxs/matlock/internal/output"
+	"github.com/nanohype/cloudgov/internal/compliance"
+	"github.com/nanohype/cloudgov/internal/output"
 )
 
 var complianceCmd = &cobra.Command{
 	Use:   "compliance [benchmark]",
 	Short: "Map scan results to compliance benchmark controls",
-	Long: `Evaluate matlock scan results against compliance benchmarks.
+	Long: `Evaluate cloudgov scan results against compliance benchmarks.
 
 Available benchmarks: cis-aws-v3, cis-gcp-v2, cis-azure-v2, soc2
 
-Provide paths to JSON reports from prior matlock scans using the report flags.`,
+Provide paths to JSON reports from prior cloudgov scans using the report flags.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runCompliance,
 }

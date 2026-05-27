@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoad_NoConfigFile(t *testing.T) {
-	// Run in a fresh temp dir so no .matlock.yaml is found
+	// Run in a fresh temp dir so no .cloudgov.yaml is found
 	tmp := t.TempDir()
 	old, _ := os.Getwd()
 	t.Cleanup(func() { _ = os.Chdir(old) })
@@ -45,7 +45,7 @@ gcp:
 azure:
   subscription_id: sub-1234
 `
-	if err := os.WriteFile(filepath.Join(tmp, ".matlock.yaml"), []byte(yaml), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".cloudgov.yaml"), []byte(yaml), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestLoad_MalformedYAMLReturnsError(t *testing.T) {
 	_ = os.Chdir(tmp)
 	t.Setenv("HOME", tmp)
 
-	if err := os.WriteFile(filepath.Join(tmp, ".matlock.yaml"), []byte("not: valid: yaml: ["), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(tmp, ".cloudgov.yaml"), []byte("not: valid: yaml: ["), 0644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

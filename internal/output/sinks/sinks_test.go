@@ -155,7 +155,7 @@ func TestSlackSink_PayloadStructure(t *testing.T) {
 	defer srv.Close()
 
 	d := Digest{
-		Source:    "matlock audit",
+		Source:    "cloudgov audit",
 		Provider:  "aws",
 		Timestamp: time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC),
 		Critical:  2, High: 3, TotalFindings: 5,
@@ -183,7 +183,7 @@ func TestSlackSink_PayloadStructure(t *testing.T) {
 	}
 	// Check that the body contains expected strings
 	body := string(raw)
-	for _, want := range []string{"matlock audit", "aws", "iam", "storage", "admin-role", "report.example.com"} {
+	for _, want := range []string{"cloudgov audit", "aws", "iam", "storage", "admin-role", "report.example.com"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("slack payload missing %q", want)
 		}
@@ -296,7 +296,7 @@ func TestPagerDutySink_PayloadShape(t *testing.T) {
 
 	sink := &PagerDutySink{RoutingKey: "my-routing-key", URL: srv.URL}
 	d := Digest{
-		Source: "matlock audit", Provider: "aws", Critical: 1,
+		Source: "cloudgov audit", Provider: "aws", Critical: 1,
 		TotalFindings: 1, Domains: []string{"iam"},
 	}
 	if err := sink.Send(context.Background(), d); err != nil {

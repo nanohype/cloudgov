@@ -1,15 +1,15 @@
 version: 2
 
-project_name: matlock
+project_name: cloudgov
 
 before:
   hooks:
     - go mod tidy
 
 builds:
-  - id: matlock
+  - id: cloudgov
     main: .
-    binary: matlock
+    binary: cloudgov
     goos:
       - linux
       - darwin
@@ -22,16 +22,16 @@ builds:
         goarch: arm64
     ldflags:
       - -s -w
-      - -X github.com/stxkxs/matlock/cmd.Version={{ .Version }}
-      - -X github.com/stxkxs/matlock/cmd.Commit={{ .Commit }}
-      - -X github.com/stxkxs/matlock/cmd.BuildDate={{ .Date }}
+      - -X github.com/nanohype/cloudgov/cmd.Version={{ .Version }}
+      - -X github.com/nanohype/cloudgov/cmd.Commit={{ .Commit }}
+      - -X github.com/nanohype/cloudgov/cmd.BuildDate={{ .Date }}
     env:
       - CGO_ENABLED=0
 
 archives:
-  - id: matlock
+  - id: cloudgov
     ids:
-      - matlock
+      - cloudgov
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     format_overrides:
       - goos: windows
@@ -43,23 +43,23 @@ checksum:
   algorithm: sha256
 
 brews:
-  - name: matlock
+  - name: cloudgov
     repository:
-      owner: stxkxs
+      owner: nanohype
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: "https://github.com/stxkxs/matlock"
+    homepage: "https://github.com/nanohype/cloudgov"
     description: "Multi-cloud security and cost swiss army knife — audit IAM permissions, spot cost anomalies, find orphaned resources, and flag insecure storage across AWS, GCP, and Azure"
     license: "Apache-2.0"
     test: |
-      system "#{bin}/matlock", "--version"
+      system "#{bin}/cloudgov", "--version"
     install: |
-      bin.install "matlock"
+      bin.install "cloudgov"
 
 release:
   github:
-    owner: stxkxs
-    name: matlock
+    owner: nanohype
+    name: cloudgov
   draft: false
   prerelease: auto

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // WriteFixScripts generates one shell remediation script per provider and writes them
@@ -43,7 +43,7 @@ func writeProviderScript(path, provider string, findings []cloud.BucketFinding) 
 	sb.WriteString("#!/usr/bin/env bash\n")
 	sb.WriteString("set -euo pipefail\n")
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("# matlock storage audit --fix\n"))
+	sb.WriteString(fmt.Sprintf("# cloudgov storage audit --fix\n"))
 	sb.WriteString(fmt.Sprintf("# Provider: %s\n", provider))
 	sb.WriteString(fmt.Sprintf("# Generated: %s\n", time.Now().UTC().Format(time.RFC3339)))
 	sb.WriteString(fmt.Sprintf("# Findings: %d\n", len(findings)))

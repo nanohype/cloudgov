@@ -7,7 +7,7 @@ import (
 
 	"google.golang.org/api/compute/v1"
 
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 func TestAuditNetwork(t *testing.T) {

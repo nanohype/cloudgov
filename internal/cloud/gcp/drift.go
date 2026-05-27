@@ -8,8 +8,8 @@ import (
 	"google.golang.org/api/googleapi"
 	cstorage "google.golang.org/api/storage/v1"
 
-	"github.com/stxkxs/matlock/internal/cloud"
-	"github.com/stxkxs/matlock/internal/drift"
+	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/drift"
 )
 
 // gcsRESTAPI is the narrow GCS v1 REST surface used by drift checks. Distinct

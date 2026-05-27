@@ -5,7 +5,7 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-	"github.com/stxkxs/matlock/internal/report"
+	"github.com/nanohype/cloudgov/internal/report"
 )
 
 var reportCmd = &cobra.Command{

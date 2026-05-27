@@ -20,7 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
-// Provider implements all Matlock provider interfaces for AWS.
+// Provider implements all CloudGov provider interfaces for AWS.
 //
 // Per-domain SDK clients are interface-typed and constructed at New(). Tests
 // build Provider directly with hand-written mocks satisfying the same

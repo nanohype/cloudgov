@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/stxkxs/matlock/internal/audit"
-	"github.com/stxkxs/matlock/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/audit"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // SARIF 2.1.0 structures (minimal subset for GitHub Advanced Security).
@@ -71,9 +71,9 @@ func WriteSARIF(w io.Writer, findings []cloud.Finding, version string) error {
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{{
 			Tool: sarifTool{Driver: sarifDriver{
-				Name:           "matlock",
+				Name:           "cloudgov",
 				Version:        version,
-				InformationURI: "https://github.com/stxkxs/matlock",
+				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
 			Results: results,
@@ -103,9 +103,9 @@ func WriteStorageSARIF(w io.Writer, findings []cloud.BucketFinding, version stri
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{{
 			Tool: sarifTool{Driver: sarifDriver{
-				Name:           "matlock",
+				Name:           "cloudgov",
 				Version:        version,
-				InformationURI: "https://github.com/stxkxs/matlock",
+				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
 			Results: results,
@@ -135,9 +135,9 @@ func WriteSecretsSARIF(w io.Writer, findings []cloud.SecretFinding, version stri
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{{
 			Tool: sarifTool{Driver: sarifDriver{
-				Name:           "matlock",
+				Name:           "cloudgov",
 				Version:        version,
-				InformationURI: "https://github.com/stxkxs/matlock",
+				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
 			Results: results,
@@ -258,9 +258,9 @@ func WriteAuditSARIF(w io.Writer, report *audit.Report, version string) error {
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
 		Runs: []sarifRun{{
 			Tool: sarifTool{Driver: sarifDriver{
-				Name:           "matlock",
+				Name:           "cloudgov",
 				Version:        version,
-				InformationURI: "https://github.com/stxkxs/matlock",
+				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          allRules,
 			}},
 			Results: results,

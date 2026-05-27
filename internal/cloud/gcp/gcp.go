@@ -21,7 +21,7 @@ import (
 	cstorage "google.golang.org/api/storage/v1"
 )
 
-// Provider implements Matlock provider interfaces for GCP.
+// Provider implements CloudGov provider interfaces for GCP.
 //
 // The GCP Go SDK exposes chained call builders (svc.Projects.GetIamPolicy(...).Context(ctx).Do())
 // that are awkward to mock directly. We hide that behind narrow per-domain

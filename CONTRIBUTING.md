@@ -1,4 +1,4 @@
-# Contributing to matlock
+# Contributing to cloudgov
 
 ## Prerequisites
 
@@ -146,7 +146,7 @@ Do not use `gomock`, `testify/mock`, or any mock-generation library. Hand-writte
 
 ## How to add a new command group
 
-A command group is a top-level cobra command (e.g. `matlock iam`, `matlock cost`) with one or more sub-commands.
+A command group is a top-level cobra command (e.g. `cloudgov iam`, `cloudgov cost`) with one or more sub-commands.
 
 ### 1. Create the command file
 
@@ -263,7 +263,7 @@ package mygroup
 import (
     "context"
     "fmt"
-    "github.com/stxkxs/matlock/internal/cloud"
+    "github.com/nanohype/cloudgov/internal/cloud"
 )
 
 func Scan(ctx context.Context, providers []cloud.MyGroupProvider) ([]MyResult, error) {
@@ -294,7 +294,7 @@ import (
     "context"
     "fmt"
     "testing"
-    "github.com/stxkxs/matlock/internal/cloud"
+    "github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type mockMyGroupProvider struct {
