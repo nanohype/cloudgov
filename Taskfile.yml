@@ -1,0 +1,53 @@
+version: "3"
+
+vars:
+  BINARY: cloudgov
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo "dev"
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo "unknown"
+  BUILD_DATE:
+    sh: date -u +%Y-%m-%dT%H:%M:%SZ
+  LDFLAGS: -ldflags "-X github.com/nanohype/cloudgov/cmd.Version={{.VERSION}} -X github.com/nanohype/cloudgov/cmd.Commit={{.COMMIT}} -X github.com/nanohype/cloudgov/cmd.BuildDate={{.BUILD_DATE}}"
+
+tasks:
+  build:
+    desc: Build the cloudgov binary
+    cmds:
+      - go build {{.LDFLAGS}} -o {{.BINARY}} .
+
+  install:
+    desc: Install cloudgov to $GOPATH/bin
+    cmds:
+      - go install {{.LDFLAGS}} .
+
+  test:
+    desc: Run all tests
+    cmds:
+      - go test ./...
+
+  test:cover:
+    desc: Run tests with coverage report
+    cmds:
+      - go test -coverprofile=coverage.out ./...
+      - go tool cover -html=coverage.out -o coverage.html
+
+  lint:
+    desc: Run golangci-lint
+    cmds:
+      - golangci-lint run ./...
+
+  tidy:
+    desc: Tidy go modules
+    cmds:
+      - go mod tidy
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -f {{.BINARY}} coverage.out coverage.html
+
+  run:
+    desc: Build and run cloudgov (pass args with -- e.g. task run -- iam scan)
+    cmds:
+      - go run {{.LDFLAGS}} . {{.CLI_ARGS}}

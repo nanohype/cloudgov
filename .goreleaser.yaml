@@ -1,0 +1,65 @@
+version: 2
+
+project_name: cloudgov
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: cloudgov
+    main: .
+    binary: cloudgov
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/nanohype/cloudgov/cmd.Version={{ .Version }}
+      - -X github.com/nanohype/cloudgov/cmd.Commit={{ .Commit }}
+      - -X github.com/nanohype/cloudgov/cmd.BuildDate={{ .Date }}
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: cloudgov
+    ids:
+      - cloudgov
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+brews:
+  - name: cloudgov
+    repository:
+      owner: nanohype
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/nanohype/cloudgov"
+    description: "Multi-cloud governance CLI — IAM least-privilege, cost anomalies, posture, drift, compliance, and resource hygiene across AWS, GCP, Azure, and Kubernetes"
+    license: "Apache-2.0"
+    test: |
+      system "#{bin}/cloudgov", "--version"
+    install: |
+      bin.install "cloudgov"
+
+release:
+  github:
+    owner: nanohype
+    name: cloudgov
+  draft: false
+  prerelease: auto
