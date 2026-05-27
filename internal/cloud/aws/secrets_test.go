@@ -35,6 +35,9 @@ func (m *secretsMockLambda) ListTags(_ context.Context, _ *lambda.ListTagsInput,
 func (m *secretsMockLambda) GetAccountSettings(_ context.Context, _ *lambda.GetAccountSettingsInput, _ ...func(*lambda.Options)) (*lambda.GetAccountSettingsOutput, error) {
 	return &lambda.GetAccountSettingsOutput{}, nil
 }
+func (m *secretsMockLambda) GetPolicy(_ context.Context, _ *lambda.GetPolicyInput, _ ...func(*lambda.Options)) (*lambda.GetPolicyOutput, error) {
+	return &lambda.GetPolicyOutput{}, nil
+}
 
 type secretsMockECS struct {
 	arns []string

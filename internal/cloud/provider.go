@@ -95,3 +95,70 @@ type Finding struct {
 	Detail      string
 	Remediation string
 }
+
+// K8sFindingType classifies a Kubernetes-domain observation.
+type K8sFindingType string
+
+const (
+	K8sClusterAdmin       K8sFindingType = "CLUSTER_ADMIN"
+	K8sWildcardPermission K8sFindingType = "WILDCARD_PERMISSION"
+	K8sBindingTooBroad    K8sFindingType = "BINDING_TOO_BROAD"
+	K8sDangerousVerb      K8sFindingType = "DANGEROUS_VERB"
+)
+
+// K8sFinding is a security observation about a Kubernetes cluster object.
+type K8sFinding struct {
+	Severity    Severity       `json:"severity"`
+	Type        K8sFindingType `json:"type"`
+	Kind        string         `json:"kind"`      // "ClusterRole", "ClusterRoleBinding", etc.
+	Name        string         `json:"name"`      // resource name
+	Namespace   string         `json:"namespace"` // empty for cluster-scoped
+	ContextName string         `json:"context_name,omitempty"`
+	Detail      string         `json:"detail"`
+	Remediation string         `json:"remediation"`
+}
+
+// KubernetesProvider is the foundation interface every K8s backend implements.
+type KubernetesProvider interface {
+	Provider
+	ContextName() string
+}
+
+// K8sRBACProvider scans cluster-scoped RBAC for over-privilege patterns.
+type K8sRBACProvider interface {
+	KubernetesProvider
+	ScanRBAC(ctx context.Context) ([]K8sFinding, error)
+}
+
+// LambdaPolicyFindingType classifies resource-based policy observations on
+// serverless functions.
+type LambdaPolicyFindingType string
+
+const (
+	LambdaPublicInvoke   LambdaPolicyFindingType = "PUBLIC_INVOKE"
+	LambdaCrossAccount   LambdaPolicyFindingType = "CROSS_ACCOUNT_INVOKE"
+	LambdaConfusedDeputy LambdaPolicyFindingType = "CONFUSED_DEPUTY_RISK"
+	LambdaWildcardAction LambdaPolicyFindingType = "WILDCARD_ACTION"
+)
+
+// LambdaPolicyFinding is a security observation about a Lambda function's
+// resource-based policy (lambda:GetPolicy output, separate from the
+// identity-based IAM analysis performed by IAMProvider).
+type LambdaPolicyFinding struct {
+	Severity     Severity                `json:"severity"`
+	Type         LambdaPolicyFindingType `json:"type"`
+	Provider     string                  `json:"provider"`
+	FunctionName string                  `json:"function_name"`
+	FunctionArn  string                  `json:"function_arn"`
+	Region       string                  `json:"region"`
+	StatementID  string                  `json:"statement_id,omitempty"`
+	Detail       string                  `json:"detail"`
+	Remediation  string                  `json:"remediation"`
+}
+
+// LambdaPolicyProvider audits Lambda function resource-based policies for
+// public-invoke, cross-account-invoke, and confused-deputy patterns.
+type LambdaPolicyProvider interface {
+	Provider
+	AuditLambdaPolicies(ctx context.Context) ([]LambdaPolicyFinding, error)
+}

@@ -346,6 +346,9 @@ matlock network audit --provider aws --severity CRITICAL
 
 # JSON output
 matlock network audit --output json --output-file network-findings.json
+
+# Generate shell remediation scripts (one per provider) alongside the table
+matlock network audit --fix --out fixes/
 ```
 
 **Flags**
@@ -356,6 +359,35 @@ matlock network audit --output json --output-file network-findings.json
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
+| `--fix` | `false` | Generate shell remediation scripts for each finding |
+| `--out` | `.` | Directory to write fix scripts (used with `--fix`) |
+
+---
+
+### `matlock remediate` — generate fix scripts from a saved scan report
+
+Read a previously-saved JSON scan report and emit shell scripts that remediate each finding. The offline equivalent of `<domain> audit --fix` — useful when you want to review findings first, gate remediation behind code review, or apply a subset by severity.
+
+Supported report types: `storage`, `network`. Reports are read from files written via `--output json --output-file <path>` on the corresponding scan command.
+
+```sh
+# Generate fix scripts from a saved storage scan
+matlock storage audit --output json --output-file storage.json
+matlock remediate --type storage --from storage.json --out fixes/
+
+# Same for network, only CRITICAL findings
+matlock network audit --output json --output-file network.json
+matlock remediate --type network --from network.json --severity CRITICAL --out fixes/
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--type` | (required) | Report type: `storage` or `network` |
+| `--from` | (required) | Path to JSON scan report |
+| `--out` | `.` | Directory to write fix scripts |
+| `--severity` | `LOW` | Minimum severity to include in fix scripts |
 
 ---
 
@@ -421,6 +453,68 @@ matlock tags --require owner,env --output json --output-file tags.json
 | `--provider` | auto | Cloud providers to scan |
 | `--require` | (required) | Comma-separated tag/label keys that must be present |
 | `--severity` | `MEDIUM` | Minimum severity to report |
+| `--output` | `table` | Output format: `table`, `json` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
+### `matlock lambda audit` — Lambda resource-policy exposure (AWS)
+
+Inspects each AWS Lambda function's resource-based policy (`lambda:GetPolicy`) for patterns that grant invoke permission too widely. This is the *resource-based* counterpart to `matlock iam scan` — that one checks what identities can do *from* the inside; this one checks who can invoke *into* the function from the outside.
+
+Severity rules:
+- **CRITICAL** — `Principal: "*"` or `Principal: {"AWS": "*"}` (anyone can invoke)
+- **HIGH** — cross-account principal in `Principal: {"AWS": "arn:..."}` (a different account is allowed to invoke)
+- **HIGH** — `Principal: {"Service": "..."}` without `aws:SourceAccount` or `aws:SourceArn` condition (confused-deputy risk)
+- **HIGH** — `Action: "*"` or `Action: "lambda:*"` in any allow statement
+
+Functions without a resource policy are silently skipped — they're only reachable via identity-based IAM, which the IAM scan already covers.
+
+```sh
+# Audit all Lambda resource policies in the current AWS account
+matlock lambda audit
+
+# CRITICAL only, JSON output
+matlock lambda audit --severity CRITICAL --output json --output-file lambda.json
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--provider` | `aws` | Currently only `aws` is supported |
+| `--severity` | `LOW` | Minimum severity to report |
+| `--output` | `table` | Output format: `table`, `json` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
+### `matlock k8s rbac` — over-privileged Kubernetes RBAC
+
+Scans cluster-scoped ClusterRoles and ClusterRoleBindings for the patterns that produce real incidents: wildcard verbs/resources, dangerous verbs (create/update/patch/delete) on wildcard resources, and bindings to broad subject groups (`system:authenticated`, `system:unauthenticated`, `system:masters`). Built-in default roles (`cluster-admin`, `admin`, `edit`, `view`, `system:*`, `kubeadm:*`) are skipped so the output focuses on user-introduced risk.
+
+Connection uses the standard kubeconfig chain: `--kubeconfig` flag → `$KUBECONFIG` → `~/.kube/config` → in-cluster service-account token.
+
+```sh
+# Scan the cluster of the current kubeconfig context
+matlock k8s rbac
+
+# Use a specific kubeconfig
+matlock k8s rbac --kubeconfig /path/to/kubeconfig
+
+# JSON output for CI
+matlock k8s rbac --output json --output-file rbac.json
+
+# HIGH and above only
+matlock k8s rbac --severity HIGH
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--kubeconfig` | (chain) | Path to kubeconfig file |
+| `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
 
@@ -548,6 +642,30 @@ matlock audit --provider aws --iam-days 30 --cert-days 60 --require-tags owner,e
 | `--cert-days` | `90` | Certificate expiry warning threshold in days |
 | `--require-tags` | | Required tags for tag audit (comma-separated) |
 | `--concurrency` | `10` | Max parallel goroutines for IAM scanning |
+| `--sink` | | Notification sink (repeatable). See **Notification sinks** below. |
+| `--report-url` | | URL embedded in sink notifications (link to full report) |
+
+#### Notification sinks
+
+`matlock audit --sink <spec>` posts a digest of the run to an external system after the scan completes. Sinks fire on a best-effort basis — one bad sink does not block the others, and audit exit code is unaffected. The flag is repeatable, so you can deliver to several destinations at once.
+
+| Spec form | What it does |
+|---|---|
+| `slack:<webhook-url>` | Block Kit message with severity-coded header, per-domain summary, top 10 findings, and optional report link |
+| `webhook:<url>` | POSTs the raw JSON digest to any URL; receivers parse it however they like |
+| `pagerduty:<routing-key>` | PagerDuty Events API v2 trigger — only fires when the digest contains at least one critical or high finding (avoids alert fatigue) |
+
+```sh
+# Post a Slack notification on every audit run
+matlock audit --sink slack:https://hooks.slack.com/services/T00/B00/XXX
+
+# Page on-call AND notify Slack AND forward to a custom collector
+matlock audit \
+  --sink slack:https://hooks.slack.com/services/T00/B00/XXX \
+  --sink pagerduty:my-pd-routing-key \
+  --sink webhook:https://collector.example.com/matlock \
+  --report-url https://reports.example.com/audit-$(date +%F).html
+```
 
 ---
 

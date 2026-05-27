@@ -31,6 +31,8 @@ var (
 	networkSeverity   string
 	networkOutputFmt  string
 	networkOutputFile string
+	networkFix        bool
+	networkOutDir     string
 )
 
 func init() {
@@ -38,6 +40,8 @@ func init() {
 	networkAuditCmd.Flags().StringVar(&networkSeverity, "severity", "LOW", "minimum severity to report (CRITICAL, HIGH, MEDIUM, LOW)")
 	networkAuditCmd.Flags().StringVar(&networkOutputFmt, "output", "table", "output format: table, json")
 	networkAuditCmd.Flags().StringVar(&networkOutputFile, "output-file", "", "write output to file")
+	networkAuditCmd.Flags().BoolVar(&networkFix, "fix", false, "generate shell remediation scripts for each finding")
+	networkAuditCmd.Flags().StringVar(&networkOutDir, "out", ".", "directory to write fix scripts (used with --fix)")
 
 	networkCmd.AddCommand(networkAuditCmd)
 }
@@ -68,12 +72,26 @@ func runNetworkAudit(_ *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(networkOutputFmt) {
 	case "json":
-		return output.WriteNetwork(w, findings)
+		if err := output.WriteNetwork(w, findings); err != nil {
+			return err
+		}
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d network findings\n\n", len(findings))
 		}
 		output.NetworkFindings(w, findings)
+	}
+
+	if networkFix {
+		files, err := network.WriteFixScripts(findings, networkOutDir)
+		if err != nil {
+			return fmt.Errorf("write fix scripts: %w", err)
+		}
+		if !quiet {
+			for _, f := range files {
+				fmt.Fprintf(os.Stderr, "wrote fix script: %s\n", f)
+			}
+		}
 	}
 	return nil
 }

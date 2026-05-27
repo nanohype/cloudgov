@@ -62,6 +62,9 @@ func (m *quotaMockLambda) GetAccountSettings(_ context.Context, _ *lambda.GetAcc
 		AccountUsage: m.usage,
 	}, nil
 }
+func (m *quotaMockLambda) GetPolicy(_ context.Context, _ *lambda.GetPolicyInput, _ ...func(*lambda.Options)) (*lambda.GetPolicyOutput, error) {
+	return &lambda.GetPolicyOutput{}, nil
+}
 
 func TestIAMQuotas(t *testing.T) {
 	p := &Provider{iam: &quotaMockIAM{summary: map[string]int32{

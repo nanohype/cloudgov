@@ -352,6 +352,86 @@ func ComplianceReport(w io.Writer, report compliance.ComplianceReport) {
 	fmt.Fprintln(w, summary)
 }
 
+// LambdaPolicyFindings renders a Lambda resource-policy findings table.
+func LambdaPolicyFindings(w io.Writer, findings []cloud.LambdaPolicyFinding) {
+	if len(findings) == 0 {
+		fmt.Fprintln(w, dimStyle.Render("no findings"))
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		headerStyle.Render("SEVERITY"),
+		headerStyle.Render("TYPE"),
+		headerStyle.Render("FUNCTION"),
+		headerStyle.Render("STATEMENT"),
+		headerStyle.Render("DETAIL"),
+	)
+	for _, f := range findings {
+		sev := colorSeverity(f.Severity).Render(string(f.Severity))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			sev, string(f.Type), f.FunctionName, f.StatementID, truncate(f.Detail, 70),
+		)
+	}
+	tw.Flush()
+
+	var crit, high, med int
+	for _, f := range findings {
+		switch f.Severity {
+		case cloud.SeverityCritical:
+			crit++
+		case cloud.SeverityHigh:
+			high++
+		case cloud.SeverityMedium:
+			med++
+		}
+	}
+	fmt.Fprintf(w, "\n%s critical, %s high, %s medium\n",
+		critStyle.Render(fmt.Sprintf("%d", crit)),
+		highStyle.Render(fmt.Sprintf("%d", high)),
+		medStyle.Render(fmt.Sprintf("%d", med)),
+	)
+}
+
+// K8sFindings renders a Kubernetes RBAC findings table.
+func K8sFindings(w io.Writer, findings []cloud.K8sFinding) {
+	if len(findings) == 0 {
+		fmt.Fprintln(w, dimStyle.Render("no findings"))
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		headerStyle.Render("SEVERITY"),
+		headerStyle.Render("TYPE"),
+		headerStyle.Render("KIND"),
+		headerStyle.Render("NAME"),
+		headerStyle.Render("DETAIL"),
+	)
+	for _, f := range findings {
+		sev := colorSeverity(f.Severity).Render(string(f.Severity))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			sev, string(f.Type), f.Kind, f.Name, truncate(f.Detail, 80),
+		)
+	}
+	tw.Flush()
+
+	var crit, high, med int
+	for _, f := range findings {
+		switch f.Severity {
+		case cloud.SeverityCritical:
+			crit++
+		case cloud.SeverityHigh:
+			high++
+		case cloud.SeverityMedium:
+			med++
+		}
+	}
+	fmt.Fprintf(w, "\n%s critical, %s high, %s medium\n",
+		critStyle.Render(fmt.Sprintf("%d", crit)),
+		highStyle.Render(fmt.Sprintf("%d", high)),
+		medStyle.Render(fmt.Sprintf("%d", med)),
+	)
+}
+
 // SecretFindings renders a secret findings table.
 func SecretFindings(w io.Writer, findings []cloud.SecretFinding) {
 	if len(findings) == 0 {

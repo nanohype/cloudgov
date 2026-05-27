@@ -69,6 +69,10 @@ func (m *mockLambda) GetAccountSettings(_ context.Context, _ *lambda.GetAccountS
 	return &lambda.GetAccountSettingsOutput{}, nil
 }
 
+func (m *mockLambda) GetPolicy(_ context.Context, _ *lambda.GetPolicyInput, _ ...func(*lambda.Options)) (*lambda.GetPolicyOutput, error) {
+	return &lambda.GetPolicyOutput{}, nil
+}
+
 // tagsMockS3 satisfies s3API with tagging support.
 type tagsMockS3 struct {
 	buckets    []s3types.Bucket
