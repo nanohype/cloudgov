@@ -5,10 +5,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/baseline"
 	"github.com/nanohype/cloudgov/internal/compare"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var compareCmd = &cobra.Command{
@@ -85,7 +85,7 @@ func runCompare(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return fmt.Errorf("create output file: %w", err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		w = f
 	}
 

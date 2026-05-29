@@ -91,7 +91,7 @@ func Parse(specs []string) ([]Sink, error) {
 		kind := strings.ToLower(strings.TrimSpace(s[:idx]))
 		rest := strings.TrimSpace(s[idx+1:])
 		if rest == "" {
-			return nil, fmt.Errorf("sink %q: missing url or key after %s:", spec, kind)
+			return nil, fmt.Errorf("sink %q: missing url or key after %s", spec, kind)
 		}
 		switch kind {
 		case "slack":

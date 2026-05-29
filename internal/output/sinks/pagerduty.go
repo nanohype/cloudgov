@@ -90,7 +90,7 @@ func (s *PagerDutySink) Send(ctx context.Context, d Digest) error {
 	if err != nil {
 		return fmt.Errorf("post to pagerduty: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

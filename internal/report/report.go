@@ -79,7 +79,7 @@ func Generate(opts Options) error {
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if err := Render(out, data, reportType, opts.Version); err != nil {
 		return fmt.Errorf("render report: %w", err)
@@ -427,5 +427,5 @@ func openBrowser(path string) {
 		return
 	}
 
-	exec.Command(cmd, args...).Start()
+	_ = exec.Command(cmd, args...).Start()
 }

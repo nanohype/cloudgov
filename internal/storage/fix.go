@@ -43,19 +43,19 @@ func writeProviderScript(path, provider string, findings []cloud.BucketFinding) 
 	sb.WriteString("#!/usr/bin/env bash\n")
 	sb.WriteString("set -euo pipefail\n")
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("# cloudgov storage audit --fix\n"))
-	sb.WriteString(fmt.Sprintf("# Provider: %s\n", provider))
-	sb.WriteString(fmt.Sprintf("# Generated: %s\n", time.Now().UTC().Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("# Findings: %d\n", len(findings)))
+	sb.WriteString("# cloudgov storage audit --fix\n")
+	fmt.Fprintf(&sb, "# Provider: %s\n", provider)
+	fmt.Fprintf(&sb, "# Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&sb, "# Findings: %d\n", len(findings))
 	sb.WriteString("\n")
 
 	for _, f := range findings {
-		sb.WriteString(fmt.Sprintf("# [%s] %s — %s", f.Severity, f.Type, f.Bucket))
+		fmt.Fprintf(&sb, "# [%s] %s — %s", f.Severity, f.Type, f.Bucket)
 		if f.Region != "" {
-			sb.WriteString(fmt.Sprintf(" (%s)", f.Region))
+			fmt.Fprintf(&sb, " (%s)", f.Region)
 		}
 		sb.WriteString("\n")
-		sb.WriteString(fmt.Sprintf("# %s\n", f.Detail))
+		fmt.Fprintf(&sb, "# %s\n", f.Detail)
 		sb.WriteString(f.Remediation)
 		sb.WriteString("\n\n")
 	}

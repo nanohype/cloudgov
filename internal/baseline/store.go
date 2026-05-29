@@ -63,7 +63,7 @@ func (s *Store) Save(name string, report json.RawMessage, source string) error {
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return fmt.Errorf("rename temp file: %w", err)
 	}
 	return nil
