@@ -6,7 +6,7 @@
 // Per-domain client surfaces (rbacAPI, etc.) are interface-typed adapters
 // around the real *kubernetes.Clientset. Tests construct Provider directly
 // with hand-written mocks satisfying the same interfaces — same pattern as
-// the AWS/GCP/Azure provider packages.
+// the AWS provider package.
 package k8s
 
 import (

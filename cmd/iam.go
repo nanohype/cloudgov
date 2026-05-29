@@ -7,14 +7,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/fix"
 	"github.com/nanohype/cloudgov/internal/iam"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var iamCmd = &cobra.Command{
@@ -35,7 +33,6 @@ var iamFixCmd = &cobra.Command{
 }
 
 var (
-	iamProviders   []string
 	iamDays        int
 	iamPrincipal   string
 	iamSeverity    string
@@ -50,7 +47,6 @@ var (
 )
 
 func init() {
-	iamScanCmd.Flags().StringSliceVar(&iamProviders, "provider", []string{}, "cloud providers to scan (aws,gcp,azure); auto-detect if empty")
 	iamScanCmd.Flags().IntVar(&iamDays, "days", 90, "audit log lookback period in days")
 	iamScanCmd.Flags().StringVar(&iamPrincipal, "principal", "", "scan a specific principal by name or ID")
 	iamScanCmd.Flags().StringVar(&iamSeverity, "severity", "LOW", "minimum severity to report (CRITICAL,HIGH,MEDIUM,LOW,INFO)")
@@ -70,7 +66,7 @@ func init() {
 
 func runIAMScan(cmd *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveIAMProviders(ctx, iamProviders, iamProfile)
+	providers, err := resolveIAMProviders(ctx, iamProfile)
 	if err != nil {
 		return err
 	}
@@ -142,8 +138,8 @@ func runIAMFix(_ *cobra.Command, _ []string) error {
 	}
 
 	type report struct {
-		Findings        []cloud.Finding                `json:"findings"`
-		UsedPermissions map[string][]cloud.Permission  `json:"used_permissions"`
+		Findings        []cloud.Finding               `json:"findings"`
+		UsedPermissions map[string][]cloud.Permission `json:"used_permissions"`
 	}
 	var r report
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -151,7 +147,7 @@ func runIAMFix(_ *cobra.Command, _ []string) error {
 	}
 
 	// Build minimal policies for each unique principal
-	providers, err := resolveIAMProviders(ctx, nil, "")
+	providers, err := resolveIAMProviders(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -200,47 +196,13 @@ func runIAMFix(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveIAMProviders(ctx context.Context, names []string, profile string) ([]cloud.IAMProvider, error) {
-	all := buildAllIAMProviders(ctx, profile)
-	if len(names) == 0 {
-		// Auto-detect
-		var detected []cloud.IAMProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected; set AWS_PROFILE, GOOGLE_CLOUD_PROJECT, or AZURE_SUBSCRIPTION_ID")
-		}
-		return detected, nil
+func resolveIAMProviders(ctx context.Context, profile string) ([]cloud.IAMProvider, error) {
+	p, err := cloudaws.NewWithProfile(ctx, profile)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-
-	byName := make(map[string]cloud.IAMProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected; set AWS_PROFILE or use --profile")
 	}
-	var result []cloud.IAMProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllIAMProviders(ctx context.Context, profile string) []cloud.IAMProvider {
-	var providers []cloud.IAMProvider
-	if p, err := cloudaws.NewWithProfile(ctx, profile); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.IAMProvider{p}, nil
 }

@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/drift"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var driftCmd = &cobra.Command{
@@ -20,15 +18,13 @@ var driftCmd = &cobra.Command{
 	Short: "Compare live cloud state vs Terraform state files",
 	Long: `Detect configuration drift between your Terraform state and live cloud resources.
 
-Reads a terraform.tfstate file and checks each managed resource against the cloud API.
-Supports AWS security groups, IAM policies, S3 buckets; GCP firewalls, storage buckets;
-Azure NSGs, storage accounts.`,
+Reads a terraform.tfstate file and checks each managed resource against the AWS API.
+Supports AWS security groups, IAM policies, and S3 buckets.`,
 	Args: cobra.ExactArgs(1),
 	RunE: runDrift,
 }
 
 var (
-	driftProviders    []string
 	driftResourceType string
 	driftConcurrency  int
 	driftOutputFmt    string
@@ -36,7 +32,6 @@ var (
 )
 
 func init() {
-	driftCmd.Flags().StringSliceVar(&driftProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect from state if empty")
 	driftCmd.Flags().StringVar(&driftResourceType, "resource-type", "", "filter to a single resource type")
 	driftCmd.Flags().IntVar(&driftConcurrency, "concurrency", 10, "max concurrent API calls")
 	driftCmd.Flags().StringVar(&driftOutputFmt, "output", "table", "output format: table, json")
@@ -55,7 +50,7 @@ func runDrift(_ *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "parsed %d managed resources from %s\n", len(resources), args[0])
 	}
 
-	providers, err := resolveDriftProviders(ctx, resources)
+	providers, err := resolveDriftProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -104,38 +99,13 @@ func runDrift(_ *cobra.Command, args []string) error {
 	return nil
 }
 
-func resolveDriftProviders(ctx context.Context, resources []drift.ParsedResource) ([]cloud.DriftProvider, error) {
-	// Determine which providers are needed from the resources
-	needed := make(map[string]bool)
-	if len(driftProviders) > 0 {
-		for _, name := range driftProviders {
-			needed[strings.ToLower(name)] = true
-		}
-	} else {
-		for _, r := range resources {
-			needed[r.Provider] = true
-		}
+func resolveDriftProviders(ctx context.Context) ([]cloud.DriftProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-
-	var providers []cloud.DriftProvider
-	if needed["aws"] {
-		if p, err := cloudaws.New(ctx); err == nil {
-			providers = append(providers, p)
-		}
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	if needed["gcp"] {
-		if p, err := cloudgcp.New(ctx, ""); err == nil {
-			providers = append(providers, p)
-		}
-	}
-	if needed["azure"] {
-		if p, err := cloudazure.New(ctx, ""); err == nil {
-			providers = append(providers, p)
-		}
-	}
-
-	if len(providers) == 0 {
-		return nil, fmt.Errorf("no cloud provider credentials detected for the resource types in state file")
-	}
-	return providers, nil
+	return []cloud.DriftProvider{p}, nil
 }

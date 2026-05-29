@@ -7,14 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/audit"
 	"github.com/nanohype/cloudgov/internal/cloud"
 	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/output/sinks"
+	"github.com/spf13/cobra"
 )
 
 var auditCmd = &cobra.Command{
@@ -28,7 +26,6 @@ Skip specific domains with --skip, e.g. --skip iam,certs`,
 }
 
 var (
-	auditProviders    []string
 	auditSkip         []string
 	auditSeverity     string
 	auditOutputFmt    string
@@ -42,7 +39,6 @@ var (
 )
 
 func init() {
-	auditCmd.Flags().StringSliceVar(&auditProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	auditCmd.Flags().StringSliceVar(&auditSkip, "skip", []string{}, "domains to skip (iam,storage,network,orphans,certs,tags,secrets)")
 	auditCmd.Flags().StringVar(&auditSeverity, "severity", "LOW", "minimum severity to report")
 	auditCmd.Flags().StringVar(&auditOutputFmt, "output", "table", "output format: table, json, sarif")
@@ -65,7 +61,7 @@ func runAudit(_ *cobra.Command, _ []string) error {
 		skip[strings.ToLower(s)] = true
 	}
 
-	providers, err := buildAuditProviders(ctx, auditProviders)
+	providers, err := buildAuditProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -250,7 +246,7 @@ func sortFindingsBySeverity(fs []sinks.Finding) {
 	}
 }
 
-func buildAuditProviders(ctx context.Context, names []string) (audit.Providers, error) {
+func buildAuditProviders(ctx context.Context) (audit.Providers, error) {
 	type multiProvider interface {
 		cloud.Provider
 		cloud.IAMProvider
@@ -262,57 +258,22 @@ func buildAuditProviders(ctx context.Context, names []string) (audit.Providers, 
 		cloud.SecretsProvider
 	}
 
-	var multi []multiProvider
-	if len(names) == 0 {
-		// Auto-detect
-		if p, err := cloudaws.New(ctx); err == nil && p.Detect(ctx) {
-			multi = append(multi, p)
-		}
-		if p, err := cloudgcp.New(ctx, ""); err == nil && p.Detect(ctx) {
-			multi = append(multi, p)
-		}
-		if p, err := cloudazure.New(ctx, ""); err == nil && p.Detect(ctx) {
-			multi = append(multi, p)
-		}
-		if len(multi) == 0 {
-			return audit.Providers{}, fmt.Errorf("no cloud provider credentials detected")
-		}
-	} else {
-		for _, name := range names {
-			switch strings.ToLower(name) {
-			case "aws":
-				p, err := cloudaws.New(ctx)
-				if err != nil {
-					return audit.Providers{}, fmt.Errorf("aws: %w", err)
-				}
-				multi = append(multi, p)
-			case "gcp":
-				p, err := cloudgcp.New(ctx, "")
-				if err != nil {
-					return audit.Providers{}, fmt.Errorf("gcp: %w", err)
-				}
-				multi = append(multi, p)
-			case "azure":
-				p, err := cloudazure.New(ctx, "")
-				if err != nil {
-					return audit.Providers{}, fmt.Errorf("azure: %w", err)
-				}
-				multi = append(multi, p)
-			default:
-				return audit.Providers{}, fmt.Errorf("unknown provider: %s", name)
-			}
-		}
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return audit.Providers{}, fmt.Errorf("initialize aws: %w", err)
 	}
+	if !p.Detect(ctx) {
+		return audit.Providers{}, fmt.Errorf("no AWS credentials detected")
+	}
+	var mp multiProvider = p
 
 	var providers audit.Providers
-	for _, p := range multi {
-		providers.IAM = append(providers.IAM, p)
-		providers.Storage = append(providers.Storage, p)
-		providers.Network = append(providers.Network, p)
-		providers.Orphans = append(providers.Orphans, p)
-		providers.Certs = append(providers.Certs, p)
-		providers.Tags = append(providers.Tags, p)
-		providers.Secrets = append(providers.Secrets, p)
-	}
+	providers.IAM = append(providers.IAM, mp)
+	providers.Storage = append(providers.Storage, mp)
+	providers.Network = append(providers.Network, mp)
+	providers.Orphans = append(providers.Orphans, mp)
+	providers.Certs = append(providers.Certs, mp)
+	providers.Tags = append(providers.Tags, mp)
+	providers.Secrets = append(providers.Secrets, mp)
 	return providers, nil
 }

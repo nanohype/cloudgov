@@ -1,7 +1,6 @@
 package fix
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -56,13 +55,6 @@ func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string
 	switch principal.Provider {
 	case "aws":
 		content = formatAWSTF(s, principal.Name, policy)
-	case "gcp":
-		content = formatGCPTF(s, principal.Name, policy)
-	case "azure":
-		if err := writeAzureJSON(s, policy, dir); err != nil {
-			return err
-		}
-		content = fmt.Sprintf("# Azure custom role JSON written to %s_role.json\n", s)
 	default:
 		content = fmt.Sprintf("# no Terraform template available for provider %q\n", principal.Provider)
 	}
@@ -81,39 +73,6 @@ func formatAWSTF(s, name string, policy cloud.Policy) string {
   policy      = %s
 }
 `, s, strings.ReplaceAll(name, "_", "-"), policyExpr)
-}
-
-func formatGCPTF(s, name string, policy cloud.Policy) string {
-	perms := extractGCPPermissions(policy.Raw)
-	var sb strings.Builder
-	for _, p := range perms {
-		fmt.Fprintf(&sb, "    %q,\n", p)
-	}
-	return fmt.Sprintf(`resource "google_project_iam_custom_role" "minimal_%s" {
-  role_id     = "minimal_%s"
-  title       = "Minimal role for %s"
-  permissions = [
-%s  ]
-}
-`, s, s, name, sb.String())
-}
-
-func writeAzureJSON(s string, policy cloud.Policy, dir string) error {
-	if len(policy.Raw) > 0 {
-		if err := os.WriteFile(filepath.Join(dir, s+"_role.json"), policy.Raw, 0o644); err != nil {
-			return fmt.Errorf("write azure role json: %w", err)
-		}
-	}
-	return nil
-}
-
-func extractGCPPermissions(raw []byte) []string {
-	type role struct {
-		Permissions []string `json:"includedPermissions"`
-	}
-	var r role
-	_ = json.Unmarshal(raw, &r)
-	return r.Permissions
 }
 
 func slug(name string) string {

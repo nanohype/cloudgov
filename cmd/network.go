@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/cloud"
 	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/network"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var networkCmd = &cobra.Command{
@@ -27,7 +25,6 @@ var networkAuditCmd = &cobra.Command{
 }
 
 var (
-	networkProviders  []string
 	networkSeverity   string
 	networkOutputFmt  string
 	networkOutputFile string
@@ -36,7 +33,6 @@ var (
 )
 
 func init() {
-	networkAuditCmd.Flags().StringSliceVar(&networkProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	networkAuditCmd.Flags().StringVar(&networkSeverity, "severity", "LOW", "minimum severity to report (CRITICAL, HIGH, MEDIUM, LOW)")
 	networkAuditCmd.Flags().StringVar(&networkOutputFmt, "output", "table", "output format: table, json")
 	networkAuditCmd.Flags().StringVar(&networkOutputFile, "output-file", "", "write output to file")
@@ -48,7 +44,7 @@ func init() {
 
 func runNetworkAudit(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveNetworkProviders(ctx, networkProviders)
+	providers, err := resolveNetworkProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -96,45 +92,13 @@ func runNetworkAudit(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveNetworkProviders(ctx context.Context, names []string) ([]cloud.NetworkProvider, error) {
-	all := buildAllNetworkProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.NetworkProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveNetworkProviders(ctx context.Context) ([]cloud.NetworkProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.NetworkProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.NetworkProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllNetworkProviders(ctx context.Context) []cloud.NetworkProvider {
-	var providers []cloud.NetworkProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.NetworkProvider{p}, nil
 }

@@ -97,14 +97,3 @@ func TestCompareAttributesDiffContent(t *testing.T) {
 		t.Errorf("got actual %q, want new", diffs[0].Actual)
 	}
 }
-
-func TestStringMapKeys(t *testing.T) {
-	m := map[string]interface{}{"c": 1, "a": 2, "b": 3}
-	keys := StringMapKeys(m)
-	if len(keys) != 3 {
-		t.Fatalf("got %d keys, want 3", len(keys))
-	}
-	if keys[0] != "a" || keys[1] != "b" || keys[2] != "c" {
-		t.Errorf("keys not sorted: %v", keys)
-	}
-}

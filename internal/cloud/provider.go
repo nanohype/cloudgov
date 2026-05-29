@@ -13,10 +13,8 @@ type Provider interface {
 type PrincipalType string
 
 const (
-	PrincipalUser            PrincipalType = "user"
-	PrincipalRole            PrincipalType = "role"             // AWS
-	PrincipalServiceAccount  PrincipalType = "service_account"  // GCP
-	PrincipalManagedIdentity PrincipalType = "managed_identity" // Azure
+	PrincipalUser PrincipalType = "user"
+	PrincipalRole PrincipalType = "role"
 )
 
 // Principal represents an IAM identity on any cloud.
@@ -30,15 +28,15 @@ type Principal struct {
 
 // Permission is a single privilege that was granted to or used by a principal.
 type Permission struct {
-	Action   string  // "s3:GetObject" / "storage.objects.get" / "Microsoft.Storage/..."
+	Action   string  // "s3:GetObject"
 	Resource string  // ARN / resource path / scope
 	LastUsed *string // ISO-8601 timestamp from audit logs; nil if never used
 }
 
 // Policy is a minimal policy document ready for rendering.
 type Policy struct {
-	Provider string // "aws" | "gcp" | "azure"
-	Format   string // "aws-iam-json" | "gcp-custom-role" | "azure-custom-role"
+	Provider string // "aws"
+	Format   string // "aws-iam-json"
 	Raw      []byte
 }
 

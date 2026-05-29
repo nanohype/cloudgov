@@ -52,8 +52,6 @@ func TestAnalyze_AdminAction(t *testing.T) {
 		{"s3:*"},
 		{"iam:*"},
 		{"ec2:*"},
-		{"Microsoft.Authorization/*"},
-		{"microsoft.authorization/*"},
 	}
 
 	for _, tc := range tests {
@@ -271,11 +269,8 @@ func TestIsAdminAction(t *testing.T) {
 		{"s3:*", true},
 		{"iam:*", true},
 		{"ec2:*", true},
-		{"Microsoft.Authorization/*", true},
-		{"microsoft.authorization/*", true},
 		{"s3:GetObject", false},
 		{"ec2:DescribeInstances", false},
-		{"storage.objects.get", false},
 		{"", false},
 	}
 	for _, tc := range tests {

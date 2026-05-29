@@ -26,11 +26,11 @@ type Options struct {
 
 // TemplateData is the data model passed to the HTML template.
 type TemplateData struct {
-	Title      string
-	ReportType string
+	Title       string
+	ReportType  string
 	GeneratedAt string
-	Version    string
-	Duration   string
+	Version     string
+	Duration    string
 
 	// Audit summary
 	Summary *audit.ReportSummary
@@ -75,24 +75,14 @@ func Generate(opts Options) error {
 		reportType = DetectType(data)
 	}
 
-	td, err := buildTemplateData(data, reportType, opts.Version)
-	if err != nil {
-		return err
-	}
-
-	tmpl, err := parseTemplate()
-	if err != nil {
-		return err
-	}
-
 	out, err := os.Create(opts.OutputFile)
 	if err != nil {
 		return fmt.Errorf("create output: %w", err)
 	}
 	defer out.Close()
 
-	if err := tmpl.Execute(out, td); err != nil {
-		return fmt.Errorf("execute template: %w", err)
+	if err := Render(out, data, reportType, opts.Version); err != nil {
+		return fmt.Errorf("render report: %w", err)
 	}
 
 	if opts.Open {

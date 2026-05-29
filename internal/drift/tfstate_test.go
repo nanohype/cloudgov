@@ -35,34 +35,6 @@ func TestParseTFStateBytes(t *testing.T) {
 						}
 					}
 				]
-			},
-			{
-				"mode": "managed",
-				"type": "google_compute_firewall",
-				"name": "allow-http",
-				"provider": "registry.terraform.io/hashicorp/google",
-				"instances": [
-					{
-						"attributes": {
-							"id": "projects/my-project/global/firewalls/allow-http",
-							"name": "allow-http"
-						}
-					}
-				]
-			},
-			{
-				"mode": "managed",
-				"type": "azurerm_network_security_group",
-				"name": "example",
-				"provider": "registry.terraform.io/hashicorp/azurerm",
-				"instances": [
-					{
-						"attributes": {
-							"id": "/subscriptions/sub-123/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/nsg-1",
-							"name": "nsg-1"
-						}
-					}
-				]
 			}
 		]
 	}`)
@@ -72,12 +44,11 @@ func TestParseTFStateBytes(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Data sources should be excluded
-	if len(resources) != 3 {
-		t.Fatalf("got %d resources, want 3", len(resources))
+	// Data sources should be excluded; only the managed resource remains
+	if len(resources) != 1 {
+		t.Fatalf("got %d resources, want 1", len(resources))
 	}
 
-	// AWS resource
 	if resources[0].Address != "aws_security_group.web" {
 		t.Errorf("got address %q, want aws_security_group.web", resources[0].Address)
 	}
@@ -89,16 +60,6 @@ func TestParseTFStateBytes(t *testing.T) {
 	}
 	if resources[0].Type != "aws_security_group" {
 		t.Errorf("got type %q, want aws_security_group", resources[0].Type)
-	}
-
-	// GCP resource
-	if resources[1].Provider != "gcp" {
-		t.Errorf("got provider %q, want gcp", resources[1].Provider)
-	}
-
-	// Azure resource
-	if resources[2].Provider != "azure" {
-		t.Errorf("got provider %q, want azure", resources[2].Provider)
 	}
 }
 
@@ -135,8 +96,6 @@ func TestExtractProvider(t *testing.T) {
 		want         string
 	}{
 		{"registry.terraform.io/hashicorp/aws", "aws_security_group", "aws"},
-		{"registry.terraform.io/hashicorp/google", "google_compute_firewall", "gcp"},
-		{"registry.terraform.io/hashicorp/azurerm", "azurerm_network_security_group", "azure"},
 		{"custom", "custom_resource", "custom"},
 	}
 	for _, tt := range tests {

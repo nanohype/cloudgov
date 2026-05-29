@@ -346,14 +346,3 @@ func dedup(ss []string) []string {
 	}
 	return out
 }
-
-// accountID attempts to extract the AWS account ID from a role ARN.
-func accountIDFromPrincipal(p cloud.Principal) string {
-	if arn, ok := p.Metadata["arn"]; ok {
-		parts := strings.Split(arn, ":")
-		if len(parts) >= 5 {
-			return parts[4]
-		}
-	}
-	return ""
-}

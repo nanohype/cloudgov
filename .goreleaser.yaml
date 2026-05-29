@@ -50,7 +50,7 @@ brews:
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/nanohype/cloudgov"
-    description: "Multi-cloud governance CLI — IAM least-privilege, cost anomalies, posture, drift, compliance, and resource hygiene across AWS, GCP, Azure, and Kubernetes"
+    description: "AWS governance CLI — IAM least-privilege, cost anomalies, posture, drift, compliance, and resource hygiene across AWS, plus a Kubernetes RBAC scanner"
     license: "Apache-2.0"
     test: |
       system "#{bin}/cloudgov", "--version"

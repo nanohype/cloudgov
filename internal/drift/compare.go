@@ -2,7 +2,6 @@ package drift
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -24,16 +23,6 @@ func CompareAttributes(expected, actual map[string]interface{}, fields []string)
 		}
 	}
 	return diffs
-}
-
-// StringMapKeys returns sorted keys from a map[string]interface{}.
-func StringMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 func formatValue(v interface{}) string {

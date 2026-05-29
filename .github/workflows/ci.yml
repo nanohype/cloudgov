@@ -29,7 +29,7 @@ jobs:
         run: go vet ./...
 
       - name: enforce coverage floor
-        # Phase 2 lifted aws/gcp/azure from 0% to ~65-85%. The 50% floor is
+        # Phase 2 lifted internal/cloud/aws from 0% to ~65-85%. The 50% floor is
         # the floor — it'll ratchet up as more code lands under test.
         run: |
           total=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')

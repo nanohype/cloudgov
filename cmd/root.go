@@ -19,14 +19,12 @@ var quiet bool
 
 var rootCmd = &cobra.Command{
 	Use:   "cloudgov",
-	Short: "Multi-cloud security and cost swiss army knife",
-	Long: `cloudgov audits cloud infrastructure across five domains: IAM
+	Short: "AWS security and cost swiss army knife",
+	Long: `cloudgov audits AWS infrastructure across five domains: IAM
 over-privilege, cost anomalies, infrastructure hygiene (orphans,
 storage, network, certs, tags), security posture (secrets, compliance,
 drift, full audit), and operational visibility (inventory, quotas,
-baselines, diffs, reports).
-
-Supported providers: aws, gcp, azure`,
+baselines, diffs, reports).`,
 	SilenceUsage: true,
 }
 

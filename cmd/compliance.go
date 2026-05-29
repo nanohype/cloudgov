@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/compliance"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var complianceCmd = &cobra.Command{
@@ -15,7 +15,7 @@ var complianceCmd = &cobra.Command{
 	Short: "Map scan results to compliance benchmark controls",
 	Long: `Evaluate cloudgov scan results against compliance benchmarks.
 
-Available benchmarks: cis-aws-v3, cis-gcp-v2, cis-azure-v2, soc2
+Available benchmarks: cis-aws-v3, soc2
 
 Provide paths to JSON reports from prior cloudgov scans using the report flags.`,
 	Args: cobra.ExactArgs(1),

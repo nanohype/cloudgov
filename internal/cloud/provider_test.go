@@ -48,8 +48,6 @@ func TestPrincipalTypeConstants(t *testing.T) {
 	}{
 		{PrincipalUser, "user"},
 		{PrincipalRole, "role"},
-		{PrincipalServiceAccount, "service_account"},
-		{PrincipalManagedIdentity, "managed_identity"},
 	}
 	for _, tt := range tests {
 		if string(tt.pt) != tt.want {

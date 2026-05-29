@@ -1,8 +1,8 @@
 # cloudgov
 
-Multi-cloud security and cost swiss army knife — single binary, zero dependencies.
+AWS security and cost swiss army knife — single binary, zero dependencies.
 
-Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecure storage, detect overly permissive firewall rules, monitor TLS certificate expiry, enforce resource tagging, check service quota utilization, save and compare scan baselines, generate HTML reports, and more — across AWS, GCP, and Azure.
+Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecure storage, detect overly permissive security groups, monitor TLS certificate expiry, enforce resource tagging, check service quota utilization, save and compare scan baselines, generate HTML reports, and more — across your AWS account, plus a Kubernetes RBAC scanner.
 
 <!-- screenshot placeholder -->
 <!-- ![cloudgov iam scan output](docs/screenshots/iam-scan.png) -->
@@ -53,10 +53,6 @@ task build
 ---
 
 ## Credentials setup
-
-cloudgov auto-detects available providers from environment variables and credential files. You only need to configure the providers you actually use.
-
-### AWS
 
 cloudgov uses the standard AWS SDK credential chain.
 
@@ -112,65 +108,23 @@ Required IAM permissions for a read-only audit role:
 }
 ```
 
-### GCP
-
-```sh
-# Option 1 — application default credentials (gcloud)
-gcloud auth application-default login
-
-# Option 2 — service account key
-export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
-export GOOGLE_CLOUD_PROJECT=my-project-id
-
-# Required for cost diff
-export GOOGLE_BILLING_ACCOUNT_ID=XXXXXX-XXXXXX-XXXXXX
-```
-
-Required IAM roles for the service account:
-- `roles/iam.securityReviewer`
-- `roles/logging.viewer`
-- `roles/billing.viewer`
-- `roles/storage.objectViewer`
-- `roles/compute.viewer`
-- `roles/certificatemanager.viewer` (for `cloudgov certs`)
-- `compute.projects.get` permission (for `cloudgov quota`)
-
-### Azure
-
-```sh
-# Option 1 — Azure CLI
-az login
-export AZURE_SUBSCRIPTION_ID=...
-
-# Option 2 — service principal
-export AZURE_TENANT_ID=...
-export AZURE_CLIENT_ID=...
-export AZURE_CLIENT_SECRET=...
-export AZURE_SUBSCRIPTION_ID=...
-```
-
-Required role assignments:
-- `Reader` on the subscription
-- `Cost Management Reader` on the subscription
-- `Key Vault Reader` + `Key Vault Certificates Officer` (or `Key Vault Reader` if using RBAC-enabled vaults) for `cloudgov certs`
-
 ---
 
 ## Commands
 
 ### `cloudgov iam scan` — unused and overprivileged IAM
 
-Compares granted permissions against CloudTrail / Audit Log activity over the lookback window and reports unused, admin, and cross-account risks.
+Compares granted permissions against CloudTrail activity over the lookback window and reports unused, admin, and cross-account risks.
 
 ```sh
-# Scan all auto-detected providers (90-day lookback)
+# Scan the current AWS account (90-day lookback)
 cloudgov iam scan
 
-# AWS only, last 30 days, show CRITICAL and HIGH only
-cloudgov iam scan --provider aws --days 30 --severity HIGH
+# Last 30 days, show CRITICAL and HIGH only
+cloudgov iam scan --days 30 --severity HIGH
 
 # Scan a specific principal
-cloudgov iam scan --provider gcp --principal serviceAccount:scanner@my-project.iam.gserviceaccount.com
+cloudgov iam scan --principal arn:aws:iam::123456789012:role/scanner
 
 # JSON output for downstream tooling
 cloudgov iam scan --output json --output-file report.json
@@ -189,13 +143,12 @@ cloudgov iam scan --concurrency 20
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan: `aws`, `gcp`, `azure` |
-| `--days` | `90` | Audit log lookback window in days |
+| `--days` | `90` | CloudTrail lookback window in days |
 | `--principal` | | Scan a single principal by name or ID |
 | `--severity` | `LOW` | Minimum severity to report: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO` |
 | `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
-| `--concurrency` | `10` | Maximum parallel goroutines per provider |
+| `--concurrency` | `10` | Maximum parallel goroutines |
 | `--profile` | | AWS named profile to use for credentials |
 
 ---
@@ -222,7 +175,7 @@ cloudgov iam scan --output json --output-file report.json
 cloudgov iam fix --from report.json --out ./fixes
 ls ./fixes/
 # minimal_lambda_executor.tf
-# minimal_my_project_scanner_at_my_project_iam_gserviceaccount_com.tf
+# minimal_ci_deploy_role.tf
 ```
 
 **Flags**
@@ -238,14 +191,14 @@ ls ./fixes/
 
 ### `cloudgov cost diff` — spend delta between time windows
 
-Compares cloud spend between the last N days and the N days before that, surfacing unexpected increases service by service.
+Compares AWS spend between the last N days and the N days before that, surfacing unexpected increases service by service.
 
 ```sh
 # Compare last 30 days vs the 30 days before
 cloudgov cost diff
 
-# 7-day comparison, AWS only
-cloudgov cost diff --provider aws --days 7
+# 7-day comparison
+cloudgov cost diff --days 7
 
 # JSON output for alerting pipelines
 cloudgov cost diff --output json
@@ -258,7 +211,6 @@ cloudgov cost diff --output json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to query |
 | `--days` | `30` | Compare last N days vs N days before |
 | `--threshold` | `0` | Only show services with >N% change (e.g. `--threshold 20`) |
 | `--output` | `table` | Output format: `table`, `json` |
@@ -273,7 +225,7 @@ Cost increases >10% are shown in red; decreases are shown in green.
 Finds unattached disks, reserved IPs with no instance, and idle load balancers. Reports estimated monthly cost.
 
 ```sh
-# All providers
+# Scan the current AWS account
 cloudgov orphans
 
 # Only report resources costing more than $5/month
@@ -290,7 +242,6 @@ cloudgov orphans --output json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan |
 | `--min-cost` | `0` | Only report orphans with monthly cost above this USD threshold |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -304,7 +255,7 @@ The table includes a TOTAL row summing all monthly costs.
 Audits object storage for public access, missing encryption, disabled versioning, and missing access logging.
 
 ```sh
-# All providers
+# Scan the current AWS account
 cloudgov storage audit
 
 # HIGH and CRITICAL findings only
@@ -321,16 +272,15 @@ cloudgov storage audit --output json --output-file storage-findings.json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan |
 | `--severity` | `LOW` | Minimum severity to report |
-| `--output` | `table` | Output format: `table`, `json` |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
 
 ---
 
 ### `cloudgov network audit` — overly permissive firewall rules
 
-Checks security groups (AWS), firewall rules (GCP), and network security groups (Azure) for rules that expose sensitive ports to the internet.
+Checks security groups for rules that expose sensitive ports to the internet.
 
 Severity rules:
 - **CRITICAL** — `0.0.0.0/0` on SSH (22), RDP (3389), or database ports (3306, 5432, 1433, 27017, 6379, 9200)
@@ -338,16 +288,16 @@ Severity rules:
 - **MEDIUM** — unrestricted egress (all traffic to `0.0.0.0/0`)
 
 ```sh
-# All providers
+# Scan the current AWS account
 cloudgov network audit
 
-# AWS only, show CRITICAL findings
-cloudgov network audit --provider aws --severity CRITICAL
+# Show CRITICAL findings only
+cloudgov network audit --severity CRITICAL
 
 # JSON output
 cloudgov network audit --output json --output-file network-findings.json
 
-# Generate shell remediation scripts (one per provider) alongside the table
+# Generate shell remediation scripts alongside the table
 cloudgov network audit --fix --out fixes/
 ```
 
@@ -355,7 +305,6 @@ cloudgov network audit --fix --out fixes/
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan |
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -393,7 +342,7 @@ cloudgov remediate --type network --from network.json --severity CRITICAL --out 
 
 ### `cloudgov certs` — TLS certificate expiry
 
-Lists TLS certificates from ACM (AWS), Certificate Manager (GCP), and Azure Key Vault that are expired or expiring soon.
+Lists TLS certificates from ACM that are expired or expiring soon.
 
 Severity rules:
 - **CRITICAL** — expired, or expiring within 7 days
@@ -402,14 +351,14 @@ Severity rules:
 - **LOW** — expiring within 90 days (default `--days` threshold)
 
 ```sh
-# All providers, warn on certs expiring within 90 days (default)
+# Warn on certs expiring within 90 days (default)
 cloudgov certs
 
 # Only show certs expiring within 30 days
 cloudgov certs --days 30
 
-# AWS only, CRITICAL and HIGH only
-cloudgov certs --provider aws --severity HIGH
+# CRITICAL and HIGH only
+cloudgov certs --severity HIGH
 
 # JSON output
 cloudgov certs --output json --output-file certs.json
@@ -419,28 +368,25 @@ cloudgov certs --output json --output-file certs.json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan |
 | `--days` | `90` | Include certs expiring within this many days |
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
 
-> **GCP note:** Certificate Manager must be enabled in your project (`gcloud services enable certificatemanager.googleapis.com`). If the API is not enabled, `cloudgov certs` skips GCP with a warning.
-
 ---
 
 ### `cloudgov tags` — missing resource tags/labels
 
-Audits EC2 instances, S3 buckets, RDS databases, Lambda functions (AWS), compute instances and GCS buckets (GCP), and all resource types (Azure) for missing required tags or labels.
+Audits EC2 instances, S3 buckets, RDS databases, and Lambda functions for missing required tags.
 
 All findings are **MEDIUM** severity.
 
 ```sh
-# Require owner, env, and cost-center tags across all providers
+# Require owner, env, and cost-center tags
 cloudgov tags --require owner,env,cost-center
 
-# AWS only
-cloudgov tags --provider aws --require owner,env
+# Require a smaller tag set
+cloudgov tags --require owner,env
 
 # JSON output
 cloudgov tags --require owner,env --output json --output-file tags.json
@@ -450,8 +396,7 @@ cloudgov tags --require owner,env --output json --output-file tags.json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan |
-| `--require` | (required) | Comma-separated tag/label keys that must be present |
+| `--require` | (required) | Comma-separated tag keys that must be present |
 | `--severity` | `MEDIUM` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -482,7 +427,6 @@ cloudgov lambda audit --severity CRITICAL --output json --output-file lambda.jso
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | `aws` | Currently only `aws` is supported |
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -522,14 +466,14 @@ cloudgov k8s rbac --severity HIGH
 
 ### `cloudgov secrets scan` — leaked credentials in cloud resources
 
-Scans Lambda environment variables, ECS task definitions, EC2 user data (AWS), Cloud Functions environment, App Service settings (Azure), and similar runtime configuration for embedded secrets — AWS keys, Slack tokens, private keys, GitHub tokens, generic high-entropy strings.
+Scans Lambda environment variables, ECS task definitions, EC2 user data, and similar runtime configuration for embedded secrets — AWS keys, Slack tokens, private keys, GitHub tokens, generic high-entropy strings, and third-party cloud credentials (GCP service-account keys, Azure connection strings) leaked into AWS resources.
 
 ```sh
-# Scan all auto-detected providers
+# Scan the current AWS account
 cloudgov secrets scan
 
-# AWS only, HIGH and above
-cloudgov secrets scan --provider aws --severity HIGH
+# HIGH and above
+cloudgov secrets scan --severity HIGH
 
 # SARIF output for GitHub Advanced Security
 cloudgov secrets scan --output sarif --output-file secrets.sarif
@@ -539,7 +483,6 @@ cloudgov secrets scan --output sarif --output-file secrets.sarif
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan: `aws`, `gcp`, `azure` |
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -550,7 +493,7 @@ cloudgov secrets scan --output sarif --output-file secrets.sarif
 
 Loads JSON scan reports from prior cloudgov runs and maps the findings to controls in a named benchmark, producing a pass/fail evaluation per control.
 
-Available benchmarks: `cis-aws-v3`, `cis-gcp-v2`, `cis-azure-v2`, `soc2`.
+Available benchmarks: `cis-aws-v3`, `soc2`.
 
 ```sh
 # Produce JSON reports first
@@ -580,7 +523,7 @@ cloudgov compliance soc2 --iam-report iam.json --output json --output-file soc2.
 
 ### `cloudgov drift <tfstate>` — Terraform state vs live cloud
 
-Reads a `terraform.tfstate` file and checks each managed resource against the cloud API to detect modifications or deletions outside Terraform. Supports AWS security groups / IAM policies / S3 buckets, GCP firewalls / storage buckets, Azure NSGs / storage accounts.
+Reads a `terraform.tfstate` file and checks each managed resource against the AWS API to detect modifications or deletions outside Terraform. Supports security groups, IAM policies, and S3 buckets.
 
 ```sh
 # Local state file
@@ -589,8 +532,8 @@ cloudgov drift terraform.tfstate
 # Filter to a single resource type
 cloudgov drift terraform.tfstate --resource-type aws_security_group
 
-# Limit to a specific provider, lower concurrency
-cloudgov drift terraform.tfstate --provider aws --concurrency 5
+# Lower concurrency
+cloudgov drift terraform.tfstate --concurrency 5
 
 # JSON output
 cloudgov drift terraform.tfstate --output json --output-file drift.json
@@ -600,7 +543,6 @@ cloudgov drift terraform.tfstate --output json --output-file drift.json
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto from state | Cloud providers to query: `aws`, `gcp`, `azure` |
 | `--resource-type` | | Filter to a single Terraform resource type |
 | `--concurrency` | `10` | Max concurrent API calls |
 | `--output` | `table` | Output format: `table`, `json` |
@@ -613,7 +555,7 @@ cloudgov drift terraform.tfstate --output json --output-file drift.json
 Runs all security and cost scans (IAM, storage, network, orphans, certs, tags, secrets) in one shot and produces a single combined report. Skip specific domains with `--skip`.
 
 ```sh
-# Full audit across all auto-detected providers
+# Full audit of the current AWS account
 cloudgov audit
 
 # Skip IAM and certs domains
@@ -625,15 +567,14 @@ cloudgov audit --severity HIGH --output json --output-file audit.json
 # SARIF output for GitHub Advanced Security
 cloudgov audit --output sarif --output-file audit.sarif
 
-# AWS only with custom thresholds
-cloudgov audit --provider aws --iam-days 30 --cert-days 60 --require-tags owner,env
+# Custom thresholds
+cloudgov audit --iam-days 30 --cert-days 60 --require-tags owner,env
 ```
 
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to scan: `aws`, `gcp`, `azure` |
 | `--skip` | | Domains to skip: `iam`, `storage`, `network`, `orphans`, `certs`, `tags`, `secrets` |
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json`, `sarif` |
@@ -671,24 +612,23 @@ cloudgov audit \
 
 ### `cloudgov inventory` — list all cloud resources
 
-Lists all cloud resources across providers with type, region, tags, and creation date. Groups by type and region for a complete asset overview.
+Lists all AWS resources with type, region, tags, and creation date. Groups by type and region for a complete asset overview.
 
 ```sh
-# List all resources across auto-detected providers
+# List all resources in the current AWS account
 cloudgov inventory
 
 # Filter to specific resource types
 cloudgov inventory --type ec2,s3,lambda
 
-# AWS only, JSON output
-cloudgov inventory --provider aws --output json --output-file inventory.json
+# JSON output
+cloudgov inventory --output json --output-file inventory.json
 ```
 
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to list: `aws`, `gcp`, `azure` |
 | `--type` | all | Resource types to list (e.g. `ec2`, `s3`, `lambda`) |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -697,24 +637,23 @@ cloudgov inventory --provider aws --output json --output-file inventory.json
 
 ### `cloudgov quota` — service quota utilization
 
-Checks service quota usage across cloud providers to prevent outages from silently hitting limits. Reports IAM, EC2, S3, Lambda, RDS quotas (AWS), compute project quotas (GCP), and compute/network/storage quotas (Azure).
+Checks AWS service quota usage to prevent outages from silently hitting limits. Reports IAM, EC2, S3, Lambda, and RDS quotas.
 
 ```sh
-# All providers, all quotas
+# All quotas
 cloudgov quota
 
 # Only quotas above 50% utilization
 cloudgov quota --threshold 50
 
-# AWS only, JSON output
-cloudgov quota --provider aws --output json --output-file quotas.json
+# JSON output
+cloudgov quota --output json --output-file quotas.json
 ```
 
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--provider` | auto | Cloud providers to check: `aws`, `gcp`, `azure` |
 | `--threshold` | `0` | Minimum utilization percentage to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -875,7 +814,6 @@ jobs:
           AWS_REGION: us-east-1
         run: |
           cloudgov iam scan \
-            --provider aws \
             --severity HIGH \
             --output sarif \
             --output-file results.sarif \
@@ -920,7 +858,6 @@ jobs:
           AWS_REGION: us-east-1
         run: |
           cloudgov audit \
-            --provider aws \
             --severity HIGH \
             --output sarif \
             --output-file audit.sarif \

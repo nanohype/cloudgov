@@ -33,10 +33,6 @@ func evaluateControl(benchmarkID string, ctrl Control, input InputFindings) Cont
 	switch benchmarkID {
 	case "cis-aws-v3":
 		return evaluateCISAWS(ctrl, input)
-	case "cis-gcp-v2":
-		return evaluateCISGCP(ctrl, input)
-	case "cis-azure-v2":
-		return evaluateCISAzure(ctrl, input)
 	case "soc2":
 		return evaluateSOC2(ctrl, input)
 	default:
@@ -83,90 +79,6 @@ func evaluateCISAWS(ctrl Control, input InputFindings) ControlResult {
 		return evalNetworkAdminPorts(ctrl, input.Network)
 	case "5.4":
 		return evalNetworkFinding(ctrl, input.Network, cloud.NetworkOpenIngress)
-
-	default:
-		return evalNotEvaluated(ctrl, "no evaluator for this control")
-	}
-}
-
-// --- CIS GCP v2 ---
-
-func evaluateCISGCP(ctrl Control, input InputFindings) ControlResult {
-	switch ctrl.ID {
-	// IAM
-	case "1.4":
-		return evalAdminAccess(ctrl, input.IAM)
-	case "1.5":
-		return evalBroadScope(ctrl, input.IAM)
-	case "1.6":
-		return evalStalePrincipal(ctrl, input.IAM)
-	case "1.1", "1.7":
-		return evalIAMGeneric(ctrl, input.IAM)
-
-	// Logging
-	case "2.2":
-		return evalStorageFinding(ctrl, input.Storage, cloud.BucketNoLogging)
-
-	// Networking
-	case "3.1":
-		return evalNetworkFinding(ctrl, input.Network, cloud.NetworkOpenIngress)
-	case "3.6", "3.7":
-		return evalNetworkAdminPorts(ctrl, input.Network)
-
-	// Storage
-	case "5.1":
-		return evalStorageFinding(ctrl, input.Storage, cloud.BucketPublicAccess)
-	case "5.2":
-		return evalStorageFinding(ctrl, input.Storage, cloud.BucketPublicACL)
-
-	// Not evaluatable from scan data
-	case "2.1", "4.1", "4.6", "6.1.1", "6.2.1", "7.1":
-		return evalNotEvaluated(ctrl, "requires configuration data not available in scan reports")
-
-	default:
-		return evalNotEvaluated(ctrl, "no evaluator for this control")
-	}
-}
-
-// --- CIS Azure v2 ---
-
-func evaluateCISAzure(ctrl Control, input InputFindings) ControlResult {
-	switch ctrl.ID {
-	// IAM
-	case "1.1.1", "1.2.1":
-		return evalIAMGeneric(ctrl, input.IAM)
-	case "1.3.1":
-		return evalStalePrincipal(ctrl, input.IAM)
-
-	// Storage
-	case "3.1":
-		return evalStorageGeneric(ctrl, input.Storage)
-	case "3.2":
-		return evalStalePrincipal(ctrl, input.IAM)
-	case "3.7":
-		return evalStorageFinding(ctrl, input.Storage, cloud.BucketPublicAccess)
-	case "3.8":
-		return evalStorageGeneric(ctrl, input.Storage)
-	case "3.15":
-		return evalStorageFinding(ctrl, input.Storage, cloud.BucketUnencrypted)
-
-	// Logging
-	case "5.1.2":
-		return evalStorageFinding(ctrl, input.Storage, cloud.BucketNoLogging)
-
-	// Networking
-	case "6.1", "6.2":
-		return evalNetworkAdminPorts(ctrl, input.Network)
-	case "6.4":
-		return evalNetworkFinding(ctrl, input.Network, cloud.NetworkOpenIngress)
-
-	// Certs / Key Vault
-	case "8.1":
-		return evalCerts(ctrl, input.Certs)
-
-	// Not evaluatable from scan data
-	case "2.1.1", "4.1.1", "7.1", "9.1", "9.10":
-		return evalNotEvaluated(ctrl, "requires configuration data not available in scan reports")
 
 	default:
 		return evalNotEvaluated(ctrl, "no evaluator for this control")

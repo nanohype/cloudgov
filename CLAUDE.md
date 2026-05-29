@@ -1,6 +1,6 @@
 # cloudgov — development brief
 
-Multi-cloud security and cost swiss army knife CLI. Written in Go 1.26.
+AWS security and cost swiss army knife CLI. Written in Go 1.26.
 Module: `github.com/nanohype/cloudgov`
 Build: `task build`
 
@@ -8,7 +8,7 @@ Build: `task build`
 
 Production-quality open-source CLI for public release on GitHub.
 Target users: platform engineers, security engineers, DevOps teams.
-Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spanning IAM, cost, infrastructure hygiene, security posture, and operational visibility.
+Differentiator: single binary, AWS-native, five domains spanning IAM, cost, infrastructure hygiene, security posture, and operational visibility. A Kubernetes RBAC scanner (`cloudgov k8s rbac`) rounds out the cluster side.
 
 ## commands
 
@@ -22,7 +22,7 @@ Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spannin
 **Infrastructure hygiene**
 - `cloudgov orphans` — unused disks, IPs, load balancers
 - `cloudgov storage audit` — public buckets, unencrypted storage, versioning, logging
-- `cloudgov network audit` — overly permissive security groups / firewall rules / NSGs
+- `cloudgov network audit` — overly permissive security groups
 - `cloudgov certs` — TLS certificates expiring within configurable thresholds
 - `cloudgov tags` — resources missing required tags/labels
 
@@ -33,7 +33,7 @@ Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spannin
 - `cloudgov audit` — orchestrates all the above into one consolidated run
 
 **Operational visibility & workflow**
-- `cloudgov inventory` — list all resources across providers
+- `cloudgov inventory` — list all AWS resources
 - `cloudgov quota` — service quota utilization vs limits
 - `cloudgov baseline` — save/list/delete named scan baselines
 - `cloudgov compare` — diff a current report against a saved baseline
@@ -54,8 +54,7 @@ Differentiator: single binary, multi-cloud (aws/gcp/azure), five domains spannin
 ```go
 awssdk   "github.com/aws/aws-sdk-go-v2/aws"
 cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
-cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
+cloudk8s "github.com/nanohype/cloudgov/internal/cloud/k8s"
 orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
 ```
 
@@ -115,7 +114,7 @@ When all items in a section are done, move to the next section.
 
 - [x] `internal/iam/analyzer_test.go` — unit tests for `analyze()`: admin action detection, wildcard resource, unused permission, stale principal, cross-account, dedup. Use table-driven tests with mock principals and permissions.
 - [x] `internal/iam/suggest_test.go` — test `BuildMinimalPermissions` and `GroupByResource`
-- [x] `internal/fix/terraform_test.go` — test `formatAWSTF`, `formatGCPTF`, `slug`, `extractGCPPermissions`
+- [x] `internal/fix/terraform_test.go` — test `formatAWSTF`, `slug`
 - [x] `internal/output/json_test.go` — test JSON marshaling round-trips for all report types
 - [x] `internal/orphans/scanner_test.go` — test `Scan` with a mock provider, `TotalMonthlyCost`
 - [x] `internal/storage/scanner_test.go` — test `Scan` with a mock provider, severity filtering
@@ -126,7 +125,6 @@ When all items in a section are done, move to the next section.
 - [x] Add exponential backoff retry wrapper for all AWS API calls (use `aws-sdk-go-v2`'s built-in retry with `RetryMaxAttempts: 5`).
 - [x] Handle AWS paginator errors gracefully — log warning and continue rather than aborting the whole scan.
 - [x] `internal/cloud/aws/iam.go`: handle `NoSuchEntity` errors when fetching individual policy versions (policy may have been deleted between list and get).
-- [x] `internal/cloud/gcp/auditlogs.go`: `extractMethod` currently only handles `map[string]interface{}` — add handling for `*structpb.Struct` payload type from the logging SDK.
 - [x] `cmd/iam.go` `runIAMFix`: currently generates empty policies. Fix: load used permissions from the scan report JSON (not by re-querying the API) and pass them to `MinimalPolicy`.
 
 ### section 3 — user experience
@@ -151,17 +149,15 @@ When all items in a section are done, move to the next section.
 - [x] `cloudgov iam scan --output sarif`: currently only works for IAM findings. Route storage findings through SARIF too (add `WriteStorageSARIF` to output package).
 - [x] Add `cloudgov storage audit --fix`: generate remediation scripts (shell, not Terraform) for each finding. Write to `--out` directory.
 - [x] Add `cloudgov cost diff --threshold 20` flag: only show services with >20% change.
-- [x] `internal/cloud/gcp/cost.go`: implement using the Cloud Billing Budget API or BigQuery export. Add a note in the error if `GOOGLE_BILLING_ACCOUNT_ID` env var is not set.
 - [x] Add `--profile` flag to `iam scan` for AWS named profiles (pass through to `config.LoadDefaultConfig` with `config.WithSharedConfigProfile`).
 
 ### section 6 — coverage (Phase 2 of maintenance plan)
 
-Goal: get `internal/cloud/{aws,gcp,azure}` from 0% to meaningful coverage by extracting per-domain SDK interfaces and injecting them. Reference pattern: `internal/orphans/scanner_test.go:11-22`.
+Goal: get `internal/cloud/{aws,k8s}` from 0% to meaningful coverage by extracting per-domain SDK interfaces and injecting them. Reference pattern: `internal/orphans/scanner_test.go:11-22`.
 
 - [ ] `internal/cloud/aws/iam.go` — extract narrow `iamAPI` interface, hold it on `Provider`, add `aws/iam_test.go` with hand-written mock. This is the reference implementation; update this section with the proven pattern before fanning out.
 - [ ] Repeat for every file in `internal/cloud/aws/` (cloudtrail, cost, orphans, storage, network, certs, tags, drift, inventory, quota, secrets).
-- [ ] Repeat for every file in `internal/cloud/gcp/` (auditlogs + same domain list).
-- [ ] Repeat for every file in `internal/cloud/azure/` (rbac, activitylog + same domain list).
+- [ ] Repeat for `internal/cloud/k8s/` (rbac).
 - [ ] `internal/output/table.go` — add `table_test.go` with golden-file tests for each report renderer under `testdata/*.golden`.
 - [ ] `internal/output/sarif.go` — add `sarif_test.go` for SARIF round-trip.
 - [ ] `internal/cloud/provider_test.go` — small unit test for `SeverityRank` and constant tables.

@@ -547,26 +547,6 @@ func TestDedupPermissions(t *testing.T) {
 	}
 }
 
-func TestAccountIDFromPrincipal(t *testing.T) {
-	tests := []struct {
-		name string
-		p    cloud.Principal
-		want string
-	}{
-		{"role arn", cloud.Principal{Metadata: map[string]string{"arn": "arn:aws:iam::123456789012:role/admin"}}, "123456789012"},
-		{"no arn metadata", cloud.Principal{Metadata: map[string]string{}}, ""},
-		{"malformed arn", cloud.Principal{Metadata: map[string]string{"arn": "not-an-arn"}}, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := accountIDFromPrincipal(tt.p)
-			if got != tt.want {
-				t.Errorf("got %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 // ── test helpers ──────────────────────────────────────────────────────────────
 
 func equalStrings(a, b []string) bool {
