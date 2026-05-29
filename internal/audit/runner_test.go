@@ -7,34 +7,12 @@ import (
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
-type mockIAMProvider struct {
-	name       string
-	findings   []cloud.Finding
-	principals []cloud.Principal
-	err        error
-}
-
-func (m *mockIAMProvider) Name() string                 { return m.name }
-func (m *mockIAMProvider) Detect(_ context.Context) bool { return true }
-func (m *mockIAMProvider) ListPrincipals(_ context.Context) ([]cloud.Principal, error) {
-	return m.principals, m.err
-}
-func (m *mockIAMProvider) GrantedPermissions(_ context.Context, _ cloud.Principal) ([]cloud.Permission, error) {
-	return nil, nil
-}
-func (m *mockIAMProvider) UsedPermissions(_ context.Context, _ cloud.Principal, _ interface{}) ([]cloud.Permission, error) {
-	return nil, nil
-}
-func (m *mockIAMProvider) MinimalPolicy(_ context.Context, _ cloud.Principal, _ []cloud.Permission) (cloud.Policy, error) {
-	return cloud.Policy{}, nil
-}
-
 type mockStorageProvider struct {
 	findings []cloud.BucketFinding
 	err      error
 }
 
-func (m *mockStorageProvider) Name() string                 { return "mock" }
+func (m *mockStorageProvider) Name() string                  { return "mock" }
 func (m *mockStorageProvider) Detect(_ context.Context) bool { return true }
 func (m *mockStorageProvider) AuditStorage(_ context.Context) ([]cloud.BucketFinding, error) {
 	return m.findings, m.err
@@ -45,7 +23,7 @@ type mockNetworkProvider struct {
 	err      error
 }
 
-func (m *mockNetworkProvider) Name() string                 { return "mock" }
+func (m *mockNetworkProvider) Name() string                  { return "mock" }
 func (m *mockNetworkProvider) Detect(_ context.Context) bool { return true }
 func (m *mockNetworkProvider) AuditNetwork(_ context.Context) ([]cloud.NetworkFinding, error) {
 	return m.findings, m.err
@@ -56,7 +34,7 @@ type mockOrphansProvider struct {
 	err     error
 }
 
-func (m *mockOrphansProvider) Name() string                 { return "mock" }
+func (m *mockOrphansProvider) Name() string                  { return "mock" }
 func (m *mockOrphansProvider) Detect(_ context.Context) bool { return true }
 func (m *mockOrphansProvider) ListOrphans(_ context.Context) ([]cloud.OrphanResource, error) {
 	return m.orphans, m.err
@@ -67,7 +45,7 @@ type mockCertProvider struct {
 	err      error
 }
 
-func (m *mockCertProvider) Name() string                 { return "mock" }
+func (m *mockCertProvider) Name() string                  { return "mock" }
 func (m *mockCertProvider) Detect(_ context.Context) bool { return true }
 func (m *mockCertProvider) ListCertificates(_ context.Context) ([]cloud.CertFinding, error) {
 	return m.findings, m.err
@@ -78,7 +56,7 @@ type mockSecretsProvider struct {
 	err      error
 }
 
-func (m *mockSecretsProvider) Name() string                 { return "mock" }
+func (m *mockSecretsProvider) Name() string                  { return "mock" }
 func (m *mockSecretsProvider) Detect(_ context.Context) bool { return true }
 func (m *mockSecretsProvider) ScanSecrets(_ context.Context) ([]cloud.SecretFinding, error) {
 	return m.findings, m.err

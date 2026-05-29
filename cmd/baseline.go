@@ -6,8 +6,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/baseline"
+	"github.com/spf13/cobra"
 )
 
 var baselineCmd = &cobra.Command{
@@ -41,11 +41,11 @@ var (
 func init() {
 	baselineSaveCmd.Flags().StringVar(&baselineFrom, "from", "", "path to scan report JSON file (required)")
 	baselineSaveCmd.Flags().StringVar(&baselineName, "name", "", "name for the baseline (required)")
-	baselineSaveCmd.MarkFlagRequired("from")
-	baselineSaveCmd.MarkFlagRequired("name")
+	_ = baselineSaveCmd.MarkFlagRequired("from")
+	_ = baselineSaveCmd.MarkFlagRequired("name")
 
 	baselineDeleteCmd.Flags().StringVar(&baselineName, "name", "", "name of the baseline to delete (required)")
-	baselineDeleteCmd.MarkFlagRequired("name")
+	_ = baselineDeleteCmd.MarkFlagRequired("name")
 
 	baselineCmd.AddCommand(baselineSaveCmd)
 	baselineCmd.AddCommand(baselineListCmd)

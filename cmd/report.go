@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/report"
+	"github.com/spf13/cobra"
 )
 
 var reportCmd = &cobra.Command{
@@ -26,7 +26,7 @@ func init() {
 	reportCmd.Flags().StringVar(&reportOut, "out", "report.html", "output HTML file path")
 	reportCmd.Flags().StringVar(&reportType, "type", "auto", "report type: auto, audit, iam, storage, network, orphans, certs, tags, secrets, cost, quotas")
 	reportCmd.Flags().BoolVar(&reportOpen, "open", false, "open the report in the default browser after generation")
-	reportCmd.MarkFlagRequired("from")
+	_ = reportCmd.MarkFlagRequired("from")
 }
 
 func runReport(_ *cobra.Command, _ []string) error {
