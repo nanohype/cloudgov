@@ -60,4 +60,5 @@ func init() {
 	rootCmd.AddCommand(k8sCmd)
 	rootCmd.AddCommand(remediateCmd)
 	rootCmd.AddCommand(lambdaCmd)
+	rootCmd.AddCommand(mcpCmd)
 }
