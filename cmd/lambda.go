@@ -39,14 +39,12 @@ Currently AWS only.`,
 }
 
 var (
-	lambdaProviders  []string
 	lambdaSeverity   string
 	lambdaOutputFmt  string
 	lambdaOutputFile string
 )
 
 func init() {
-	lambdaAuditCmd.Flags().StringSliceVar(&lambdaProviders, "provider", []string{"aws"}, "cloud providers (currently only aws is supported)")
 	lambdaAuditCmd.Flags().StringVar(&lambdaSeverity, "severity", "LOW", "minimum severity to report")
 	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFmt, "output", "table", "output format: table, json")
 	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFile, "output-file", "", "write output to file")
@@ -57,20 +55,16 @@ func init() {
 func runLambdaAudit(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
 
-	var allFindings []cloud.LambdaPolicyFinding
-	for _, name := range lambdaProviders {
-		if strings.ToLower(name) != "aws" {
-			return fmt.Errorf("provider %q: lambda audit currently only supports aws", name)
-		}
-		p, err := cloudaws.New(ctx)
-		if err != nil {
-			return fmt.Errorf("aws: %w", err)
-		}
-		findings, err := p.AuditLambdaPolicies(ctx)
-		if err != nil {
-			return err
-		}
-		allFindings = append(allFindings, findings...)
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return fmt.Errorf("initialize aws: %w", err)
+	}
+	if !p.Detect(ctx) {
+		return fmt.Errorf("no AWS credentials detected")
+	}
+	allFindings, err := p.AuditLambdaPolicies(ctx)
+	if err != nil {
+		return err
 	}
 
 	allFindings = filterLambdaBySeverity(allFindings, cloud.Severity(strings.ToUpper(lambdaSeverity)))

@@ -18,10 +18,10 @@ Both must pass before marking any backlog item complete.
 
 ---
 
-## How to add a new cloud provider
+## How to add a new provider
 
-A provider is a struct that implements the cloud interfaces for a specific cloud platform.
-The existing providers are `internal/cloud/aws`, `internal/cloud/gcp`, and `internal/cloud/azure`.
+A provider is a struct that implements the cloud interfaces for a specific target.
+The existing providers are `internal/cloud/aws` (the primary target) and `internal/cloud/k8s` (Kubernetes RBAC).
 
 ### 1. Create the package
 
@@ -45,7 +45,7 @@ type Provider interface {
 }
 ```
 
-`Name()` returns a lowercase identifier (e.g. `"aws"`, `"gcp"`, `"azure"`).
+`Name()` returns a lowercase identifier (e.g. `"aws"`, `"k8s"`).
 `Detect()` returns `true` when credentials or environment variables for this provider are available.
 
 ```go
@@ -55,7 +55,7 @@ package mycloud
 import "context"
 
 type Provider struct {
-    // SDK config, credentials, project/subscription ID, etc.
+    // SDK config, credentials, etc.
 }
 
 func New(ctx context.Context) (*Provider, error) {
@@ -96,32 +96,48 @@ func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, err
 }
 ```
 
-### 4. Register the provider in every command
+### 4. Wire the provider into the command resolvers
 
-Each command file in `cmd/` has a `buildAllXxxProviders()` function. Add your provider to all four:
+Each command file in `cmd/` has a `resolveXxxProviders()` function that constructs the
+provider(s) for that domain. Today these are single-provider AWS-only constructors — they
+build the AWS provider, check `Detect()`, and return it:
 
 ```go
 // cmd/orphans.go
-func buildAllOrphansProviders(ctx context.Context) []cloud.OrphansProvider {
-    var providers []cloud.OrphansProvider
-    if p, err := cloudaws.New(ctx); err == nil {
-        providers = append(providers, p)
+func resolveOrphansProviders(ctx context.Context) ([]cloud.OrphansProvider, error) {
+    p, err := cloudaws.New(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("initialize aws: %w", err)
     }
-    if p, err := cloudgcp.New(ctx, ""); err == nil {
-        providers = append(providers, p)
+    if !p.Detect(ctx) {
+        return nil, fmt.Errorf("no AWS credentials detected")
     }
-    if p, err := cloudazure.New(ctx, ""); err == nil {
-        providers = append(providers, p)
-    }
-    // add your provider:
-    if p, err := cloudmycloud.New(ctx); err == nil {
-        providers = append(providers, p)
-    }
-    return providers
+    return []cloud.OrphansProvider{p}, nil
 }
 ```
 
-Do the same in `buildAllIAMProviders`, `buildAllStorageProviders`, `buildAllCostProviders`, `buildAllInventoryProviders`, and `buildAllQuotaProviders`.
+To add another implementation for a domain, construct it alongside the AWS provider and
+append it to the returned slice (skip any provider whose credentials aren't detected):
+
+```go
+func resolveOrphansProviders(ctx context.Context) ([]cloud.OrphansProvider, error) {
+    var providers []cloud.OrphansProvider
+    if p, err := cloudaws.New(ctx); err == nil && p.Detect(ctx) {
+        providers = append(providers, p)
+    }
+    if p, err := cloudmycloud.New(ctx); err == nil && p.Detect(ctx) {
+        providers = append(providers, p)
+    }
+    if len(providers) == 0 {
+        return nil, fmt.Errorf("no credentials detected")
+    }
+    return providers, nil
+}
+```
+
+Do the same in `resolveIAMProviders`, `resolveStorageProviders`, `resolveCostProviders`,
+`resolveInventoryProviders`, and `resolveQuotaProviders` for whichever domains your
+provider supports.
 
 ### 5. Write tests
 
@@ -203,45 +219,20 @@ func init() {
 
 ### 3. Implement provider resolution
 
-If your command operates across cloud providers, follow the resolver pattern used by every existing command:
+If your command needs a cloud provider, follow the resolver pattern used by every existing
+command. The resolver constructs the AWS provider, verifies credentials with `Detect()`, and
+returns it as a slice so the scanner code can stay uniform:
 
 ```go
-func resolveMyGroupProviders(ctx context.Context, names []string) []cloud.MyGroupProvider {
-    all := buildAllMyGroupProviders(ctx)
-    if len(names) == 0 {
-        var detected []cloud.MyGroupProvider
-        for _, p := range all {
-            if p.Detect(ctx) {
-                detected = append(detected, p)
-            }
-        }
-        return detected
+func resolveMyGroupProviders(ctx context.Context) ([]cloud.MyGroupProvider, error) {
+    p, err := cloudaws.New(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("initialize aws: %w", err)
     }
-    byName := make(map[string]cloud.MyGroupProvider, len(all))
-    for _, p := range all {
-        byName[p.Name()] = p
+    if !p.Detect(ctx) {
+        return nil, fmt.Errorf("no AWS credentials detected")
     }
-    var out []cloud.MyGroupProvider
-    for _, n := range names {
-        if p, ok := byName[n]; ok {
-            out = append(out, p)
-        }
-    }
-    return out
-}
-
-func buildAllMyGroupProviders(ctx context.Context) []cloud.MyGroupProvider {
-    var providers []cloud.MyGroupProvider
-    if p, err := cloudaws.New(ctx); err == nil {
-        providers = append(providers, p)
-    }
-    if p, err := cloudgcp.New(ctx, ""); err == nil {
-        providers = append(providers, p)
-    }
-    if p, err := cloudazure.New(ctx, ""); err == nil {
-        providers = append(providers, p)
-    }
-    return providers
+    return []cloud.MyGroupProvider{p}, nil
 }
 ```
 

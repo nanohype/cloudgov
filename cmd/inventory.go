@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/cloud"
 	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/inventory"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var inventoryCmd = &cobra.Command{
@@ -26,14 +24,12 @@ Filter by resource type with --type, e.g. --type ec2,s3,lambda`,
 }
 
 var (
-	inventoryProviders  []string
 	inventoryTypes      []string
 	inventoryOutputFmt  string
 	inventoryOutputFile string
 )
 
 func init() {
-	inventoryCmd.Flags().StringSliceVar(&inventoryProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	inventoryCmd.Flags().StringSliceVar(&inventoryTypes, "type", []string{}, "resource types to list (e.g. ec2,s3,lambda); empty = all")
 	inventoryCmd.Flags().StringVar(&inventoryOutputFmt, "output", "table", "output format: table, json")
 	inventoryCmd.Flags().StringVar(&inventoryOutputFile, "output-file", "", "write output to file")
@@ -41,7 +37,7 @@ func init() {
 
 func runInventory(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveInventoryProviders(ctx, inventoryProviders)
+	providers, err := resolveInventoryProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,45 +76,13 @@ func runInventory(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveInventoryProviders(ctx context.Context, names []string) ([]cloud.InventoryProvider, error) {
-	all := buildAllInventoryProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.InventoryProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveInventoryProviders(ctx context.Context) ([]cloud.InventoryProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.InventoryProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.InventoryProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllInventoryProviders(ctx context.Context) []cloud.InventoryProvider {
-	var providers []cloud.InventoryProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.InventoryProvider{p}, nil
 }

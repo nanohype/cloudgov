@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/secrets"
+	"github.com/spf13/cobra"
 )
 
 var secretsCmd = &cobra.Command{
@@ -27,14 +25,12 @@ var secretsScanCmd = &cobra.Command{
 }
 
 var (
-	secretsProviders  []string
 	secretsSeverity   string
 	secretsOutputFmt  string
 	secretsOutputFile string
 )
 
 func init() {
-	secretsScanCmd.Flags().StringSliceVar(&secretsProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	secretsScanCmd.Flags().StringVar(&secretsSeverity, "severity", "LOW", "minimum severity to report")
 	secretsScanCmd.Flags().StringVar(&secretsOutputFmt, "output", "table", "output format: table, json, sarif")
 	secretsScanCmd.Flags().StringVar(&secretsOutputFile, "output-file", "", "write output to file")
@@ -44,7 +40,7 @@ func init() {
 
 func runSecretsScan(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveSecretsProviders(ctx, secretsProviders)
+	providers, err := resolveSecretsProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -80,45 +76,13 @@ func runSecretsScan(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveSecretsProviders(ctx context.Context, names []string) ([]cloud.SecretsProvider, error) {
-	all := buildAllSecretsProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.SecretsProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveSecretsProviders(ctx context.Context) ([]cloud.SecretsProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.SecretsProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.SecretsProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllSecretsProviders(ctx context.Context) []cloud.SecretsProvider {
-	var providers []cloud.SecretsProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.SecretsProvider{p}, nil
 }

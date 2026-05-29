@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"github.com/nanohype/cloudgov/internal/cloud"
 	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/tags"
+	"github.com/spf13/cobra"
 )
 
 var tagsCmd = &cobra.Command{
@@ -22,7 +20,6 @@ var tagsCmd = &cobra.Command{
 }
 
 var (
-	tagsProviders  []string
 	tagsRequired   []string
 	tagsSeverity   string
 	tagsOutputFmt  string
@@ -30,7 +27,6 @@ var (
 )
 
 func init() {
-	tagsCmd.Flags().StringSliceVar(&tagsProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	tagsCmd.Flags().StringSliceVar(&tagsRequired, "require", []string{}, "required tag/label keys (comma-separated, e.g. owner,env,cost-center)")
 	tagsCmd.Flags().StringVar(&tagsSeverity, "severity", "MEDIUM", "minimum severity to report")
 	tagsCmd.Flags().StringVar(&tagsOutputFmt, "output", "table", "output format: table, json")
@@ -43,7 +39,7 @@ func runTags(_ *cobra.Command, _ []string) error {
 	}
 
 	ctx := context.Background()
-	providers, err := resolveTagProviders(ctx, tagsProviders)
+	providers, err := resolveTagProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -78,45 +74,13 @@ func runTags(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveTagProviders(ctx context.Context, names []string) ([]cloud.TagProvider, error) {
-	all := buildAllTagProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.TagProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveTagProviders(ctx context.Context) ([]cloud.TagProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.TagProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.TagProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllTagProviders(ctx context.Context) []cloud.TagProvider {
-	var providers []cloud.TagProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.TagProvider{p}, nil
 }

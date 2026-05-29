@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/cost"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/spf13/cobra"
 )
 
 var costCmd = &cobra.Command{
@@ -27,7 +25,6 @@ var costDiffCmd = &cobra.Command{
 }
 
 var (
-	costProviders  []string
 	costDays       int
 	costOutputFmt  string
 	costOutputFile string
@@ -35,7 +32,6 @@ var (
 )
 
 func init() {
-	costDiffCmd.Flags().StringSliceVar(&costProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	costDiffCmd.Flags().IntVar(&costDays, "days", 30, "compare last N days vs the N days before that")
 	costDiffCmd.Flags().StringVar(&costOutputFmt, "output", "table", "output format: table, json")
 	costDiffCmd.Flags().StringVar(&costOutputFile, "output-file", "", "write output to file")
@@ -46,7 +42,7 @@ func init() {
 
 func runCostDiff(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveCostProviders(ctx, costProviders)
+	providers, err := resolveCostProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -75,45 +71,13 @@ func runCostDiff(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveCostProviders(ctx context.Context, names []string) ([]cloud.CostProvider, error) {
-	all := buildAllCostProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.CostProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveCostProviders(ctx context.Context) ([]cloud.CostProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.CostProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.CostProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllCostProviders(ctx context.Context) []cloud.CostProvider {
-	var providers []cloud.CostProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.CostProvider{p}, nil
 }

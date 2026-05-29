@@ -8,7 +8,7 @@ import (
 
 // TFStateV4 is a minimal representation of Terraform state v4.
 type TFStateV4 struct {
-	Version   int         `json:"version"`
+	Version   int               `json:"version"`
 	Resources []TFStateResource `json:"resources"`
 }
 
@@ -18,7 +18,7 @@ type TFStateResource struct {
 	Type      string            `json:"type"` // "aws_security_group"
 	Name      string            `json:"name"` // "web"
 	Provider  string            `json:"provider"`
-	Instances []TFStateInstance  `json:"instances"`
+	Instances []TFStateInstance `json:"instances"`
 }
 
 // TFStateInstance is a single instance of a resource.
@@ -28,11 +28,11 @@ type TFStateInstance struct {
 
 // ParsedResource holds parsed info for a single Terraform resource instance.
 type ParsedResource struct {
-	Address      string                 // "aws_security_group.web"
-	Type         string                 // "aws_security_group"
-	Provider     string                 // "aws" | "gcp" | "azure"
-	ID           string                 // cloud resource ID from attributes
-	Attributes   map[string]interface{} // full attributes map
+	Address    string                 // "aws_security_group.web"
+	Type       string                 // "aws_security_group"
+	Provider   string                 // "aws"
+	ID         string                 // cloud resource ID from attributes
+	Attributes map[string]interface{} // full attributes map
 }
 
 // ParseTFState reads and parses a Terraform state v4 JSON file.
@@ -76,13 +76,8 @@ func ParseTFStateBytes(data []byte) ([]ParsedResource, error) {
 
 func extractProvider(providerStr, resourceType string) string {
 	// Try to infer from resource type prefix
-	switch {
-	case len(resourceType) > 4 && resourceType[:4] == "aws_":
+	if len(resourceType) > 4 && resourceType[:4] == "aws_" {
 		return "aws"
-	case len(resourceType) > 7 && resourceType[:7] == "google_":
-		return "gcp"
-	case len(resourceType) > 8 && resourceType[:8] == "azurerm_":
-		return "azure"
 	}
 	return providerStr
 }

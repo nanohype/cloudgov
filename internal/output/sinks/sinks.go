@@ -22,7 +22,7 @@ import (
 // it to whatever the target system expects.
 type Digest struct {
 	Source        string // "cloudgov audit" / "cloudgov iam scan"
-	Provider      string // "aws" / "gcp" / "azure" / "multi"
+	Provider      string // "aws"
 	Timestamp     time.Time
 	TotalFindings int
 	Critical      int

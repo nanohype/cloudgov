@@ -18,7 +18,7 @@ type ScanOptions struct {
 	Days            int
 	PrincipalFilter string // empty = all
 	MinSeverity     cloud.Severity
-	Concurrency     int // max parallel goroutines; 0 or negative defaults to 10
+	Concurrency     int                   // max parallel goroutines; 0 or negative defaults to 10
 	Progress        func(done, total int) // called after each principal is scanned; nil = no-op
 }
 
@@ -230,7 +230,7 @@ func normalizeKey(action, resource string) string {
 
 func isAdminAction(action string) bool {
 	return action == "*" || strings.HasSuffix(action, ":*") ||
-		action == "iam:*" || strings.EqualFold(action, "Microsoft.Authorization/*")
+		action == "iam:*"
 }
 
 func isWildcardResource(resource string) bool {

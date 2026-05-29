@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/storage"
+	"github.com/spf13/cobra"
 )
 
 var storageCmd = &cobra.Command{
@@ -27,7 +25,6 @@ var storageAuditCmd = &cobra.Command{
 }
 
 var (
-	storageProviders  []string
 	storageSeverity   string
 	storageOutputFmt  string
 	storageOutputFile string
@@ -36,7 +33,6 @@ var (
 )
 
 func init() {
-	storageAuditCmd.Flags().StringSliceVar(&storageProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	storageAuditCmd.Flags().StringVar(&storageSeverity, "severity", "LOW", "minimum severity to report")
 	storageAuditCmd.Flags().StringVar(&storageOutputFmt, "output", "table", "output format: table, json, sarif")
 	storageAuditCmd.Flags().StringVar(&storageOutputFile, "output-file", "", "write output to file")
@@ -48,7 +44,7 @@ func init() {
 
 func runStorageAudit(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveStorageProviders(ctx, storageProviders)
+	providers, err := resolveStorageProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -96,45 +92,13 @@ func runStorageAudit(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveStorageProviders(ctx context.Context, names []string) ([]cloud.StorageProvider, error) {
-	all := buildAllStorageProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.StorageProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveStorageProviders(ctx context.Context) ([]cloud.StorageProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.StorageProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.StorageProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllStorageProviders(ctx context.Context) []cloud.StorageProvider {
-	var providers []cloud.StorageProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.StorageProvider{p}, nil
 }

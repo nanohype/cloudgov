@@ -6,13 +6,11 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/cobra"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-	cloudazure "github.com/nanohype/cloudgov/internal/cloud/azure"
-	cloudgcp "github.com/nanohype/cloudgov/internal/cloud/gcp"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/quota"
+	"github.com/spf13/cobra"
 )
 
 var quotaCmd = &cobra.Command{
@@ -22,14 +20,12 @@ var quotaCmd = &cobra.Command{
 }
 
 var (
-	quotaProviders  []string
 	quotaThreshold  float64
 	quotaOutputFmt  string
 	quotaOutputFile string
 )
 
 func init() {
-	quotaCmd.Flags().StringSliceVar(&quotaProviders, "provider", []string{}, "cloud providers (aws,gcp,azure); auto-detect if empty")
 	quotaCmd.Flags().Float64Var(&quotaThreshold, "threshold", 0, "minimum utilization percentage to report")
 	quotaCmd.Flags().StringVar(&quotaOutputFmt, "output", "table", "output format: table, json")
 	quotaCmd.Flags().StringVar(&quotaOutputFile, "output-file", "", "write output to file")
@@ -37,7 +33,7 @@ func init() {
 
 func runQuota(_ *cobra.Command, _ []string) error {
 	ctx := context.Background()
-	providers, err := resolveQuotaProviders(ctx, quotaProviders)
+	providers, err := resolveQuotaProviders(ctx)
 	if err != nil {
 		return err
 	}
@@ -77,45 +73,13 @@ func runQuota(_ *cobra.Command, _ []string) error {
 	return nil
 }
 
-func resolveQuotaProviders(ctx context.Context, names []string) ([]cloud.QuotaProvider, error) {
-	all := buildAllQuotaProviders(ctx)
-	if len(names) == 0 {
-		var detected []cloud.QuotaProvider
-		for _, p := range all {
-			if p.Detect(ctx) {
-				detected = append(detected, p)
-			}
-		}
-		if len(detected) == 0 {
-			return nil, fmt.Errorf("no cloud provider credentials detected")
-		}
-		return detected, nil
+func resolveQuotaProviders(ctx context.Context) ([]cloud.QuotaProvider, error) {
+	p, err := cloudaws.New(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("initialize aws: %w", err)
 	}
-	byName := make(map[string]cloud.QuotaProvider)
-	for _, p := range all {
-		byName[p.Name()] = p
+	if !p.Detect(ctx) {
+		return nil, fmt.Errorf("no AWS credentials detected")
 	}
-	var result []cloud.QuotaProvider
-	for _, name := range names {
-		p, ok := byName[strings.ToLower(name)]
-		if !ok {
-			return nil, fmt.Errorf("unknown provider: %s", name)
-		}
-		result = append(result, p)
-	}
-	return result, nil
-}
-
-func buildAllQuotaProviders(ctx context.Context) []cloud.QuotaProvider {
-	var providers []cloud.QuotaProvider
-	if p, err := cloudaws.New(ctx); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudgcp.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	if p, err := cloudazure.New(ctx, ""); err == nil {
-		providers = append(providers, p)
-	}
-	return providers
+	return []cloud.QuotaProvider{p}, nil
 }
