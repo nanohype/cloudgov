@@ -61,4 +61,5 @@ func init() {
 	rootCmd.AddCommand(remediateCmd)
 	rootCmd.AddCommand(lambdaCmd)
 	rootCmd.AddCommand(mcpCmd)
+	rootCmd.AddCommand(platformCmd)
 }

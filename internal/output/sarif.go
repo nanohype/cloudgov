@@ -330,6 +330,50 @@ func driftLevel(s cloud.DriftStatus) string {
 	}
 }
 
+// WritePlatformSARIF writes Platform-tenant conformance findings in SARIF 2.1.0.
+func WritePlatformSARIF(w io.Writer, findings []cloud.PlatformFinding, version string) error {
+	results := make([]sarifResult, 0, len(findings))
+	for _, f := range findings {
+		results = append(results, sarifResult{
+			RuleID:  string(f.Type),
+			Level:   sarifLevel(f.Severity),
+			Message: sarifMessage{Text: f.Platform + ": " + f.Detail},
+			Kind:    "open",
+		})
+	}
+	return encodeSARIF(w, sarifReport(version, buildPlatformRules(), results))
+}
+
+func buildPlatformRules() []sarifRule {
+	types := []struct {
+		id          cloud.PlatformFindingType
+		name, level string
+	}{
+		{cloud.PlatformNamespaceMissing, "NamespaceMissing", "error"},
+		{cloud.PlatformPSSNotRestricted, "PSSNotRestricted", "error"},
+		{cloud.PlatformLabelMissing, "LabelMissing", "note"},
+		{cloud.PlatformQuotaMissing, "ResourceQuotaMissing", "error"},
+		{cloud.PlatformLimitRangeMissing, "LimitRangeMissing", "warning"},
+		{cloud.PlatformNetworkPolicyMissing, "NetworkPolicyMissing", "error"},
+		{cloud.PlatformNetworkPolicyWeak, "NetworkPolicyWeak", "error"},
+		{cloud.PlatformServiceAccountMissing, "ServiceAccountMissing", "error"},
+		{cloud.PlatformIRSAAnnotationMissing, "IRSAAnnotationMissing", "error"},
+		{cloud.PlatformIRSARoleMismatch, "IRSARoleMismatch", "error"},
+		{cloud.PlatformIdentityInvalid, "IdentityInvalid", "warning"},
+		{cloud.PlatformNotReady, "NotReady", "note"},
+	}
+	rules := make([]sarifRule, 0, len(types))
+	for _, t := range types {
+		rules = append(rules, sarifRule{
+			ID:               string(t.id),
+			Name:             t.name,
+			ShortDescription: sarifMessage{Text: t.name},
+			DefaultConfig:    sarifRuleConfig{Level: t.level},
+		})
+	}
+	return rules
+}
+
 func sarifLevel(s cloud.Severity) string {
 	switch s {
 	case cloud.SeverityCritical, cloud.SeverityHigh:

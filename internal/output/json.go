@@ -235,6 +235,16 @@ func CompareFindingJSON(domain, provider, typ, resourceID, detail, severity stri
 	}
 }
 
+type platformReport struct {
+	Findings []cloud.PlatformFinding `json:"findings"`
+	Total    int                     `json:"total"`
+}
+
+// WritePlatform marshals Platform conformance findings as JSON to w.
+func WritePlatform(w io.Writer, findings []cloud.PlatformFinding) error {
+	return writeJSON(w, platformReport{Findings: findings, Total: len(findings)})
+}
+
 func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

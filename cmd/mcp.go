@@ -24,6 +24,7 @@ import (
 	"github.com/nanohype/cloudgov/internal/network"
 	"github.com/nanohype/cloudgov/internal/orphans"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/platform"
 	"github.com/nanohype/cloudgov/internal/quota"
 	"github.com/nanohype/cloudgov/internal/secrets"
 	"github.com/nanohype/cloudgov/internal/storage"
@@ -346,6 +347,20 @@ func registerMCPTools(s *mcp.Server) {
 			}
 			report := compliance.Evaluate(benchmark, input)
 			return jsonResult(func(w io.Writer) error { return output.WriteCompliance(w, report) })
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "platform_audit", Description: "Audit nanohype Platform tenants for conformance to the eks-agent-platform contract: namespace + PSS, ResourceQuota, tenant-egress NetworkPolicy, and tenant-runtime IRSA wiring."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
+			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig)
+			if err != nil {
+				return nil, nil, err
+			}
+			findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic)
+			if err != nil {
+				return nil, nil, err
+			}
+			findings = filterPlatformBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
+			return jsonResult(func(w io.Writer) error { return output.WritePlatform(w, findings) })
 		})
 }
 

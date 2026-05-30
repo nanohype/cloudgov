@@ -39,6 +39,29 @@ func colorSeverity(s cloud.Severity) lipgloss.Style {
 	}
 }
 
+// PlatformFindings renders Platform-tenant conformance findings to w.
+func PlatformFindings(w io.Writer, findings []cloud.PlatformFinding) {
+	if len(findings) == 0 {
+		fmt.Fprintln(w, dimStyle.Render("no platform conformance findings"))
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+		headerStyle.Render("SEVERITY"),
+		headerStyle.Render("PLATFORM"),
+		headerStyle.Render("TYPE"),
+		headerStyle.Render("RESOURCE"),
+		headerStyle.Render("DETAIL"),
+	)
+	for _, f := range findings {
+		sev := colorSeverity(f.Severity).Render(string(f.Severity))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
+			sev, f.Platform, string(f.Type), f.Resource, truncate(f.Detail, 70),
+		)
+	}
+	tw.Flush()
+}
+
 // IAMFindings renders a findings table to w, followed by a severity summary line.
 func IAMFindings(w io.Writer, findings []cloud.Finding, totalPrincipals int) {
 	if len(findings) == 0 {
