@@ -25,6 +25,12 @@ const (
 	PlatformIRSAExtraPolicyMissing PlatformFindingType = "IRSA_EXTRA_POLICY_MISSING"
 	PlatformIRSASuspensionDrift    PlatformFindingType = "IRSA_SUSPENSION_DRIFT"
 	PlatformIRSANoBaseline         PlatformFindingType = "IRSA_NO_BASELINE"
+
+	// Budget + compliance cross-references.
+	PlatformBudgetMissing      PlatformFindingType = "BUDGET_POLICY_MISSING"
+	PlatformKillSwitchDisabled PlatformFindingType = "KILL_SWITCH_DISABLED"
+	PlatformComplianceWeaker   PlatformFindingType = "COMPLIANCE_WEAKER_THAN_TENANT"
+	PlatformTenantMissing      PlatformFindingType = "TENANT_MISSING"
 )
 
 // IAMRoleInfo is the read-only view of an IAM role the platform auditor needs to

@@ -367,6 +367,10 @@ func buildPlatformRules() []sarifRule {
 		{cloud.PlatformIRSAExtraPolicyMissing, "IRSAExtraPolicyMissing", "warning"},
 		{cloud.PlatformIRSASuspensionDrift, "IRSASuspensionDrift", "error"},
 		{cloud.PlatformIRSANoBaseline, "IRSANoBaseline", "error"},
+		{cloud.PlatformBudgetMissing, "BudgetPolicyMissing", "error"},
+		{cloud.PlatformKillSwitchDisabled, "KillSwitchDisabled", "error"},
+		{cloud.PlatformComplianceWeaker, "ComplianceWeakerThanTenant", "error"},
+		{cloud.PlatformTenantMissing, "TenantMissing", "note"},
 	}
 	rules := make([]sarifRule, 0, len(types))
 	for _, t := range types {

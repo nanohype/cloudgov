@@ -20,12 +20,14 @@ import (
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
-// platformGVR is the Platform custom resource (eks-agent-platform operator).
-var platformGVR = schema.GroupVersionResource{
-	Group:    "agents.stxkxs.io",
-	Version:  "v1alpha1",
-	Resource: "platforms",
-}
+// GVRs for the eks-agent-platform custom resources the auditor reads. Platform
+// and Tenant are in the platform.nanohype.dev group; BudgetPolicy is in
+// governance.nanohype.dev. Tenant is cluster-scoped; the others are namespaced.
+var (
+	platformGVR = schema.GroupVersionResource{Group: "platform.nanohype.dev", Version: "v1alpha1", Resource: "platforms"}
+	tenantGVR   = schema.GroupVersionResource{Group: "platform.nanohype.dev", Version: "v1alpha1", Resource: "tenants"}
+	budgetGVR   = schema.GroupVersionResource{Group: "governance.nanohype.dev", Version: "v1alpha1", Resource: "budgetpolicies"}
+)
 
 const (
 	platformLabel  = "eks-agent-platform/platform"
@@ -54,16 +56,16 @@ type RoleReader interface {
 func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles RoleReader) ([]cloud.PlatformFinding, error) {
 	list, err := dyn.Resource(platformGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list Platform CRs (agents.stxkxs.io/v1alpha1): %w", err)
+		return nil, fmt.Errorf("list Platform CRs (platform.nanohype.dev/v1alpha1): %w", err)
 	}
 	var findings []cloud.PlatformFinding
 	for i := range list.Items {
-		findings = append(findings, auditPlatform(ctx, typed, roles, &list.Items[i])...)
+		findings = append(findings, auditPlatform(ctx, typed, dyn, roles, &list.Items[i])...)
 	}
 	return findings, nil
 }
 
-func auditPlatform(ctx context.Context, typed kubernetes.Interface, roles RoleReader, p *unstructured.Unstructured) []cloud.PlatformFinding {
+func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles RoleReader, p *unstructured.Unstructured) []cloud.PlatformFinding {
 	name := p.GetName()
 	tenant, _, _ := unstructured.NestedString(p.Object, "spec", "tenant")
 	persona, _, _ := unstructured.NestedString(p.Object, "spec", "persona")
@@ -86,6 +88,7 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, roles RoleRe
 
 	var out []cloud.PlatformFinding
 	out = append(out, auditIdentity(p, f)...)
+	out = append(out, auditBudgetCompliance(ctx, dyn, p, f)...)
 
 	// Only Ready/Suspended platforms are expected to be fully provisioned. For
 	// the rest, namespace conformance gaps are expected (still provisioning).
@@ -297,4 +300,55 @@ func roleNameFromARN(arn string) string {
 		return full[j+1:]
 	}
 	return full
+}
+
+// auditBudgetCompliance checks the Platform's cross-resource invariants: the
+// referenced BudgetPolicy exists, SOC2 platforms have the kill-switch enabled,
+// and the Platform is at least as strict as its owning Tenant. These are spec
+// consistency checks, so they run regardless of phase.
+func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstructured.Unstructured, f findingFunc) []cloud.PlatformFinding {
+	var out []cloud.PlatformFinding
+	ns := p.GetNamespace()
+	soc2, _, _ := unstructured.NestedBool(p.Object, "spec", "compliance", "soc2")
+	hipaa, _, _ := unstructured.NestedBool(p.Object, "spec", "compliance", "hipaa")
+
+	budgetName, _, _ := unstructured.NestedString(p.Object, "spec", "budget", "name")
+	if budgetName == "" {
+		out = append(out, f(cloud.SeverityMedium, cloud.PlatformBudgetMissing, "",
+			"spec.budget.name is empty; no BudgetPolicy is referenced", "Reference a BudgetPolicy in spec.budget.name."))
+	} else {
+		bp, err := dyn.Resource(budgetGVR).Namespace(ns).Get(ctx, budgetName, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			out = append(out, f(cloud.SeverityHigh, cloud.PlatformBudgetMissing, ns+"/"+budgetName,
+				"spec.budget.name references a BudgetPolicy that does not exist", "Create the referenced BudgetPolicy or fix the reference."))
+		case err == nil && soc2:
+			if killSwitch, _, _ := unstructured.NestedBool(bp.Object, "spec", "killSwitchEnabled"); !killSwitch {
+				out = append(out, f(cloud.SeverityHigh, cloud.PlatformKillSwitchDisabled, ns+"/"+budgetName,
+					"SOC2 platform's BudgetPolicy has killSwitchEnabled=false", "Enable the budget kill-switch; SOC2 requires it."))
+			}
+		}
+	}
+
+	tenantName, _, _ := unstructured.NestedString(p.Object, "spec", "tenant")
+	if tenantName != "" {
+		ten, err := dyn.Resource(tenantGVR).Get(ctx, tenantName, metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			out = append(out, f(cloud.SeverityLow, cloud.PlatformTenantMissing, tenantName,
+				"spec.tenant references a Tenant CR that does not exist", "Create the Tenant CR or fix the reference."))
+		case err == nil:
+			tSOC2, _, _ := unstructured.NestedBool(ten.Object, "spec", "compliance", "soc2")
+			tHIPAA, _, _ := unstructured.NestedBool(ten.Object, "spec", "compliance", "hipaa")
+			if tSOC2 && !soc2 {
+				out = append(out, f(cloud.SeverityHigh, cloud.PlatformComplianceWeaker, tenantName,
+					"Tenant requires soc2 but this Platform does not set compliance.soc2", "A Platform must be at least as strict as its Tenant; set compliance.soc2=true."))
+			}
+			if tHIPAA && !hipaa {
+				out = append(out, f(cloud.SeverityHigh, cloud.PlatformComplianceWeaker, tenantName,
+					"Tenant requires hipaa but this Platform does not set compliance.hipaa", "Set compliance.hipaa=true to match the Tenant baseline."))
+			}
+		}
+	}
+	return out
 }

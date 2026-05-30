@@ -35,6 +35,9 @@ that its deployed state still matches the eks-agent-platform contract:
     ServiceAccount, has no inline policies, carries the declared
     extraPolicyArns, and its suspension tag agrees with status (needs AWS creds)
   - spec.identity declares exactly one of allowedModels / allowedModelFamilies
+  - spec.budget.name resolves to a BudgetPolicy; SOC2 platforms have the
+    budget kill-switch enabled
+  - the Platform's compliance is at least as strict as its owning Tenant
 
 cloudgov only reports — the operator enforces. This catches drift, manual
 tampering, and reconcile gaps. Platforms that are not yet Ready are skipped

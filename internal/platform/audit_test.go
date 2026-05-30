@@ -17,11 +17,13 @@ import (
 )
 
 const (
-	tName = "app1"
-	tNS   = "tenants-app1"
-	tTen  = "acme"
-	tPers = "eng"
-	tRole = "arn:aws:iam::123456789012:role/dev-app1-tenant"
+	tName   = "app1"
+	tNS     = "tenants-app1"
+	tMgmtNS = "eks-agent-platform"
+	tTen    = "acme"
+	tPers   = "eng"
+	tBudget = "tenant-budget"
+	tRole   = "arn:aws:iam::123456789012:role/dev-app1-tenant"
 )
 
 func platformCR(phase string, families []string) *unstructured.Unstructured {
@@ -30,24 +32,60 @@ func platformCR(phase string, families []string) *unstructured.Unstructured {
 		fam[i] = s
 	}
 	return &unstructured.Unstructured{Object: map[string]interface{}{
-		"apiVersion": "agents.stxkxs.io/v1alpha1",
+		"apiVersion": "platform.nanohype.dev/v1alpha1",
 		"kind":       "Platform",
-		"metadata":   map[string]interface{}{"name": tName, "namespace": "eks-agent-platform"},
+		"metadata":   map[string]interface{}{"name": tName, "namespace": tMgmtNS},
 		"spec": map[string]interface{}{
 			"tenant":   tTen,
 			"persona":  tPers,
+			"budget":   map[string]interface{}{"name": tBudget},
 			"identity": map[string]interface{}{"allowedModelFamilies": fam},
 		},
 		"status": map[string]interface{}{"phase": phase, "namespace": tNS, "iamRoleArn": tRole},
 	}}
 }
 
+func platformCRCompliance(soc2, hipaa bool) *unstructured.Unstructured {
+	cr := platformCR("Ready", []string{"anthropic"})
+	_ = unstructured.SetNestedField(cr.Object, soc2, "spec", "compliance", "soc2")
+	_ = unstructured.SetNestedField(cr.Object, hipaa, "spec", "compliance", "hipaa")
+	return cr
+}
+
+func budgetCR(killSwitch bool) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "governance.nanohype.dev/v1alpha1",
+		"kind":       "BudgetPolicy",
+		"metadata":   map[string]interface{}{"name": tBudget, "namespace": tMgmtNS},
+		"spec":       map[string]interface{}{"killSwitchEnabled": killSwitch},
+	}}
+}
+
+func tenantCR(soc2, hipaa bool) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "platform.nanohype.dev/v1alpha1",
+		"kind":       "Tenant",
+		"metadata":   map[string]interface{}{"name": tTen}, // cluster-scoped
+		"spec":       map[string]interface{}{"compliance": map[string]interface{}{"soc2": soc2, "hipaa": hipaa}},
+	}}
+}
+
 func dynClient(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{platformGVR: "PlatformList"},
+		map[schema.GroupVersionResource]string{
+			platformGVR: "PlatformList",
+			budgetGVR:   "BudgetPolicyList",
+			tenantGVR:   "TenantList",
+		},
 		objs...,
 	)
+}
+
+// conformantDyn returns a dynamic client where the Platform, its BudgetPolicy,
+// and its Tenant all satisfy the cross-resource invariants.
+func conformantDyn() *dynamicfake.FakeDynamicClient {
+	return dynClient(platformCR("Ready", []string{"anthropic"}), budgetCR(true), tenantCR(false, false))
 }
 
 func types(findings []cloud.PlatformFinding) map[cloud.PlatformFindingType]bool {
@@ -75,9 +113,27 @@ func conformantObjects() []runtime.Object {
 	}
 }
 
+type fakeRoles struct {
+	info *cloud.IAMRoleInfo
+	err  error
+}
+
+func (f fakeRoles) GetRoleInfo(context.Context, string) (*cloud.IAMRoleInfo, error) {
+	return f.info, f.err
+}
+
+func conformantRole() fakeRoles {
+	return fakeRoles{info: &cloud.IAMRoleInfo{
+		ARN:                 tRole,
+		TrustPolicyDocument: `{"Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:tenants-app1:tenant-runtime"}}}`,
+		Tags:                map[string]string{},
+		AttachedPolicyARNs:  []string{"arn:aws:iam::123456789012:policy/tenant-baseline"},
+	}}
+}
+
 func TestAudit_Conformant(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), nil)
+	findings, err := Audit(context.Background(), typed, conformantDyn(), conformantRole())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +143,7 @@ func TestAudit_Conformant(t *testing.T) {
 }
 
 func TestAudit_DriftDetected(t *testing.T) {
-	// Namespace exists but PSS is wrong; NetworkPolicy and ServiceAccount are absent.
+	// Namespace exists but PSS is wrong; NetworkPolicy and ServiceAccount absent.
 	typed := kubefake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: tNS, Labels: map[string]string{
 			platformLabel: tName, tenantLabel: tTen, personaLabel: tPers,
@@ -95,7 +151,7 @@ func TestAudit_DriftDetected(t *testing.T) {
 		&corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: defaultName, Namespace: tNS}},
 		&corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: defaultName, Namespace: tNS}},
 	)
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), nil)
+	findings, err := Audit(context.Background(), typed, conformantDyn(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,8 +168,8 @@ func TestAudit_DriftDetected(t *testing.T) {
 }
 
 func TestAudit_NamespaceMissing(t *testing.T) {
-	typed := kubefake.NewSimpleClientset() // nothing provisioned
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), nil)
+	typed := kubefake.NewSimpleClientset()
+	findings, err := Audit(context.Background(), typed, conformantDyn(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,8 +179,8 @@ func TestAudit_NamespaceMissing(t *testing.T) {
 }
 
 func TestAudit_NotReadySkipsResourceChecks(t *testing.T) {
-	typed := kubefake.NewSimpleClientset() // nothing provisioned, but phase is Pending
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Pending", []string{"anthropic"})), nil)
+	typed := kubefake.NewSimpleClientset()
+	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Pending", []string{"anthropic"}), budgetCR(true), tenantCR(false, false)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +195,7 @@ func TestAudit_NotReadySkipsResourceChecks(t *testing.T) {
 
 func TestAudit_IdentityInvalid(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	// neither allowedModels nor allowedModelFamilies set
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", nil)), nil)
+	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", nil), budgetCR(true), tenantCR(false, false)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -149,36 +204,26 @@ func TestAudit_IdentityInvalid(t *testing.T) {
 	}
 }
 
-type fakeRoles struct {
-	info *cloud.IAMRoleInfo
-	err  error
-}
-
-func (f fakeRoles) GetRoleInfo(context.Context, string) (*cloud.IAMRoleInfo, error) {
-	return f.info, f.err
-}
-
 func TestAudit_IRSARoleMissing(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), fakeRoles{info: nil})
+	findings, err := Audit(context.Background(), typed, conformantDyn(), fakeRoles{info: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !types(findings)[cloud.PlatformIRSARoleMissing] {
-		t.Fatalf("expected IRSA_ROLE_MISSING when status.iamRoleArn role is absent, got %+v", findings)
+		t.Fatalf("expected IRSA_ROLE_MISSING when the role is absent, got %+v", findings)
 	}
 }
 
 func TestAudit_IRSADrift(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	role := &cloud.IAMRoleInfo{
+	role := fakeRoles{info: &cloud.IAMRoleInfo{
 		ARN:                 tRole,
 		TrustPolicyDocument: `{"Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:other-ns:other-sa"}}}`,
 		Tags:                map[string]string{},
 		InlinePolicyNames:   []string{"legacy-inline"},
-		// no attached managed policies, not suspended -> NoBaseline
-	}
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), fakeRoles{info: role})
+	}}
+	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,19 +239,44 @@ func TestAudit_IRSADrift(t *testing.T) {
 	}
 }
 
-func TestAudit_IRSAConformant(t *testing.T) {
+func TestAudit_BudgetMissing(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	role := &cloud.IAMRoleInfo{
-		ARN:                 tRole,
-		TrustPolicyDocument: `{"Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:tenants-app1:tenant-runtime"}}}`,
-		Tags:                map[string]string{},
-		AttachedPolicyARNs:  []string{"arn:aws:iam::123456789012:policy/tenant-baseline"},
-	}
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), fakeRoles{info: role})
+	// Platform references tBudget and tTen, but no BudgetPolicy/Tenant exist.
+	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(findings) != 0 {
-		t.Fatalf("conformant platform + role should have 0 findings, got %+v", findings)
+	got := types(findings)
+	if !got[cloud.PlatformBudgetMissing] {
+		t.Errorf("expected BUDGET_POLICY_MISSING, got %+v", got)
+	}
+	if !got[cloud.PlatformTenantMissing] {
+		t.Errorf("expected TENANT_MISSING, got %+v", got)
+	}
+}
+
+func TestAudit_KillSwitchDisabled(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	// SOC2 platform whose BudgetPolicy has the kill-switch off; Tenant also SOC2.
+	dyn := dynClient(platformCRCompliance(true, false), budgetCR(false), tenantCR(true, false))
+	findings, err := Audit(context.Background(), typed, dyn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !types(findings)[cloud.PlatformKillSwitchDisabled] {
+		t.Fatalf("expected KILL_SWITCH_DISABLED, got %+v", findings)
+	}
+}
+
+func TestAudit_ComplianceWeakerThanTenant(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	// Tenant requires SOC2; Platform does not set it.
+	dyn := dynClient(platformCRCompliance(false, false), budgetCR(true), tenantCR(true, false))
+	findings, err := Audit(context.Background(), typed, dyn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !types(findings)[cloud.PlatformComplianceWeaker] {
+		t.Fatalf("expected COMPLIANCE_WEAKER_THAN_TENANT, got %+v", findings)
 	}
 }
