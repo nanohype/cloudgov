@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -47,6 +48,33 @@ func New(_ context.Context, kubeconfig string) (*Provider, error) {
 	}
 	p.rbac = &rbacAdapter{clientset: clientset}
 	return p, nil
+}
+
+// Clients bundles a typed clientset and a dynamic client from one cluster
+// connection, for callers that read custom resources (e.g. Platform CRs)
+// alongside core objects.
+type Clients struct {
+	Typed       kubernetes.Interface
+	Dynamic     dynamic.Interface
+	ContextName string
+}
+
+// NewClients resolves cluster config exactly as New does and returns both a
+// typed clientset and a dynamic client.
+func NewClients(_ context.Context, kubeconfig string) (*Clients, error) {
+	config, contextName, err := loadConfig(kubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("load kubeconfig: %w", err)
+	}
+	typed, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("build kubernetes clientset: %w", err)
+	}
+	dyn, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("build dynamic client: %w", err)
+	}
+	return &Clients{Typed: typed, Dynamic: dyn, ContextName: contextName}, nil
 }
 
 // Name returns the provider identifier.

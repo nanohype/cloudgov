@@ -1,7 +1,8 @@
 # cloudgov — agent entry point
 
 AWS security & cost governance CLI. Single static binary, AWS-only, plus a
-Kubernetes RBAC scanner. Five domains: IAM least-privilege, cost, infrastructure
+Kubernetes RBAC scanner and a nanohype Platform-tenant conformance auditor. Five
+domains: IAM least-privilege, cost, infrastructure
 hygiene (orphans, storage, network, certs, tags), security posture (secrets,
 compliance, drift, full audit), and operational visibility (inventory, quotas).
 
@@ -33,6 +34,7 @@ params are optional unless marked **required**.
 | `compliance` | map saved reports to a benchmark | **`benchmark`** (`cis-aws-v3`/`soc2`), `*_report` paths |
 | `k8s_rbac` | over-privileged cluster RBAC | `kubeconfig`, `severity` |
 | `lambda_audit` | Lambda resource-policy exposure | `severity` |
+| `platform_audit` | nanohype Platform-tenant conformance vs the eks-agent-platform contract | `kubeconfig`, `severity` |
 
 Credentials resolve via the standard AWS SDK chain and kubeconfig chain — the
 same as the CLI. The server is read-only; it never mutates cloud or cluster state.
