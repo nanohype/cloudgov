@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	cloudk8s "github.com/nanohype/cloudgov/internal/cloud/k8s"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/platform"
@@ -30,6 +31,9 @@ that its deployed state still matches the eks-agent-platform contract:
   - tenant-egress NetworkPolicy is present, egress-typed, and namespace-wide
   - tenant-runtime ServiceAccount carries the IRSA role-arn annotation that
     matches Platform.status.iamRoleArn
+  - the IAM role behind status.iamRoleArn exists, trusts only the tenant
+    ServiceAccount, has no inline policies, carries the declared
+    extraPolicyArns, and its suspension tag agrees with status (needs AWS creds)
   - spec.identity declares exactly one of allowedModels / allowedModelFamilies
 
 cloudgov only reports — the operator enforces. This catches drift, manual
@@ -62,7 +66,16 @@ func runPlatformAudit(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("connect to kubernetes: %w", err)
 	}
 
-	findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic)
+	// AWS IRSA conformance needs AWS credentials; skip it (with a note) when
+	// they're absent so the k8s-side audit still runs.
+	var roles platform.RoleReader
+	if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
+		roles = awsP
+	} else if !quiet {
+		fmt.Fprintln(os.Stderr, "note: AWS credentials not detected; skipping IRSA role conformance")
+	}
+
+	findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 	if err != nil {
 		return err
 	}

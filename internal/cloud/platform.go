@@ -17,7 +17,25 @@ const (
 	PlatformIRSARoleMismatch      PlatformFindingType = "IRSA_ROLE_MISMATCH"
 	PlatformIdentityInvalid       PlatformFindingType = "IDENTITY_INVALID"
 	PlatformNotReady              PlatformFindingType = "NOT_READY"
+
+	// AWS-side IRSA role conformance.
+	PlatformIRSARoleMissing        PlatformFindingType = "IRSA_ROLE_MISSING"
+	PlatformIRSATrustMismatch      PlatformFindingType = "IRSA_TRUST_MISMATCH"
+	PlatformIRSAInlinePolicy       PlatformFindingType = "IRSA_INLINE_POLICY"
+	PlatformIRSAExtraPolicyMissing PlatformFindingType = "IRSA_EXTRA_POLICY_MISSING"
+	PlatformIRSASuspensionDrift    PlatformFindingType = "IRSA_SUSPENSION_DRIFT"
+	PlatformIRSANoBaseline         PlatformFindingType = "IRSA_NO_BASELINE"
 )
+
+// IAMRoleInfo is the read-only view of an IAM role the platform auditor needs to
+// verify IRSA conformance.
+type IAMRoleInfo struct {
+	ARN                 string
+	TrustPolicyDocument string // URL-decoded JSON
+	Tags                map[string]string
+	AttachedPolicyARNs  []string
+	InlinePolicyNames   []string
+}
 
 // PlatformFinding is a single conformance gap for a Platform tenant — the
 // difference between what the eks-agent-platform contract requires and what is

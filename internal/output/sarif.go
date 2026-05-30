@@ -361,6 +361,12 @@ func buildPlatformRules() []sarifRule {
 		{cloud.PlatformIRSARoleMismatch, "IRSARoleMismatch", "error"},
 		{cloud.PlatformIdentityInvalid, "IdentityInvalid", "warning"},
 		{cloud.PlatformNotReady, "NotReady", "note"},
+		{cloud.PlatformIRSARoleMissing, "IRSARoleMissing", "error"},
+		{cloud.PlatformIRSATrustMismatch, "IRSATrustMismatch", "error"},
+		{cloud.PlatformIRSAInlinePolicy, "IRSAInlinePolicy", "error"},
+		{cloud.PlatformIRSAExtraPolicyMissing, "IRSAExtraPolicyMissing", "warning"},
+		{cloud.PlatformIRSASuspensionDrift, "IRSASuspensionDrift", "error"},
+		{cloud.PlatformIRSANoBaseline, "IRSANoBaseline", "error"},
 	}
 	rules := make([]sarifRule, 0, len(types))
 	for _, t := range types {
