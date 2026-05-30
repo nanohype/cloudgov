@@ -23,7 +23,7 @@ var platformCmd = &cobra.Command{
 var platformAuditCmd = &cobra.Command{
 	Use:   "audit",
 	Short: "Verify live Platform tenants conform to their contract",
-	Long: `Read every Platform CR (agents.stxkxs.io/v1alpha1) in the cluster and check
+	Long: `Read every Platform CR (platform.nanohype.dev/v1alpha1) in the cluster and check
 that its deployed state still matches the eks-agent-platform contract:
 
   - tenant namespace exists with PSS=restricted and ownership labels
