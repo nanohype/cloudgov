@@ -7,6 +7,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -42,21 +43,27 @@ const (
 // namespace context for the platform under audit.
 type findingFunc func(sev cloud.Severity, t cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding
 
+// RoleReader fetches IAM role detail for IRSA conformance checks. The AWS
+// provider implements it; pass nil to skip AWS-side checks (e.g. no credentials).
+type RoleReader interface {
+	GetRoleInfo(ctx context.Context, roleName string) (*cloud.IAMRoleInfo, error)
+}
+
 // Audit lists every Platform CR in the cluster and reports conformance gaps in
 // each tenant's namespace and IRSA wiring. Read-only.
-func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface) ([]cloud.PlatformFinding, error) {
+func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles RoleReader) ([]cloud.PlatformFinding, error) {
 	list, err := dyn.Resource(platformGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list Platform CRs (agents.stxkxs.io/v1alpha1): %w", err)
 	}
 	var findings []cloud.PlatformFinding
 	for i := range list.Items {
-		findings = append(findings, auditPlatform(ctx, typed, &list.Items[i])...)
+		findings = append(findings, auditPlatform(ctx, typed, roles, &list.Items[i])...)
 	}
 	return findings, nil
 }
 
-func auditPlatform(ctx context.Context, typed kubernetes.Interface, p *unstructured.Unstructured) []cloud.PlatformFinding {
+func auditPlatform(ctx context.Context, typed kubernetes.Interface, roles RoleReader, p *unstructured.Unstructured) []cloud.PlatformFinding {
 	name := p.GetName()
 	tenant, _, _ := unstructured.NestedString(p.Object, "spec", "tenant")
 	persona, _, _ := unstructured.NestedString(p.Object, "spec", "persona")
@@ -66,6 +73,9 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, p *unstructu
 		ns = "tenants-" + name
 	}
 	roleArn, _, _ := unstructured.NestedString(p.Object, "status", "iamRoleArn")
+	suspendedAt, _, _ := unstructured.NestedString(p.Object, "status", "suspendedAt")
+	suspended := suspendedAt != ""
+	extras, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "identity", "extraPolicyArns")
 
 	f := func(sev cloud.Severity, t cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding {
 		return cloud.PlatformFinding{
@@ -120,6 +130,9 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, p *unstructu
 
 	out = append(out, auditNetworkPolicy(ctx, typed, ns, f)...)
 	out = append(out, auditServiceAccount(ctx, typed, ns, roleArn, f)...)
+	if roles != nil && roleArn != "" {
+		out = append(out, auditRole(ctx, roles, roleArn, ns, suspended, extras, f)...)
+	}
 	return out
 }
 
@@ -207,4 +220,81 @@ func orUnset(s string) string {
 		return "(unset)"
 	}
 	return s
+}
+
+// auditRole verifies the tenant IRSA role against the contract: it exists, has
+// no inline policies, trusts only the tenant-runtime ServiceAccount, has a
+// suspension tag consistent with Platform.status, and carries the declared
+// extraPolicyArns (plus a baseline when active).
+func auditRole(ctx context.Context, roles RoleReader, roleArn, ns string, suspended bool, extras []string, f findingFunc) []cloud.PlatformFinding {
+	name := roleNameFromARN(roleArn)
+	if name == "" {
+		return nil
+	}
+	info, err := roles.GetRoleInfo(ctx, name)
+	if err != nil {
+		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformNotReady, roleArn, "could not read IAM role: "+err.Error(), "")}
+	}
+	if info == nil {
+		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformIRSARoleMissing, roleArn,
+			"Platform.status.iamRoleArn points to an IAM role that does not exist",
+			"The operator provisions the tenant IRSA role; check the reconcile status.")}
+	}
+
+	var out []cloud.PlatformFinding
+
+	if len(info.InlinePolicyNames) > 0 {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSAInlinePolicy, roleArn,
+			fmt.Sprintf("tenant IRSA role has %d inline policy(ies); the contract uses managed policies only", len(info.InlinePolicyNames)),
+			"Remove inline policies and attach managed policies instead."))
+	}
+
+	wantSub := "system:serviceaccount:" + ns + ":" + saName
+	if !strings.Contains(info.TrustPolicyDocument, wantSub) {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSATrustMismatch, roleArn,
+			"trust policy does not constrain AssumeRoleWithWebIdentity to "+wantSub,
+			"Reconcile the role's OIDC trust policy to the tenant-runtime ServiceAccount subject."))
+	}
+
+	roleSuspended := info.Tags["platform.nanohype.dev/suspended"] == "true"
+	if suspended != roleSuspended {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSASuspensionDrift, roleArn,
+			fmt.Sprintf("suspension mismatch: Platform.status.suspendedAt set=%t but role suspended tag=%t", suspended, roleSuspended),
+			"Reconcile the kill-switch state; the role tag and Platform status must agree."))
+	}
+
+	attached := make(map[string]bool, len(info.AttachedPolicyARNs))
+	for _, a := range info.AttachedPolicyARNs {
+		attached[a] = true
+	}
+	for _, arn := range extras {
+		if arn != "" && !attached[arn] {
+			out = append(out, f(cloud.SeverityMedium, cloud.PlatformIRSAExtraPolicyMissing, roleArn,
+				"declared spec.identity.extraPolicyArns entry is not attached: "+arn,
+				"Attach the declared managed policy, or remove it from the Platform spec."))
+		}
+	}
+
+	if !suspended && len(info.AttachedPolicyARNs) == 0 {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSANoBaseline, roleArn,
+			"role has no managed policies attached; the baseline Bedrock policy is expected on an active tenant",
+			"Verify the operator attached the baseline policy (or that the tenant is intentionally suspended)."))
+	}
+	return out
+}
+
+// roleNameFromARN extracts the IAM role name (the final path segment) from a
+// role ARN, e.g. arn:aws:iam::123:role/eks-agent-platform/tenants/dev-app1-tenant
+// -> dev-app1-tenant.
+func roleNameFromARN(arn string) string {
+	const sep = ":role/"
+	i := strings.Index(arn, sep)
+	if i < 0 {
+		return ""
+	}
+	full := arn[i+len(sep):]
+	if j := strings.LastIndex(full, "/"); j >= 0 {
+		return full[j+1:]
+	}
+	return full
 }

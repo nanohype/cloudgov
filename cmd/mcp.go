@@ -355,7 +355,11 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic)
+			var roles platform.RoleReader
+			if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
+				roles = awsP
+			}
+			findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 			if err != nil {
 				return nil, nil, err
 			}
