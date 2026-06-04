@@ -1,6 +1,9 @@
 package fix
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,7 +52,7 @@ func TestFormatAWSTF(t *testing.T) {
 			wantContains: []string{
 				`resource "aws_iam_policy" "minimal_my_user"`,
 				`name        = "minimal-my-user"`,
-				`jsonencode({})`,
+				`policy      = <<POLICY`,
 			},
 		},
 		{
@@ -62,7 +65,8 @@ func TestFormatAWSTF(t *testing.T) {
 			wantContains: []string{
 				`resource "aws_iam_policy" "minimal_dev_role"`,
 				`name        = "minimal-dev-role"`,
-				`jsonencode({"Version":"2012-10-17","Statement":[]})`,
+				`policy      = <<POLICY`,
+				`"Version": "2012-10-17"`,
 			},
 		},
 		{
@@ -84,5 +88,50 @@ func TestFormatAWSTF(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFormatAWSTF_NoJSONEncodeBug(t *testing.T) {
+	out := formatAWSTF("dev_role", "dev_role", cloud.Policy{
+		Raw: []byte(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject"],"Resource":"arn:aws:s3:::b/*"}]}`),
+	})
+	if strings.Contains(out, "jsonencode(") {
+		t.Errorf("output wraps raw JSON in jsonencode() — invalid HCL:\n%s", out)
+	}
+}
+
+func TestFormatAWSTF_EscapesTemplateMarkers(t *testing.T) {
+	out := formatAWSTF("r", "r", cloud.Policy{
+		Raw: []byte(`{"Statement":[{"Resource":"arn:aws:s3:::b/${aws:username}/*"}]}`),
+	})
+	if !strings.Contains(out, "$${aws:username}") {
+		t.Errorf("policy variable not escaped as $${aws:username}:\n%s", out)
+	}
+	// After removing the escaped markers, no bare ${ may remain — a leftover would
+	// be interpolated by Terraform.
+	if strings.Contains(strings.ReplaceAll(out, "$${", ""), "${") {
+		t.Errorf("found an unescaped ${ in output:\n%s", out)
+	}
+}
+
+// TestFormatAWSTF_ParsesAsHCL proves the generated file is valid HCL: `tofu fmt`
+// parses (and would reformat) it and exits non-zero only on a syntax error.
+// Skipped when tofu isn't installed (e.g. CI without OpenTofu).
+func TestFormatAWSTF_ParsesAsHCL(t *testing.T) {
+	tofu, err := exec.LookPath("tofu")
+	if err != nil {
+		t.Skip("tofu not in PATH; skipping HCL parse proof")
+	}
+	out := formatAWSTF("dev_role", "dev_role", cloud.Policy{
+		// Includes the IAM policy variable ${aws:username}; without escaping, this
+		// is exactly what made the generated HCL fail to parse.
+		Raw: []byte(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:GetObject"],"Resource":"arn:aws:s3:::b/${aws:username}/*"}]}`),
+	})
+	path := filepath.Join(t.TempDir(), "main.tf")
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := exec.Command(tofu, "fmt", path).CombinedOutput(); err != nil {
+		t.Fatalf("generated HCL does not parse under `tofu fmt`: %v\n%s\n---\n%s", err, b, out)
 	}
 }
