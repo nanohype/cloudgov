@@ -9,16 +9,28 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	cwltypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 	"github.com/aws/aws-sdk-go-v2/service/eks"
+	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	ebtypes "github.com/aws/aws-sdk-go-v2/service/eventbridge/types"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
-type mockEKS struct{ clusters []string }
+type mockEKS struct {
+	clusters    []string
+	clusterTags map[string]map[string]string // cluster name -> tags (for tag audits)
+}
 
 func (m mockEKS) ListClusters(_ context.Context, _ *eks.ListClustersInput, _ ...func(*eks.Options)) (*eks.ListClustersOutput, error) {
 	return &eks.ListClustersOutput{Clusters: m.clusters}, nil
+}
+
+func (m mockEKS) DescribeCluster(_ context.Context, in *eks.DescribeClusterInput, _ ...func(*eks.Options)) (*eks.DescribeClusterOutput, error) {
+	name := awssdk.ToString(in.Name)
+	return &eks.DescribeClusterOutput{Cluster: &ekstypes.Cluster{
+		Name: in.Name,
+		Tags: m.clusterTags[name],
+	}}, nil
 }
 
 type mockLogs struct{ groups []string }
@@ -31,10 +43,17 @@ func (m mockLogs) DescribeLogGroups(_ context.Context, _ *cloudwatchlogs.Describ
 	return &cloudwatchlogs.DescribeLogGroupsOutput{LogGroups: lgs}, nil
 }
 
-type mockSQS struct{ urls []string }
+type mockSQS struct {
+	urls      []string
+	queueTags map[string]map[string]string // queue url -> tags (for tag audits)
+}
 
 func (m mockSQS) ListQueues(_ context.Context, _ *sqs.ListQueuesInput, _ ...func(*sqs.Options)) (*sqs.ListQueuesOutput, error) {
 	return &sqs.ListQueuesOutput{QueueUrls: m.urls}, nil
+}
+
+func (m mockSQS) ListQueueTags(_ context.Context, in *sqs.ListQueueTagsInput, _ ...func(*sqs.Options)) (*sqs.ListQueueTagsOutput, error) {
+	return &sqs.ListQueueTagsOutput{Tags: m.queueTags[awssdk.ToString(in.QueueUrl)]}, nil
 }
 
 type ebRule struct {
@@ -78,7 +97,7 @@ func TestOrphanClusterResidue(t *testing.T) {
 		eventbridge: mockEventBridge{rules: []ebRule{
 			{arn: "arn:aws:events:us-west-2:111:rule/KarpenterSpot-1", name: "KarpenterSpot-1", clusterTag: "live", tagged: true}, // live → skip
 			{arn: "arn:aws:events:us-west-2:111:rule/KarpenterSpot-2", name: "KarpenterSpot-2", clusterTag: "dead", tagged: true}, // dead → orphan
-			{arn: "arn:aws:events:us-west-2:111:rule/KarpenterSpot-3", name: "KarpenterSpot-3", tagged: false},                     // untagged → debris orphan
+			{arn: "arn:aws:events:us-west-2:111:rule/KarpenterSpot-3", name: "KarpenterSpot-3", tagged: false},                    // untagged → debris orphan
 		}},
 	}
 
