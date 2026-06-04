@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"fmt"
-	"os"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -69,7 +68,7 @@ func (p *Provider) orphanDisks(ctx context.Context) ([]cloud.OrphanResource, err
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: describe volumes page: %v\n", err)
+			p.warnf("warn: describe volumes page: %v\n", err)
 			break
 		}
 		for _, v := range page.Volumes {
@@ -136,7 +135,7 @@ func (p *Provider) orphanLoadBalancers(ctx context.Context) ([]cloud.OrphanResou
 	for lbPager.HasMorePages() {
 		page, err := lbPager.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: describe load balancers page: %v\n", err)
+			p.warnf("warn: describe load balancers page: %v\n", err)
 			break
 		}
 		for _, lb := range page.LoadBalancers {

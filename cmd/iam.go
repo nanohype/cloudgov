@@ -202,5 +202,5 @@ func runIAMFix(_ *cobra.Command, _ []string) error {
 }
 
 func resolveIAMProviders(ctx context.Context, profile string) ([]cloud.IAMProvider, error) {
-	return providers.Resolve[cloud.IAMProvider](ctx, providers.WithProfile(profile))
+	return providers.Resolve[cloud.IAMProvider](ctx, providers.WithProfile(profile), providers.WithQuiet(quiet))
 }

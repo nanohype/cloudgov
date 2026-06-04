@@ -4,9 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -43,7 +41,7 @@ func (p *Provider) ListPrincipals(ctx context.Context) ([]cloud.Principal, error
 	for rolePager.HasMorePages() {
 		page, err := rolePager.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: list roles page: %v\n", err)
+			p.warnf("warn: list roles page: %v\n", err)
 			break
 		}
 		for _, r := range page.Roles {
@@ -66,7 +64,7 @@ func (p *Provider) ListPrincipals(ctx context.Context) ([]cloud.Principal, error
 	for userPager.HasMorePages() {
 		page, err := userPager.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: list users page: %v\n", err)
+			p.warnf("warn: list users page: %v\n", err)
 			break
 		}
 		for _, u := range page.Users {
@@ -156,7 +154,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 		for attachedPager.HasMorePages() {
 			page, err := attachedPager.NextPage(ctx)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warn: list attached role policies page: %v\n", err)
+				p.warnf("warn: list attached role policies page: %v\n", err)
 				break
 			}
 			for _, ap := range page.AttachedPolicies {
@@ -174,7 +172,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 		for inlinePager.HasMorePages() {
 			page, err := inlinePager.NextPage(ctx)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warn: list role policies page: %v\n", err)
+				p.warnf("warn: list role policies page: %v\n", err)
 				break
 			}
 			for _, policyName := range page.PolicyNames {
@@ -201,7 +199,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 		for attachedPager.HasMorePages() {
 			page, err := attachedPager.NextPage(ctx)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warn: list attached user policies page: %v\n", err)
+				p.warnf("warn: list attached user policies page: %v\n", err)
 				break
 			}
 			for _, ap := range page.AttachedPolicies {
@@ -219,7 +217,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 		for inlinePager.HasMorePages() {
 			page, err := inlinePager.NextPage(ctx)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "warn: list user policies page: %v\n", err)
+				p.warnf("warn: list user policies page: %v\n", err)
 				break
 			}
 			for _, policyName := range page.PolicyNames {
@@ -249,7 +247,7 @@ func (p *Provider) getManagedPolicyPermissions(ctx context.Context, policyArn st
 	if err != nil {
 		var noSuchEntity *iamtypes.NoSuchEntityException
 		if errors.As(err, &noSuchEntity) {
-			fmt.Fprintf(os.Stderr, "warn: policy %s no longer exists, skipping\n", policyArn)
+			p.warnf("warn: policy %s no longer exists, skipping\n", policyArn)
 			return nil, nil
 		}
 		return nil, err
@@ -264,7 +262,7 @@ func (p *Provider) getManagedPolicyPermissions(ctx context.Context, policyArn st
 	if err != nil {
 		var noSuchEntity *iamtypes.NoSuchEntityException
 		if errors.As(err, &noSuchEntity) {
-			fmt.Fprintf(os.Stderr, "warn: policy version for %s no longer exists, skipping\n", policyArn)
+			p.warnf("warn: policy version for %s no longer exists, skipping\n", policyArn)
 			return nil, nil
 		}
 		return nil, err

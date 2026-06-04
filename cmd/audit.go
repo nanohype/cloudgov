@@ -258,7 +258,7 @@ func sortFindingsBySeverity(fs []sinks.Finding) {
 func buildAuditProviders(ctx context.Context) (audit.Providers, error) {
 	// Each available provider contributes to the capabilities it implements, so a
 	// future GCP/Azure provider joins the audit with no change here.
-	all := providers.Default().Available(ctx)
+	all := providers.Default(providers.WithQuiet(quiet)).Available(ctx)
 	if len(all) == 0 {
 		return audit.Providers{}, errors.New("no cloud provider detected")
 	}

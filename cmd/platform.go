@@ -72,7 +72,7 @@ func runPlatformAudit(_ *cobra.Command, _ []string) error {
 	// AWS IRSA conformance needs AWS credentials; skip it (with a note) when
 	// they're absent so the k8s-side audit still runs.
 	var roles platform.RoleReader
-	if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
+	if awsP, aerr := cloudaws.New(ctx, cloudaws.WithQuiet(quiet)); aerr == nil && awsP.Detect(ctx) {
 		roles = awsP
 	} else if !quiet {
 		fmt.Fprintln(os.Stderr, "note: AWS credentials not detected; skipping IRSA role conformance")

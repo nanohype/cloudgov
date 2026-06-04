@@ -111,5 +111,5 @@ func runDrift(_ *cobra.Command, args []string) error {
 }
 
 func resolveDriftProviders(ctx context.Context) ([]cloud.DriftProvider, error) {
-	return providers.Resolve[cloud.DriftProvider](ctx)
+	return providers.Resolve[cloud.DriftProvider](ctx, providers.WithQuiet(quiet))
 }

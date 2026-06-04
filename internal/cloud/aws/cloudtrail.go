@@ -2,8 +2,6 @@ package aws
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -48,7 +46,7 @@ func (p *Provider) cloudtrailUsedPermissions(ctx context.Context, principal clou
 	for pager.HasMorePages() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: cloudtrail lookup page: %v\n", err)
+			p.warnf("warn: cloudtrail lookup page: %v\n", err)
 			break
 		}
 		for _, event := range page.Events {

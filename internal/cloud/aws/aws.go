@@ -2,6 +2,8 @@ package aws
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -49,27 +51,53 @@ type Provider struct {
 	ecs            ecsAPI
 	ssm            ssmAPI
 	cloudformation cloudFormationAPI
+
+	// warnw receives non-fatal pagination/skip warnings. nil means os.Stderr;
+	// WithQuiet sets it to io.Discard so --quiet silences provider-level noise.
+	warnw io.Writer
+}
+
+// Option configures a Provider at construction.
+type Option func(*Provider)
+
+// WithQuiet routes non-fatal provider warnings to io.Discard (used by --quiet).
+func WithQuiet(quiet bool) Option {
+	return func(p *Provider) {
+		if quiet {
+			p.warnw = io.Discard
+		}
+	}
+}
+
+// warnf emits a non-fatal warning to warnw (os.Stderr unless --quiet set it to
+// io.Discard). Use this for paginator/skip warnings instead of os.Stderr directly.
+func (p *Provider) warnf(format string, args ...any) {
+	w := p.warnw
+	if w == nil {
+		w = os.Stderr
+	}
+	fmt.Fprintf(w, format, args...)
 }
 
 // New loads credentials from the default chain and returns a Provider.
-func New(ctx context.Context) (*Provider, error) {
-	return NewWithProfile(ctx, "")
+func New(ctx context.Context, opts ...Option) (*Provider, error) {
+	return NewWithProfile(ctx, "", opts...)
 }
 
 // NewWithProfile loads credentials using the named AWS profile. If profile is empty, the default chain is used.
-func NewWithProfile(ctx context.Context, profile string) (*Provider, error) {
-	opts := []func(*config.LoadOptions) error{
+func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provider, error) {
+	loadOpts := []func(*config.LoadOptions) error{
 		config.WithRetryMaxAttempts(5),
 		config.WithRetryMode(awssdk.RetryModeStandard),
 	}
 	if profile != "" {
-		opts = append(opts, config.WithSharedConfigProfile(profile))
+		loadOpts = append(loadOpts, config.WithSharedConfigProfile(profile))
 	}
-	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	cfg, err := config.LoadDefaultConfig(ctx, loadOpts...)
 	if err != nil {
 		return nil, err
 	}
-	return &Provider{
+	p := &Provider{
 		cfg:          cfg,
 		iam:          iam.NewFromConfig(cfg),
 		cloudtrail:   cloudtrail.NewFromConfig(cfg),
@@ -88,7 +116,11 @@ func NewWithProfile(ctx context.Context, profile string) (*Provider, error) {
 		ecs:            ecs.NewFromConfig(cfg),
 		ssm:            ssm.NewFromConfig(cfg),
 		cloudformation: cloudformation.NewFromConfig(cfg),
-	}, nil
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p, nil
 }
 
 // Name returns the provider identifier.
