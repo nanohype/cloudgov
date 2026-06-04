@@ -76,10 +76,10 @@ func providerScript(provider string, orphans []cloud.OrphanResource) []byte {
 }
 
 // deleteCommand returns the shell command(s) that delete an orphan, or "" if the
-// kind has no known single-command delete path (e.g. snapshots/images, which are
-// detected elsewhere but not reaped here). Identifiers are single-quoted; AWS
+// kind has no known single-command delete path. Identifiers are single-quoted; AWS
 // resource IDs never contain shell metacharacters, but quoting keeps the generated
-// script correct for any input.
+// script correct for any input. Deregistering an AMI leaves its backing snapshots,
+// which a subsequent scan flags as stranded snapshots.
 func deleteCommand(o cloud.OrphanResource) string {
 	if o.ID == "" {
 		return ""
@@ -93,6 +93,10 @@ func deleteCommand(o cloud.OrphanResource) string {
 		return "aws ec2 release-address --allocation-id " + id + region
 	case cloud.OrphanLoadBalancer:
 		return "aws elbv2 delete-load-balancer --load-balancer-arn " + id + region
+	case cloud.OrphanSnapshot:
+		return "aws ec2 delete-snapshot --snapshot-id " + id + region
+	case cloud.OrphanImage:
+		return "aws ec2 deregister-image --image-id " + id + region
 	case cloud.OrphanEKSLogGroup:
 		return "aws logs delete-log-group --log-group-name " + id + region
 	case cloud.OrphanKarpenterQueue:

@@ -60,6 +60,16 @@ func TestDeleteCommand(t *testing.T) {
 			notWant: []string{"--region"},
 		},
 		{
+			name:   "snapshot",
+			orphan: cloud.OrphanResource{Kind: cloud.OrphanSnapshot, ID: "snap-1", Region: "us-west-2"},
+			want:   []string{"aws ec2 delete-snapshot --snapshot-id 'snap-1'", "--region 'us-west-2'"},
+		},
+		{
+			name:   "image deregisters the AMI",
+			orphan: cloud.OrphanResource{Kind: cloud.OrphanImage, ID: "ami-1", Region: "us-west-2"},
+			want:   []string{"aws ec2 deregister-image --image-id 'ami-1'"},
+		},
+		{
 			name:   "empty id has no delete path",
 			orphan: cloud.OrphanResource{Kind: cloud.OrphanDisk, ID: ""},
 			empty:  true,
@@ -70,8 +80,8 @@ func TestDeleteCommand(t *testing.T) {
 			empty:  true,
 		},
 		{
-			name:   "unscanned kind has no delete path",
-			orphan: cloud.OrphanResource{Kind: cloud.OrphanSnapshot, ID: "snap-1"},
+			name:   "unknown kind has no delete path",
+			orphan: cloud.OrphanResource{Kind: cloud.OrphanKind("mystery"), ID: "x-1"},
 			empty:  true,
 		},
 	}
@@ -111,7 +121,7 @@ func TestWriteFixScripts(t *testing.T) {
 	orphans := []cloud.OrphanResource{
 		{Kind: cloud.OrphanDisk, ID: "vol-1", Name: "vol-1", Region: "us-west-2", Provider: "aws", Detail: "available"},
 		{Kind: cloud.OrphanEKSLogGroup, ID: "/aws/eks/dead/cluster", Name: "/aws/eks/dead/cluster", Region: "us-west-2", Provider: "aws"},
-		{Kind: cloud.OrphanSnapshot, ID: "snap-1", Provider: "aws"}, // not deletable → skipped
+		{Kind: cloud.OrphanKind("mystery"), ID: "x-1", Provider: "aws"}, // not deletable → skipped
 	}
 
 	files, err := WriteFixScripts(orphans, dir)
@@ -143,8 +153,8 @@ func TestWriteFixScripts(t *testing.T) {
 			t.Errorf("script missing %q\n---\n%s", must, script)
 		}
 	}
-	if strings.Contains(script, "snap-1") {
-		t.Errorf("non-deletable snapshot leaked into script:\n%s", script)
+	if strings.Contains(script, "x-1") {
+		t.Errorf("non-deletable kind leaked into script:\n%s", script)
 	}
 
 	// Executable bit set.
@@ -189,7 +199,7 @@ func TestWriteFixScriptsNoDeletable(t *testing.T) {
 	dir := t.TempDir()
 	// Only non-deletable kinds → no scripts, no error.
 	files, err := WriteFixScripts([]cloud.OrphanResource{
-		{Kind: cloud.OrphanSnapshot, ID: "snap-1", Provider: "aws"},
+		{Kind: cloud.OrphanKind("mystery"), ID: "x-1", Provider: "aws"},
 	}, dir)
 	if err != nil {
 		t.Fatalf("WriteFixScripts: %v", err)
