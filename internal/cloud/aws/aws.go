@@ -11,15 +11,19 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/acm"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
 	"github.com/aws/aws-sdk-go-v2/service/cloudtrail"
+	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/costexplorer"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
+	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
+	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
@@ -53,6 +57,10 @@ type Provider struct {
 	ssm            ssmAPI
 	cloudformation cloudFormationAPI
 	servicequotas  serviceQuotasAPI
+	eks            eksAPI
+	logs           logsAPI
+	sqs            sqsAPI
+	eventbridge    eventBridgeAPI
 
 	// warnw receives non-fatal pagination/skip warnings. nil means os.Stderr;
 	// WithQuiet sets it to io.Discard so --quiet silences provider-level noise.
@@ -119,6 +127,10 @@ func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provi
 		ssm:            ssm.NewFromConfig(cfg),
 		cloudformation: cloudformation.NewFromConfig(cfg),
 		servicequotas:  servicequotas.NewFromConfig(cfg),
+		eks:            eks.NewFromConfig(cfg),
+		logs:           cloudwatchlogs.NewFromConfig(cfg),
+		sqs:            sqs.NewFromConfig(cfg),
+		eventbridge:    eventbridge.NewFromConfig(cfg),
 	}
 	for _, o := range opts {
 		o(p)

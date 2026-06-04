@@ -220,9 +220,14 @@ Cost increases >10% are shown in red; decreases are shown in green.
 
 ---
 
-### `cloudgov orphans` — unused disks, IPs, and load balancers
+### `cloudgov orphans` — unused disks, IPs, load balancers, and cluster residue
 
-Finds unattached disks, reserved IPs with no instance, and idle load balancers. Reports estimated monthly cost.
+Finds unattached disks, reserved IPs with no instance, and idle load balancers (with
+estimated monthly cost), plus **cluster residue** — resources tied to a now-deleted EKS
+cluster that the cluster's teardown can't reach: the control-plane log group (which blocks
+a same-named re-create) and Karpenter's interruption SQS queue + EventBridge rules. Residue
+is matched against `eks:ListClusters`, so a live cluster's resources are never flagged, and
+it's always reported regardless of `--min-cost` (it's a conflict, not a cost, problem).
 
 ```sh
 # Scan the current AWS account

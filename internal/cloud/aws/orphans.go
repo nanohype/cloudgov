@@ -52,6 +52,10 @@ func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, err
 	}
 	orphans = append(orphans, lbs...)
 
+	// Cluster residue (EKS log groups + Karpenter infra for deleted clusters) is
+	// best-effort: it warns and skips on error rather than failing the whole scan.
+	orphans = append(orphans, p.orphanClusterResidue(ctx)...)
+
 	return orphans, nil
 }
 
