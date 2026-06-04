@@ -95,5 +95,5 @@ func runNetworkAudit(_ *cobra.Command, _ []string) error {
 }
 
 func resolveNetworkProviders(ctx context.Context) ([]cloud.NetworkProvider, error) {
-	return providers.Resolve[cloud.NetworkProvider](ctx)
+	return providers.Resolve[cloud.NetworkProvider](ctx, providers.WithQuiet(quiet))
 }

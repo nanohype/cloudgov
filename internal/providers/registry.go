@@ -77,12 +77,19 @@ type Option func(*options)
 
 type options struct {
 	profile string
+	quiet   bool
 }
 
 // WithProfile selects a named credentials profile for providers that support
 // one (AWS named profiles today).
 func WithProfile(profile string) Option {
 	return func(o *options) { o.profile = profile }
+}
+
+// WithQuiet silences providers' non-fatal warnings (paginator/skip messages),
+// used by the root --quiet flag.
+func WithQuiet(quiet bool) Option {
+	return func(o *options) { o.quiet = quiet }
 }
 
 // Default builds the registry of all built-in providers — the single place a
@@ -93,7 +100,7 @@ func Default(opts ...Option) *Registry {
 		opt(&o)
 	}
 	return NewRegistry(
-		newAWSFactory(o.profile),
+		newAWSFactory(o.profile, o.quiet),
 		// gcp/azure factories — register here once implemented; the capability
 		// interfaces and finding.Provider field already accommodate them.
 	)
@@ -108,21 +115,22 @@ func Resolve[T any](ctx context.Context, opts ...Option) ([]T, error) {
 // awsFactory adapts the AWS provider to the Factory contract.
 type awsFactory struct {
 	profile string
+	quiet   bool
 }
 
 // newAWSFactory builds the AWS factory for the given named profile ("" = the
-// default credential chain).
-func newAWSFactory(profile string) awsFactory {
-	return awsFactory{profile: profile}
+// default credential chain) and quiet setting.
+func newAWSFactory(profile string, quiet bool) awsFactory {
+	return awsFactory{profile: profile, quiet: quiet}
 }
 
 func (f awsFactory) Name() string { return "aws" }
 
 func (f awsFactory) Detect(ctx context.Context) bool {
-	p, err := cloudaws.NewWithProfile(ctx, f.profile)
+	p, err := cloudaws.NewWithProfile(ctx, f.profile, cloudaws.WithQuiet(f.quiet))
 	return err == nil && p.Detect(ctx)
 }
 
 func (f awsFactory) New(ctx context.Context) (cloud.Provider, error) {
-	return cloudaws.NewWithProfile(ctx, f.profile)
+	return cloudaws.NewWithProfile(ctx, f.profile, cloudaws.WithQuiet(f.quiet))
 }

@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -19,35 +18,35 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 
 	iamQuotas, err := p.iamQuotas(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: iam quotas: %v\n", err)
+		p.warnf("warn: iam quotas: %v\n", err)
 	} else {
 		quotas = append(quotas, iamQuotas...)
 	}
 
 	ec2Quotas, err := p.ec2Quotas(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: ec2 quotas: %v\n", err)
+		p.warnf("warn: ec2 quotas: %v\n", err)
 	} else {
 		quotas = append(quotas, ec2Quotas...)
 	}
 
 	s3Quotas, err := p.s3Quotas(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: s3 quotas: %v\n", err)
+		p.warnf("warn: s3 quotas: %v\n", err)
 	} else {
 		quotas = append(quotas, s3Quotas...)
 	}
 
 	lambdaQuotas, err := p.lambdaQuotas(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: lambda quotas: %v\n", err)
+		p.warnf("warn: lambda quotas: %v\n", err)
 	} else {
 		quotas = append(quotas, lambdaQuotas...)
 	}
 
 	rdsQuotas, err := p.rdsQuotas(ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "warn: rds quotas: %v\n", err)
+		p.warnf("warn: rds quotas: %v\n", err)
 	} else {
 		quotas = append(quotas, rdsQuotas...)
 	}
@@ -120,7 +119,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 	for sgPager.HasMorePages() {
 		page, err := sgPager.NextPage(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warn: describe security groups page: %v\n", err)
+			p.warnf("warn: describe security groups page: %v\n", err)
 			break
 		}
 		sgCount += len(page.SecurityGroups)
@@ -184,7 +183,7 @@ func (p *Provider) lambdaQuotas(ctx context.Context) ([]cloud.QuotaUsage, error)
 			for pager.HasMorePages() {
 				page, err := pager.NextPage(ctx)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "warn: list functions page: %v\n", err)
+					p.warnf("warn: list functions page: %v\n", err)
 					break
 				}
 				fnCount += len(page.Functions)

@@ -95,5 +95,5 @@ func runStorageAudit(_ *cobra.Command, _ []string) error {
 }
 
 func resolveStorageProviders(ctx context.Context) ([]cloud.StorageProvider, error) {
-	return providers.Resolve[cloud.StorageProvider](ctx)
+	return providers.Resolve[cloud.StorageProvider](ctx, providers.WithQuiet(quiet))
 }

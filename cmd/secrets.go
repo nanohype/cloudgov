@@ -79,5 +79,5 @@ func runSecretsScan(_ *cobra.Command, _ []string) error {
 }
 
 func resolveSecretsProviders(ctx context.Context) ([]cloud.SecretsProvider, error) {
-	return providers.Resolve[cloud.SecretsProvider](ctx)
+	return providers.Resolve[cloud.SecretsProvider](ctx, providers.WithQuiet(quiet))
 }
