@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/inventory"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -77,12 +77,5 @@ func runInventory(_ *cobra.Command, _ []string) error {
 }
 
 func resolveInventoryProviders(ctx context.Context) ([]cloud.InventoryProvider, error) {
-	p, err := cloudaws.New(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("initialize aws: %w", err)
-	}
-	if !p.Detect(ctx) {
-		return nil, fmt.Errorf("no AWS credentials detected")
-	}
-	return []cloud.InventoryProvider{p}, nil
+	return providers.Resolve[cloud.InventoryProvider](ctx)
 }

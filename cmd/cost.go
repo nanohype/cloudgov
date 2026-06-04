@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/cost"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -72,12 +72,5 @@ func runCostDiff(_ *cobra.Command, _ []string) error {
 }
 
 func resolveCostProviders(ctx context.Context) ([]cloud.CostProvider, error) {
-	p, err := cloudaws.New(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("initialize aws: %w", err)
-	}
-	if !p.Detect(ctx) {
-		return nil, fmt.Errorf("no AWS credentials detected")
-	}
-	return []cloud.CostProvider{p}, nil
+	return providers.Resolve[cloud.CostProvider](ctx)
 }
