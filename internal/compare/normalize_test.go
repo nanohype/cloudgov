@@ -1,6 +1,7 @@
 package compare
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -59,6 +60,11 @@ func TestDetectType(t *testing.T) {
 			name: "quotas report",
 			data: `{"quotas": [{"provider": "aws"}], "total": 1}`,
 			want: ReportTypeQuotas,
+		},
+		{
+			name: "drift report",
+			data: `{"results": [{"resource_type": "aws_security_group", "status": "MODIFIED"}], "total": 1}`,
+			want: ReportTypeDrift,
 		},
 		{
 			name: "unknown report",
@@ -177,6 +183,71 @@ func TestNormalizeReport_Orphans(t *testing.T) {
 	}
 	if f.ResourceID != "vol-123" {
 		t.Errorf("ResourceID = %q, want vol-123", f.ResourceID)
+	}
+}
+
+func TestNormalizeReport_Drift(t *testing.T) {
+	data := []byte(`{
+		"results": [
+			{
+				"resource_type": "aws_security_group",
+				"resource_id": "sg-123",
+				"resource_name": "aws_security_group.web",
+				"provider": "aws",
+				"status": "MODIFIED",
+				"fields": [{"field": "ingress.0.cidr_blocks", "expected": "10.0.0.0/8", "actual": "0.0.0.0/0"}]
+			},
+			{
+				"resource_type": "aws_instance",
+				"resource_id": "i-456",
+				"resource_name": "aws_instance.app",
+				"provider": "aws",
+				"status": "DELETED"
+			},
+			{
+				"resource_type": "aws_s3_bucket",
+				"resource_name": "aws_s3_bucket.data",
+				"provider": "aws",
+				"status": "IN_SYNC"
+			}
+		],
+		"total": 3
+	}`)
+
+	findings, err := NormalizeReport(data)
+	if err != nil {
+		t.Fatalf("NormalizeReport: %v", err)
+	}
+	// IN_SYNC is the absence of drift, not a finding.
+	if len(findings) != 2 {
+		t.Fatalf("got %d findings, want 2 (IN_SYNC excluded)", len(findings))
+	}
+
+	byID := map[string]NormalizedFinding{}
+	for _, f := range findings {
+		if f.Domain != "drift" {
+			t.Errorf("Domain = %q, want drift", f.Domain)
+		}
+		byID[f.ResourceID] = f
+	}
+
+	mod, ok := byID["aws_security_group.web"] // keys on the terraform address
+	if !ok {
+		t.Fatal("MODIFIED finding missing (should key on terraform address)")
+	}
+	if mod.Type != "MODIFIED" || mod.Severity != "MEDIUM" {
+		t.Errorf("modified: Type=%q Severity=%q, want MODIFIED/MEDIUM", mod.Type, mod.Severity)
+	}
+	if !strings.Contains(mod.Detail, "ingress.0.cidr_blocks") {
+		t.Errorf("modified Detail should summarize drifted fields, got %q", mod.Detail)
+	}
+
+	del, ok := byID["aws_instance.app"]
+	if !ok {
+		t.Fatal("DELETED finding missing")
+	}
+	if del.Severity != "HIGH" {
+		t.Errorf("deleted severity = %q, want HIGH", del.Severity)
 	}
 }
 

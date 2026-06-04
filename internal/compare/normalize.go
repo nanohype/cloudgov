@@ -38,6 +38,7 @@ const (
 	ReportTypeTags    ReportType = "tags"
 	ReportTypeSecrets ReportType = "secrets"
 	ReportTypeQuotas  ReportType = "quotas"
+	ReportTypeDrift   ReportType = "drift"
 	ReportTypeUnknown ReportType = "unknown"
 )
 
@@ -75,6 +76,11 @@ func DetectType(data []byte) ReportType {
 	// Quota reports have "quotas"
 	if _, hasQuotas := raw["quotas"]; hasQuotas {
 		return ReportTypeQuotas
+	}
+
+	// Drift reports have "results" (DriftResult list)
+	if _, hasResults := raw["results"]; hasResults {
+		return ReportTypeDrift
 	}
 
 	// Findings-based reports: peek at first finding element
@@ -147,6 +153,8 @@ func NormalizeReport(data []byte) ([]NormalizedFinding, error) {
 		return nil, fmt.Errorf("cost diff reports cannot be compared as findings")
 	case ReportTypeQuotas:
 		return normalizeQuotas(data)
+	case ReportTypeDrift:
+		return normalizeDrift(data)
 	default:
 		return nil, fmt.Errorf("unknown report type")
 	}
@@ -310,6 +318,23 @@ func normalizeQuotas(data []byte) ([]NormalizedFinding, error) {
 	return result, nil
 }
 
+func normalizeDrift(data []byte) ([]NormalizedFinding, error) {
+	var report struct {
+		Results []cloud.DriftResult `json:"results"`
+	}
+	if err := json.Unmarshal(data, &report); err != nil {
+		return nil, fmt.Errorf("parse drift report: %w", err)
+	}
+	var result []NormalizedFinding
+	for _, r := range report.Results {
+		if r.Status == cloud.DriftInSync {
+			continue // an in-sync resource is the absence of drift, not a finding
+		}
+		result = append(result, normalizeDriftResult(r))
+	}
+	return result, nil
+}
+
 func normalizeIAMFinding(f cloud.Finding) NormalizedFinding {
 	resourceID := f.Resource
 	if f.Principal != nil {
@@ -393,4 +418,54 @@ func normalizeSecretFinding(f cloud.SecretFinding) NormalizedFinding {
 		Detail:     f.Detail,
 		Severity:   string(f.Severity),
 	}
+}
+
+func normalizeDriftResult(f cloud.DriftResult) NormalizedFinding {
+	// The Terraform address is the stable logical identity; fall back to the cloud
+	// id when it isn't set.
+	resourceID := f.ResourceName
+	if resourceID == "" {
+		resourceID = f.ResourceID
+	}
+	detail := f.Detail
+	if detail == "" {
+		detail = driftFieldsSummary(f.Fields)
+	}
+	return NormalizedFinding{
+		Domain:     "drift",
+		Provider:   f.Provider,
+		Type:       string(f.Status),
+		ResourceID: resourceID,
+		Detail:     detail,
+		Severity:   string(driftSeverity(f.Status)),
+	}
+}
+
+// driftSeverity ranks a drift status: a resource that vanished from the cloud is
+// more urgent than one whose config drifted, and an un-checkable resource is
+// informational.
+func driftSeverity(s cloud.DriftStatus) cloud.Severity {
+	switch s {
+	case cloud.DriftDeleted:
+		return cloud.SeverityHigh
+	case cloud.DriftModified:
+		return cloud.SeverityMedium
+	case cloud.DriftError:
+		return cloud.SeverityLow
+	default:
+		return cloud.SeverityMedium
+	}
+}
+
+// driftFieldsSummary lists the drifted field names, so two reports whose drift on
+// the same resource differs don't collapse to the same MatchKey.
+func driftFieldsSummary(fields []cloud.DriftField) string {
+	if len(fields) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(fields))
+	for _, f := range fields {
+		names = append(names, f.Field)
+	}
+	return "drifted: " + strings.Join(names, ", ")
 }
