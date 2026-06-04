@@ -17,6 +17,7 @@ import (
 // these; tests pass hand-written mocks. (Each first-used here, per the package rule.)
 type eksAPI interface {
 	ListClusters(ctx context.Context, params *eks.ListClustersInput, optFns ...func(*eks.Options)) (*eks.ListClustersOutput, error)
+	DescribeCluster(ctx context.Context, params *eks.DescribeClusterInput, optFns ...func(*eks.Options)) (*eks.DescribeClusterOutput, error)
 }
 
 type logsAPI interface {
@@ -25,6 +26,7 @@ type logsAPI interface {
 
 type sqsAPI interface {
 	ListQueues(ctx context.Context, params *sqs.ListQueuesInput, optFns ...func(*sqs.Options)) (*sqs.ListQueuesOutput, error)
+	ListQueueTags(ctx context.Context, params *sqs.ListQueueTagsInput, optFns ...func(*sqs.Options)) (*sqs.ListQueueTagsOutput, error)
 }
 
 type eventBridgeAPI interface {

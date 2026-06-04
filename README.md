@@ -98,6 +98,17 @@ Required IAM permissions for a read-only audit role:
         "lambda:GetFunction",
         "lambda:ListTags",
         "lambda:GetAccountSettings",
+        "ecs:ListClusters",
+        "ecs:DescribeClusters",
+        "eks:ListClusters",
+        "eks:DescribeCluster",
+        "dynamodb:ListTables",
+        "dynamodb:DescribeTable",
+        "dynamodb:ListTagsOfResource",
+        "sns:ListTopics",
+        "sns:ListTagsForResource",
+        "sqs:ListQueues",
+        "sqs:ListQueueTags",
         "iam:GetAccountSummary",
         "servicequotas:GetServiceQuota",
         "servicequotas:ListServiceQuotas"
@@ -386,7 +397,7 @@ cloudgov certs --output json --output-file certs.json
 
 ### `cloudgov tags` — missing resource tags/labels
 
-Audits EC2 instances, S3 buckets, RDS databases, and Lambda functions for missing required tags.
+Audits EC2 instances, S3 buckets, RDS databases, Lambda functions, ECS clusters, EKS clusters, DynamoDB tables, SNS topics, and SQS queues for missing required tags.
 
 All findings are **MEDIUM** severity.
 
