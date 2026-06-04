@@ -165,6 +165,23 @@ Goal: get `internal/cloud/{aws,k8s}` from 0% to meaningful coverage by extractin
 - [ ] `internal/cost/*_test.go` — add tests for cost-domain logic.
 - [ ] `.github/workflows/ci.yml` — add `-cover -coverprofile=coverage.out`, add a coverage floor check (start 50%, ratchet up), add `golangci-lint run`.
 
+### section 7 — uplift (production-grade AWS + pluggable multi-cloud seam)
+
+Dependency-ordered. Stay **AWS-only**; keep the seams **pluggable** so a future GCP/Azure
+provider is additive (implement the `cloud` capability interfaces + register a factory). Do
+each item completely; `task build` + `go test ./...` green before marking `[x]`.
+
+- [x] **Provider registry** (`internal/providers`): collapse the per-command `resolveXProviders` + `buildAuditProviders` into one `Factory{Name,Detect,New}` + `Registry` with generic `Resolve[T]`/`Capable[T]`. Adding a cloud becomes "implement + register in `Default`" with no command changes (proven by `registry_test.go`). No global state — `Default()` is a constructor.
+- [ ] **Resolver/flag correctness**: pass the profile in `runIAMFix` (not `""`); thread `--quiet` to providers so paginator stderr respects it; reset the `exitCode`/`failOn` gate globals between `Execute()` calls; keep the registry's provider-agnostic "no cloud provider detected" message.
+- [ ] **Valid-HCL fix generator**: `internal/fix/terraform.go` `formatAWSTF` must emit HCL that `tofu validate` parses (heredoc or a small JSON→HCL-map render, no `hclwrite` dep). Add golden-file tests; raise `internal/fix` coverage.
+- [ ] **Real Service Quotas + honest orphan cost**: `internal/cloud/aws/quota.go` → `servicequotas:GetServiceQuota` with fallback to defaults (S3 bucket count has no quota API — keep fixed); `internal/cloud/aws/orphans.go` → label cost estimates in `Detail` ("est., gp2, <region>"); defer the Pricing API.
+- [ ] **Cluster-residue orphans**: add `OrphanKind`s + `orphanClusterResidue()` (EKS `/aws/eks/<cluster>/cluster` log groups, `Karpenter-<cluster>` SQS, `ClusterName`-tagged EventBridge rules; untagged rule = failed-create debris) keyed on `eks:ListClusters`; fix the `internal/orphans/scanner.go` min-cost filter so ~$0 unowned resources aren't dropped. (Subsumes `eks-fleet/scripts/reap-orphans.sh`.)
+- [ ] **Wire remediate for all remediable domains**: extend `cmd/remediate.go` beyond storage/network (orphans delete, iam, certs, tags, secrets); diff-before-write.
+- [ ] **In-domain gaps**: implement dead `OrphanSnapshot`/`OrphanImage`; add a `DriftResult` case to `compare/normalize.go`; expand `tags` to ECS/EKS/DynamoDB/SNS/SQS; `WriteCertsSARIF` + honor `opts.Days`.
+- [ ] **Honest AWS-only + parity matrix**: align help text + README to AWS-only; add a command×cloud matrix (AWS full, GCP/Azure seam-ready). Actual GCP/Azure impl is a separate future project the registry makes additive.
+- [ ] **Output renderer registry**: `FindingRenderer` so domains self-register (stop editing the two 1000-line `output/{table,json}.go`); move severity into the domain structs (`cloud.QuotaUsage.Severity`).
+- [ ] **Integration tests + CI floors**: cmd→scanner→provider→output tests with fixtures; per-package coverage floors + `golangci-lint` in `ci.yml` (folds in section 6).
+
 ## how to run a single improvement pass (headless)
 
 ```bash

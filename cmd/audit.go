@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -9,9 +10,9 @@ import (
 
 	"github.com/nanohype/cloudgov/internal/audit"
 	"github.com/nanohype/cloudgov/internal/cloud"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/output/sinks"
+	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -255,33 +256,35 @@ func sortFindingsBySeverity(fs []sinks.Finding) {
 }
 
 func buildAuditProviders(ctx context.Context) (audit.Providers, error) {
-	type multiProvider interface {
-		cloud.Provider
-		cloud.IAMProvider
-		cloud.StorageProvider
-		cloud.NetworkProvider
-		cloud.OrphansProvider
-		cloud.CertProvider
-		cloud.TagProvider
-		cloud.SecretsProvider
+	// Each available provider contributes to the capabilities it implements, so a
+	// future GCP/Azure provider joins the audit with no change here.
+	all := providers.Default().Available(ctx)
+	if len(all) == 0 {
+		return audit.Providers{}, errors.New("no cloud provider detected")
 	}
-
-	p, err := cloudaws.New(ctx)
-	if err != nil {
-		return audit.Providers{}, fmt.Errorf("initialize aws: %w", err)
+	var ap audit.Providers
+	for _, p := range all {
+		if c, ok := p.(cloud.IAMProvider); ok {
+			ap.IAM = append(ap.IAM, c)
+		}
+		if c, ok := p.(cloud.StorageProvider); ok {
+			ap.Storage = append(ap.Storage, c)
+		}
+		if c, ok := p.(cloud.NetworkProvider); ok {
+			ap.Network = append(ap.Network, c)
+		}
+		if c, ok := p.(cloud.OrphansProvider); ok {
+			ap.Orphans = append(ap.Orphans, c)
+		}
+		if c, ok := p.(cloud.CertProvider); ok {
+			ap.Certs = append(ap.Certs, c)
+		}
+		if c, ok := p.(cloud.TagProvider); ok {
+			ap.Tags = append(ap.Tags, c)
+		}
+		if c, ok := p.(cloud.SecretsProvider); ok {
+			ap.Secrets = append(ap.Secrets, c)
+		}
 	}
-	if !p.Detect(ctx) {
-		return audit.Providers{}, fmt.Errorf("no AWS credentials detected")
-	}
-	var mp multiProvider = p
-
-	var providers audit.Providers
-	providers.IAM = append(providers.IAM, mp)
-	providers.Storage = append(providers.Storage, mp)
-	providers.Network = append(providers.Network, mp)
-	providers.Orphans = append(providers.Orphans, mp)
-	providers.Certs = append(providers.Certs, mp)
-	providers.Tags = append(providers.Tags, mp)
-	providers.Secrets = append(providers.Secrets, mp)
-	return providers, nil
+	return ap, nil
 }

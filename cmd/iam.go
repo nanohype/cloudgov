@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/fix"
 	"github.com/nanohype/cloudgov/internal/iam"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -199,12 +199,5 @@ func runIAMFix(_ *cobra.Command, _ []string) error {
 }
 
 func resolveIAMProviders(ctx context.Context, profile string) ([]cloud.IAMProvider, error) {
-	p, err := cloudaws.NewWithProfile(ctx, profile)
-	if err != nil {
-		return nil, fmt.Errorf("initialize aws: %w", err)
-	}
-	if !p.Detect(ctx) {
-		return nil, fmt.Errorf("no AWS credentials detected; set AWS_PROFILE or use --profile")
-	}
-	return []cloud.IAMProvider{p}, nil
+	return providers.Resolve[cloud.IAMProvider](ctx, providers.WithProfile(profile))
 }

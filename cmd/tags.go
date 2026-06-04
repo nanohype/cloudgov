@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/nanohype/cloudgov/internal/tags"
 	"github.com/spf13/cobra"
 )
@@ -77,12 +77,5 @@ func runTags(_ *cobra.Command, _ []string) error {
 }
 
 func resolveTagProviders(ctx context.Context) ([]cloud.TagProvider, error) {
-	p, err := cloudaws.New(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("initialize aws: %w", err)
-	}
-	if !p.Detect(ctx) {
-		return nil, fmt.Errorf("no AWS credentials detected")
-	}
-	return []cloud.TagProvider{p}, nil
+	return providers.Resolve[cloud.TagProvider](ctx)
 }
