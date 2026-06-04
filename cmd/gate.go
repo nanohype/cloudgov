@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/spf13/cobra"
 )
 
 // exitCode is the process exit status returned by Execute. 0 means clean (or
@@ -38,5 +39,20 @@ func gate[T any](items []T, sev func(T) cloud.Severity) {
 func gateBool(cond bool) {
 	if failOn != "" && cond {
 		exitCode = 2
+	}
+}
+
+// resetRunState clears run-scoped state so the command tree is safe to drive
+// repeatedly in one process (the MCP server and agent loops re-run commands
+// without a fresh os.Exit). The exit code always resets; the persistent flag
+// vars reset only when the flag wasn't passed this run, so an explicit
+// --fail-on / --quiet still wins and an omitted one can't leak from a prior run.
+func resetRunState(cmd *cobra.Command) {
+	exitCode = 0
+	if !cmd.Flags().Changed("fail-on") {
+		failOn = ""
+	}
+	if !cmd.Flags().Changed("quiet") {
+		quiet = false
 	}
 }
