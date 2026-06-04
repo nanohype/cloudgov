@@ -22,7 +22,10 @@ func Scan(ctx context.Context, providers []cloud.OrphansProvider, opts ScanOptio
 			return nil, fmt.Errorf("%s: %w", provider.Name(), err)
 		}
 		for _, o := range orphans {
-			if o.MonthlyCost >= opts.MinMonthlyCost {
+			// Cluster residue is always reported: it's a conflict/correctness
+			// problem (a stale resource blocking re-creation), so its ~$0 cost
+			// must not let --min-cost hide it.
+			if o.Kind.AlwaysReport() || o.MonthlyCost >= opts.MinMonthlyCost {
 				all = append(all, o)
 			}
 		}
