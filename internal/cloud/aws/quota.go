@@ -4,13 +4,39 @@ import (
 	"context"
 	"fmt"
 
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
+
+// serviceQuotasAPI is the narrow Service Quotas surface used by this package.
+type serviceQuotasAPI interface {
+	GetServiceQuota(ctx context.Context, params *servicequotas.GetServiceQuotaInput, optFns ...func(*servicequotas.Options)) (*servicequotas.GetServiceQuotaOutput, error)
+}
+
+// quotaLimit returns the account's APPLIED limit for (serviceCode, quotaCode),
+// falling back to the documented default when Service Quotas has no value or the
+// call fails (the quota may be untracked in this region, or access denied). This
+// keeps the limit accurate for accounts that raised it, instead of reporting a
+// false near-limit against a stale hardcoded default.
+func (p *Provider) quotaLimit(ctx context.Context, serviceCode, quotaCode string, fallback float64) float64 {
+	if p.servicequotas == nil {
+		return fallback
+	}
+	out, err := p.servicequotas.GetServiceQuota(ctx, &servicequotas.GetServiceQuotaInput{
+		ServiceCode: awssdk.String(serviceCode),
+		QuotaCode:   awssdk.String(quotaCode),
+	})
+	if err != nil || out.Quota == nil || out.Quota.Value == nil {
+		return fallback
+	}
+	return *out.Quota.Value
+}
 
 // ListQuotas returns service quota utilization for IAM, EC2, S3, Lambda, and RDS.
 func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
@@ -101,9 +127,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		return nil, fmt.Errorf("describe addresses: %w", err)
 	}
 	eipUsed := float64(len(addrOut.Addresses))
-
-	// Default EIP limit is 5 per region
-	eipLimit := float64(5)
+	eipLimit := p.quotaLimit(ctx, "ec2", "L-0263D0A3", 5)
 
 	// VPCs
 	vpcOut, err := p.ec2.DescribeVpcs(ctx, &ec2.DescribeVpcsInput{})
@@ -111,7 +135,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		return nil, fmt.Errorf("describe vpcs: %w", err)
 	}
 	vpcUsed := float64(len(vpcOut.Vpcs))
-	vpcLimit := float64(5) // Default
+	vpcLimit := p.quotaLimit(ctx, "vpc", "L-F678F1CE", 5)
 
 	// Security Groups
 	var sgCount int
@@ -125,7 +149,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		sgCount += len(page.SecurityGroups)
 	}
 	sgUsed := float64(sgCount)
-	sgLimit := float64(2500) // Default per region
+	sgLimit := p.quotaLimit(ctx, "vpc", "L-E79EC296", 2500)
 
 	// Internet Gateways
 	igwOut, err := p.ec2.DescribeInternetGateways(ctx, &ec2.DescribeInternetGatewaysInput{})
@@ -133,7 +157,7 @@ func (p *Provider) ec2Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		return nil, fmt.Errorf("describe internet gateways: %w", err)
 	}
 	igwUsed := float64(len(igwOut.InternetGateways))
-	igwLimit := float64(5) // Default per region
+	igwLimit := p.quotaLimit(ctx, "vpc", "L-A4707A72", 5)
 
 	region := p.cfg.Region
 	quotas := []cloud.QuotaUsage{
@@ -151,7 +175,7 @@ func (p *Provider) s3Quotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		return nil, fmt.Errorf("list buckets: %w", err)
 	}
 	used := float64(len(out.Buckets))
-	limit := float64(100) // Default S3 bucket limit per account
+	limit := p.quotaLimit(ctx, "s3", "L-DC2B2D3D", 100)
 
 	return []cloud.QuotaUsage{{
 		Provider:    "aws",
@@ -231,7 +255,7 @@ func (p *Provider) rdsQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 	}
 
 	used := float64(count)
-	limit := float64(40) // Default RDS instance limit per region
+	limit := p.quotaLimit(ctx, "rds", "L-7B6409FD", 40)
 
 	return []cloud.QuotaUsage{{
 		Provider:    "aws",

@@ -86,7 +86,7 @@ func (p *Provider) orphanDisks(ctx context.Context) ([]cloud.OrphanResource, err
 				Region:      p.cfg.Region,
 				Provider:    "aws",
 				MonthlyCost: cost,
-				Detail:      fmt.Sprintf("%d GiB %s, state: available", sizeGB, v.VolumeType),
+				Detail:      fmt.Sprintf("%d GiB %s, available; est. ~$%.2f/mo (gp2 on-demand list price, not billed actuals)", sizeGB, v.VolumeType, cost),
 			})
 		}
 	}
@@ -121,7 +121,7 @@ func (p *Provider) orphanIPs(ctx context.Context) ([]cloud.OrphanResource, error
 			Region:      p.cfg.Region,
 			Provider:    "aws",
 			MonthlyCost: 3.65, // ~$0.005/hr for unassociated EIPs
-			Detail:      fmt.Sprintf("EIP %s is unassociated", awssdk.ToString(addr.PublicIp)),
+			Detail:      fmt.Sprintf("EIP %s unassociated; est. ~$3.65/mo (~$0.005/hr unassociated rate)", awssdk.ToString(addr.PublicIp)),
 		})
 	}
 	return orphans, nil
@@ -153,7 +153,7 @@ func (p *Provider) orphanLoadBalancers(ctx context.Context) ([]cloud.OrphanResou
 				Region:      p.cfg.Region,
 				Provider:    "aws",
 				MonthlyCost: 16.43, // ~$0.022/hr base ALB charge
-				Detail:      fmt.Sprintf("%s has no registered targets", lb.Type),
+				Detail:      fmt.Sprintf("%s has no registered targets; est. ~$16.43/mo base (~$0.022/hr on-demand)", lb.Type),
 			})
 		}
 	}
