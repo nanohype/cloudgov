@@ -20,6 +20,13 @@ type mockEC2 struct {
 	addressesErr  error
 	volumesCalls  int
 	addressesCall int
+
+	snapshotPages [][]ec2types.Snapshot
+	snapshotsErr  error
+	snapshotCalls int
+	imagesOut     []ec2types.Image
+	imagesErr     error
+	instancesOut  []ec2types.Reservation
 }
 
 func (m *mockEC2) DescribeVolumes(_ context.Context, _ *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
@@ -56,7 +63,30 @@ func (m *mockEC2) DescribeSecurityGroups(_ context.Context, _ *ec2.DescribeSecur
 }
 
 func (m *mockEC2) DescribeInstances(_ context.Context, _ *ec2.DescribeInstancesInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstancesOutput, error) {
-	return &ec2.DescribeInstancesOutput{}, nil
+	return &ec2.DescribeInstancesOutput{Reservations: m.instancesOut}, nil
+}
+
+func (m *mockEC2) DescribeSnapshots(_ context.Context, _ *ec2.DescribeSnapshotsInput, _ ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error) {
+	if m.snapshotsErr != nil {
+		return nil, m.snapshotsErr
+	}
+	idx := m.snapshotCalls
+	m.snapshotCalls++
+	if idx >= len(m.snapshotPages) {
+		return &ec2.DescribeSnapshotsOutput{}, nil
+	}
+	var token *string
+	if idx+1 < len(m.snapshotPages) {
+		token = awssdk.String("next")
+	}
+	return &ec2.DescribeSnapshotsOutput{Snapshots: m.snapshotPages[idx], NextToken: token}, nil
+}
+
+func (m *mockEC2) DescribeImages(_ context.Context, _ *ec2.DescribeImagesInput, _ ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error) {
+	if m.imagesErr != nil {
+		return nil, m.imagesErr
+	}
+	return &ec2.DescribeImagesOutput{Images: m.imagesOut}, nil
 }
 
 func (m *mockEC2) DescribeInstanceAttribute(_ context.Context, _ *ec2.DescribeInstanceAttributeInput, _ ...func(*ec2.Options)) (*ec2.DescribeInstanceAttributeOutput, error) {
