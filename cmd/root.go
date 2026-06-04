@@ -26,6 +26,11 @@ storage, network, certs, tags), security posture (secrets, compliance,
 drift, full audit), and operational visibility (inventory, quotas,
 baselines, diffs, reports).`,
 	SilenceUsage: true,
+	// Reset run-scoped state before every command so the tree is safe to drive
+	// repeatedly in one process (MCP server / agent loops).
+	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+		resetRunState(cmd)
+	},
 }
 
 // Execute runs the root command.

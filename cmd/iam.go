@@ -44,6 +44,7 @@ var (
 	iamFixFormat   string
 	iamFixOut      string
 	iamFixSeverity string
+	iamFixProfile  string
 )
 
 func init() {
@@ -59,6 +60,7 @@ func init() {
 	iamFixCmd.Flags().StringVar(&iamFixFormat, "format", "terraform", "fix format: terraform, json")
 	iamFixCmd.Flags().StringVar(&iamFixOut, "out", "./cloudgov-fixes", "output directory")
 	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", "minimum severity to generate fixes for")
+	iamFixCmd.Flags().StringVar(&iamFixProfile, "profile", "", "AWS named profile to use for credentials (match the profile used for the scan)")
 	_ = iamFixCmd.MarkFlagRequired("from")
 
 	iamCmd.AddCommand(iamScanCmd, iamFixCmd)
@@ -148,8 +150,9 @@ func runIAMFix(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("parse report: %w", err)
 	}
 
-	// Build minimal policies for each unique principal
-	providers, err := resolveIAMProviders(ctx, "")
+	// Build minimal policies for each unique principal, against the same account
+	// the scan ran in (--profile, matching `iam scan`).
+	providers, err := resolveIAMProviders(ctx, iamFixProfile)
 	if err != nil {
 		return err
 	}
