@@ -248,6 +248,10 @@ cloudgov orphans --output json
 
 The table includes a TOTAL row summing all monthly costs.
 
+> Costs are **estimates** from on-demand list prices (e.g. ~$0.10/GB-month for gp2
+> EBS), not your billed actuals — they ignore volume type, region, and discounts.
+> Use them to rank waste, not to reconcile a bill; see AWS Cost Explorer for actuals.
+
 ---
 
 ### `cloudgov storage audit` — public buckets and encryption gaps

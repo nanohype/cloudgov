@@ -12,6 +12,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
+	sqtypes "github.com/aws/aws-sdk-go-v2/service/servicequotas/types"
 )
 
 type quotaMockEC2 struct {
@@ -211,5 +213,42 @@ func TestListQuotas_AggregatesAll(t *testing.T) {
 	// IAM(1) + EC2(4) + S3(1) + Lambda(2) + RDS(1) = 9
 	if len(got) != 9 {
 		t.Errorf("expected 9 quotas, got %d", len(got))
+	}
+}
+
+type mockServiceQuotas struct {
+	value *float64
+	err   error
+}
+
+func (m mockServiceQuotas) GetServiceQuota(_ context.Context, _ *servicequotas.GetServiceQuotaInput, _ ...func(*servicequotas.Options)) (*servicequotas.GetServiceQuotaOutput, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &servicequotas.GetServiceQuotaOutput{Quota: &sqtypes.ServiceQuota{Value: m.value}}, nil
+}
+
+func TestQuotaLimit_UsesAppliedValue(t *testing.T) {
+	p := &Provider{servicequotas: mockServiceQuotas{value: awssdk.Float64(200)}}
+	if got := p.quotaLimit(context.Background(), "ec2", "L-0263D0A3", 5); got != 200 {
+		t.Errorf("quotaLimit = %v, want 200 (the applied quota, not the default)", got)
+	}
+}
+
+func TestQuotaLimit_FallsBackOnError(t *testing.T) {
+	p := &Provider{servicequotas: mockServiceQuotas{err: errors.New("AccessDenied")}}
+	if got := p.quotaLimit(context.Background(), "ec2", "L-0263D0A3", 5); got != 5 {
+		t.Errorf("quotaLimit = %v, want fallback 5", got)
+	}
+}
+
+func TestQuotaLimit_FallsBackOnNilValueOrClient(t *testing.T) {
+	p := &Provider{servicequotas: mockServiceQuotas{value: nil}}
+	if got := p.quotaLimit(context.Background(), "s3", "L-DC2B2D3D", 100); got != 100 {
+		t.Errorf("quotaLimit (nil value) = %v, want fallback 100", got)
+	}
+	// nil client (e.g. a Provider built in a test without servicequotas) falls back too.
+	if got := (&Provider{}).quotaLimit(context.Background(), "rds", "L-7B6409FD", 40); got != 40 {
+		t.Errorf("quotaLimit (nil client) = %v, want fallback 40", got)
 	}
 }

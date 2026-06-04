@@ -19,6 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
@@ -51,6 +52,7 @@ type Provider struct {
 	ecs            ecsAPI
 	ssm            ssmAPI
 	cloudformation cloudFormationAPI
+	servicequotas  serviceQuotasAPI
 
 	// warnw receives non-fatal pagination/skip warnings. nil means os.Stderr;
 	// WithQuiet sets it to io.Discard so --quiet silences provider-level noise.
@@ -116,6 +118,7 @@ func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provi
 		ecs:            ecs.NewFromConfig(cfg),
 		ssm:            ssm.NewFromConfig(cfg),
 		cloudformation: cloudformation.NewFromConfig(cfg),
+		servicequotas:  servicequotas.NewFromConfig(cfg),
 	}
 	for _, o := range opts {
 		o(p)
