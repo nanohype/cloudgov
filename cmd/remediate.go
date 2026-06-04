@@ -10,6 +10,7 @@ import (
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/network"
+	orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
 	"github.com/nanohype/cloudgov/internal/storage"
 )
 
@@ -24,8 +25,15 @@ review, or apply a subset.
 The expected JSON shape is whatever the corresponding scan emits via
 "--output json", e.g. ` + "`cloudgov storage audit --output json --output-file storage.json`" + `.
 
-Supported report types: storage, network. Each finding in the report must carry
-a Remediation string (cloudgov scans populate this by default).`,
+Supported report types:
+  - storage, network — each finding carries a runnable Remediation command
+    (cloudgov scans populate this by default), filtered by --severity.
+  - orphans — DELETE scripts are synthesized from each resource's kind+id
+    (` + "`cloudgov orphans --output json`" + `). The emitted commands are destructive and
+    irreversible, so review them before running. --severity does not apply.
+
+iam findings remediate via ` + "`cloudgov iam fix`" + ` (Terraform); secrets/certs/tags
+carry advisory (non-runnable) guidance surfaced in their own audit output.`,
 	RunE: runRemediate,
 }
 
@@ -37,7 +45,7 @@ var (
 )
 
 func init() {
-	remediateCmd.Flags().StringVar(&remediateType, "type", "", "report type: storage or network (required)")
+	remediateCmd.Flags().StringVar(&remediateType, "type", "", "report type: storage, network, or orphans (required)")
 	remediateCmd.Flags().StringVar(&remediateFrom, "from", "", "path to JSON scan report (required)")
 	remediateCmd.Flags().StringVar(&remediateOutDir, "out", ".", "directory to write fix scripts")
 	remediateCmd.Flags().StringVar(&remediateMinSev, "severity", "LOW", "minimum severity to include in fix scripts")
@@ -78,8 +86,20 @@ func runRemediate(_ *cobra.Command, _ []string) error {
 		}
 		announceFiles(files, len(findings))
 		return nil
+	case "orphans":
+		orphans, err := unmarshalOrphansReport(data)
+		if err != nil {
+			return err
+		}
+		// Orphan resources have no severity; --severity does not apply.
+		files, err := orphanscanner.WriteFixScripts(orphans, remediateOutDir)
+		if err != nil {
+			return fmt.Errorf("write fix scripts: %w", err)
+		}
+		announceFiles(files, len(orphans))
+		return nil
 	default:
-		return fmt.Errorf("unsupported report type %q (want: storage, network)", remediateType)
+		return fmt.Errorf("unsupported report type %q (want: storage, network, orphans)", remediateType)
 	}
 }
 
@@ -91,6 +111,12 @@ type storageEnvelope struct {
 
 type networkEnvelope struct {
 	Findings []cloud.NetworkFinding `json:"findings"`
+}
+
+// orphansEnvelope matches the JSON output of "cloudgov orphans --output json",
+// which wraps the resources under a "resources" key (not "findings").
+type orphansEnvelope struct {
+	Resources []cloud.OrphanResource `json:"resources"`
 }
 
 func unmarshalStorageReport(data []byte) ([]cloud.BucketFinding, error) {
@@ -120,6 +146,20 @@ func unmarshalNetworkReport(data []byte) ([]cloud.NetworkFinding, error) {
 		}
 	}
 	return env.Findings, nil
+}
+
+func unmarshalOrphansReport(data []byte) ([]cloud.OrphanResource, error) {
+	var env orphansEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return nil, fmt.Errorf("parse orphans report: %w", err)
+	}
+	if len(env.Resources) == 0 {
+		var bare []cloud.OrphanResource
+		if err := json.Unmarshal(data, &bare); err == nil && len(bare) > 0 {
+			return bare, nil
+		}
+	}
+	return env.Resources, nil
 }
 
 func filterStorageBySeverity(in []cloud.BucketFinding, min cloud.Severity) []cloud.BucketFinding {
