@@ -329,7 +329,7 @@ func buildQuotasReport(data []byte, td *TemplateData) (*TemplateData, error) {
 	td.ByDomain["quotas"] = report.Total
 
 	for _, q := range report.Quotas {
-		switch cloud.QuotaSeverity(q.Utilization) {
+		switch q.EffectiveSeverity() {
 		case cloud.SeverityCritical:
 			td.Critical++
 		case cloud.SeverityHigh:

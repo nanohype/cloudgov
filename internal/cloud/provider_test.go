@@ -2,6 +2,29 @@ package cloud
 
 import "testing"
 
+func TestQuotaEffectiveSeverity(t *testing.T) {
+	// Stored Severity wins, even when it disagrees with Utilization.
+	stored := QuotaUsage{Utilization: 10, Severity: SeverityCritical}
+	if got := stored.EffectiveSeverity(); got != SeverityCritical {
+		t.Errorf("stored: got %q, want CRITICAL", got)
+	}
+	// Unset Severity falls back to computing from Utilization.
+	for _, tc := range []struct {
+		util float64
+		want Severity
+	}{
+		{95, SeverityCritical},
+		{85, SeverityHigh},
+		{60, SeverityMedium},
+		{10, SeverityLow},
+	} {
+		q := QuotaUsage{Utilization: tc.util}
+		if got := q.EffectiveSeverity(); got != tc.want {
+			t.Errorf("util %.0f: got %q, want %q", tc.util, got, tc.want)
+		}
+	}
+}
+
 func TestSeverityRank(t *testing.T) {
 	tests := []struct {
 		sev  Severity

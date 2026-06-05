@@ -312,7 +312,7 @@ func normalizeQuotas(data []byte) ([]NormalizedFinding, error) {
 			Type:       q.Service,
 			ResourceID: q.QuotaName,
 			Detail:     fmt.Sprintf("%.0f/%.0f (%.1f%%)", q.Used, q.Limit, q.Utilization),
-			Severity:   string(cloud.QuotaSeverity(q.Utilization)),
+			Severity:   string(q.EffectiveSeverity()),
 		})
 	}
 	return result, nil
