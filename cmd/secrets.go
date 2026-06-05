@@ -15,12 +15,12 @@ import (
 
 var secretsCmd = &cobra.Command{
 	Use:   "secrets",
-	Short: "Scan cloud resources for leaked credentials",
+	Short: "Scan AWS resources for leaked credentials",
 }
 
 var secretsScanCmd = &cobra.Command{
 	Use:   "scan",
-	Short: "Scan Lambda env, ECS task defs, EC2 user data, Cloud Functions, App Service settings for secrets",
+	Short: "Scan AWS Lambda env, ECS task defs, EC2 user data, SSM params, and CloudFormation outputs for secrets",
 	RunE:  runSecretsScan,
 }
 

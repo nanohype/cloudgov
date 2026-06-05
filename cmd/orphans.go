@@ -15,7 +15,7 @@ import (
 
 var orphansCmd = &cobra.Command{
 	Use:   "orphans",
-	Short: "Find unused cloud resources wasting money",
+	Short: "Find unused AWS resources wasting money",
 	RunE:  runOrphans,
 }
 

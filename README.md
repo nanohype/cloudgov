@@ -9,6 +9,45 @@ Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecu
 
 ---
 
+## Cloud support
+
+cloudgov is **AWS-native today**. Every domain is implemented against AWS, and a
+Kubernetes RBAC scanner covers the cluster side. The architecture is
+provider-pluggable — each domain is a capability interface (`cloud.IAMProvider`,
+`cloud.StorageProvider`, …) resolved through a provider registry — so adding GCP or
+Azure is *additive*: implement the interface for a domain and register a factory, with
+no command changes. Those providers are **not implemented yet**.
+
+| Domain (command) | AWS | GCP | Azure | Kubernetes |
+|------------------|:---:|:---:|:-----:|:----------:|
+| IAM (`iam scan` / `iam fix`) | ✅ | ⬡ | ⬡ | — |
+| Cost (`cost diff`) | ✅ | ⬡ | ⬡ | — |
+| Orphans (`orphans`) | ✅ | ⬡ | ⬡ | — |
+| Storage (`storage audit`) | ✅ | ⬡ | ⬡ | — |
+| Network (`network audit`) | ✅ | ⬡ | ⬡ | — |
+| Certs (`certs`) | ✅ | ⬡ | ⬡ | — |
+| Tags (`tags`) | ✅ | ⬡ | ⬡ | — |
+| Secrets (`secrets scan`) | ✅ | ⬡ | ⬡ | — |
+| Drift (`drift`) | ✅ | ⬡ | ⬡ | — |
+| Inventory (`inventory`) | ✅ | ⬡ | ⬡ | — |
+| Quota (`quota`) | ✅ | ⬡ | ⬡ | — |
+| Consolidated (`audit`) | ✅ | ⬡ | ⬡ | — |
+| Lambda policy (`lambda audit`) | ✅ | — | — | — |
+| RBAC (`k8s rbac`) | — | — | — | ✅ |
+| Platform tenant (`platform audit`) | ✅<sup>†</sup> | — | — | ✅ |
+
+✅ implemented · ⬡ seam-ready (capability interface exists; no provider yet) · — not applicable
+
+<sup>†</sup> Platform audit reads AWS IAM roles (IRSA conformance) and Platform-tenant
+cluster objects (namespace, ResourceQuota, NetworkPolicy, ServiceAccount) — not RBAC,
+which is the separate `k8s rbac` command.
+
+The offline commands — `compliance`, `compare`, `baseline`, `report`, `remediate` —
+operate on saved scan reports or local state and are cloud-agnostic; `mcp` exposes the
+AWS scanners over MCP/stdio for AI agents.
+
+---
+
 ## Installation
 
 ### Homebrew (macOS / Linux)
@@ -544,7 +583,7 @@ cloudgov compliance soc2 --iam-report iam.json --output json --output-file soc2.
 
 ---
 
-### `cloudgov drift <tfstate>` — Terraform state vs live cloud
+### `cloudgov drift <tfstate>` — Terraform state vs live AWS
 
 Reads a `terraform.tfstate` file and checks each managed resource against the AWS API to detect modifications or deletions outside Terraform. Supports security groups, IAM policies, and S3 buckets.
 
@@ -633,7 +672,7 @@ cloudgov audit \
 
 ---
 
-### `cloudgov inventory` — list all cloud resources
+### `cloudgov inventory` — list all AWS resources
 
 Lists all AWS resources with type, region, tags, and creation date. Groups by type and region for a complete asset overview.
 
