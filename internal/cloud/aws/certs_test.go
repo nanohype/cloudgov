@@ -9,6 +9,7 @@ import (
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/acm"
 	acmtypes "github.com/aws/aws-sdk-go-v2/service/acm/types"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type mockACM struct {
@@ -71,18 +72,22 @@ func TestListCertificates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Errorf("expected 2 findings (within 180-day window), got %d: %v", len(got), got)
+	// The provider lists every issued cert; windowing by --days is the scanner's
+	// job, so the far-future cert is returned here (it would be filtered later).
+	if len(got) != 3 {
+		t.Errorf("expected 3 findings (all issued certs), got %d: %v", len(got), got)
 	}
-	domains := make(map[string]bool)
+	byDomain := make(map[string]cloud.CertFinding)
 	for _, f := range got {
-		domains[f.Domain] = true
+		byDomain[f.Domain] = f
 		if f.Provider != "aws" {
 			t.Errorf("provider: got %q", f.Provider)
 		}
 	}
-	if domains["future.com"] {
-		t.Error("365-day cert should be outside monitoring window")
+	if f, ok := byDomain["future.com"]; !ok {
+		t.Error("365-day cert should be returned by the provider (scanner applies --days)")
+	} else if f.DaysLeft < 360 || f.Severity != cloud.SeverityLow {
+		t.Errorf("future.com: DaysLeft=%d Severity=%q, want ~365 and LOW", f.DaysLeft, f.Severity)
 	}
 }
 

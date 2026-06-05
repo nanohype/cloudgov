@@ -29,7 +29,7 @@ var (
 func init() {
 	certsCmd.Flags().IntVar(&certsDays, "days", 90, "warn threshold in days (include certs expiring within this many days)")
 	certsCmd.Flags().StringVar(&certsSeverity, "severity", "LOW", "minimum severity to report (CRITICAL, HIGH, MEDIUM, LOW)")
-	certsCmd.Flags().StringVar(&certsOutputFmt, "output", "table", "output format: table, json")
+	certsCmd.Flags().StringVar(&certsOutputFmt, "output", "table", "output format: table, json, sarif")
 	certsCmd.Flags().StringVar(&certsOutputFile, "output-file", "", "write output to file")
 }
 
@@ -63,6 +63,8 @@ func runCerts(_ *cobra.Command, _ []string) error {
 	switch strings.ToLower(certsOutputFmt) {
 	case "json":
 		return output.WriteCerts(w, findings)
+	case "sarif":
+		return output.WriteCertsSARIF(w, findings, Version)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d certificate findings\n\n", len(findings))

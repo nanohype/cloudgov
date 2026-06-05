@@ -18,7 +18,10 @@ type acmAPI interface {
 	DescribeCertificate(ctx context.Context, params *acm.DescribeCertificateInput, optFns ...func(*acm.Options)) (*acm.DescribeCertificateOutput, error)
 }
 
-// ListCertificates returns ACM certificates expiring within 180 days or already expired.
+// ListCertificates returns every issued ACM certificate with its expiry status.
+// The expiry window is not applied here: the certs scanner is the single authority
+// on the --days threshold (cmd and audit both pass it), so capping here would
+// silently hide certificates a caller asked to see with --days beyond the cap.
 func (p *Provider) ListCertificates(ctx context.Context) ([]cloud.CertFinding, error) {
 	pager := acm.NewListCertificatesPaginator(p.acm, &acm.ListCertificatesInput{
 		CertificateStatuses: []acmtypes.CertificateStatus{acmtypes.CertificateStatusIssued},
@@ -47,10 +50,6 @@ func (p *Provider) ListCertificates(ctx context.Context) ([]cloud.CertFinding, e
 			}
 
 			daysLeft := int(math.Floor(cert.NotAfter.Sub(now).Hours() / 24))
-			if daysLeft > 180 {
-				continue // outside monitoring window
-			}
-
 			sev, status := cloud.CertSeverity(daysLeft)
 			domain := awssdk.ToString(cert.DomainName)
 			findings = append(findings, cloud.CertFinding{

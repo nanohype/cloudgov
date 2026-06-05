@@ -120,6 +120,7 @@ func TestBuildRules_NonEmpty(t *testing.T) {
 		"k8s":     buildK8sRules,
 		"lambda":  buildLambdaRules,
 		"drift":   buildDriftRules,
+		"certs":   buildCertRules,
 	} {
 		rules := builder()
 		if len(rules) == 0 {
@@ -226,5 +227,46 @@ func TestWriteDriftSARIF_OmitsInSync(t *testing.T) {
 	}
 	if got[1].Level != "error" {
 		t.Errorf("DELETED -> level %q, want error", got[1].Level)
+	}
+}
+
+func TestWriteCertsSARIF(t *testing.T) {
+	findings := []cloud.CertFinding{
+		{Severity: cloud.SeverityCritical, Status: cloud.CertExpired, Provider: "aws", Domain: "gone.example.com", Detail: "expired 5 days ago"},
+		{Severity: cloud.SeverityLow, Status: cloud.CertLow, Provider: "aws", Domain: "ok.example.com", Detail: "expires in 80 days"},
+	}
+	var buf bytes.Buffer
+	if err := WriteCertsSARIF(&buf, findings, "v1"); err != nil {
+		t.Fatal(err)
+	}
+	got := decodeSARIF(t, buf.Bytes())
+	if len(got) != 2 {
+		t.Fatalf("results = %d, want 2", len(got))
+	}
+	if got[0].RuleID != string(cloud.CertExpired) || got[0].Level != "error" {
+		t.Errorf("expired: ruleID=%q level=%q, want %s/error", got[0].RuleID, got[0].Level, cloud.CertExpired)
+	}
+	if got[1].Level != "note" {
+		t.Errorf("low-severity cert -> level %q, want note", got[1].Level)
+	}
+
+	// Also assert the driver rules table levels (defaultConfiguration.level is what
+	// GitHub Advanced Security reads for rule defaults), not just per-result levels.
+	var log sarifLog
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("invalid SARIF: %v", err)
+	}
+	ruleLevel := make(map[string]string)
+	for _, r := range log.Runs[0].Tool.Driver.Rules {
+		ruleLevel[r.ID] = r.DefaultConfig.Level
+	}
+	for status, want := range map[cloud.CertStatus]string{
+		cloud.CertExpired: "error",
+		cloud.CertMedium:  "warning",
+		cloud.CertLow:     "note",
+	} {
+		if got := ruleLevel[string(status)]; got != want {
+			t.Errorf("rule %s defaultConfiguration.level = %q, want %q", status, got, want)
+		}
 	}
 }
