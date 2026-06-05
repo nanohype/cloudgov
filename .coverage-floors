@@ -1,0 +1,30 @@
+# Per-package statement-coverage floors (percent). A package below its floor fails
+# CI. Floors are set a few points below current coverage to lock it in without
+# flapping on small refactors; RAISE a floor when you raise its coverage (ratchet).
+# Packages absent here have no floor yet (e.g. internal/integration is fixture/
+# test-only with no coverable statements of its own).
+cmd 15
+internal/audit 60
+internal/baseline 70
+internal/certs 90
+internal/cloud 55
+internal/cloud/aws 80
+internal/cloud/k8s 45
+internal/compare 60
+internal/compliance 65
+internal/cost 95
+internal/drift 85
+internal/fix 18
+internal/iam 50
+internal/inventory 85
+internal/network 90
+internal/orphans 90
+internal/output 65
+internal/output/sinks 80
+internal/platform 80
+internal/providers 50
+internal/quota 95
+internal/report 40
+internal/secrets 90
+internal/storage 28
+internal/tags 90
