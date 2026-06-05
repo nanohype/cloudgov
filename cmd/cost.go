@@ -15,7 +15,7 @@ import (
 
 var costCmd = &cobra.Command{
 	Use:   "cost",
-	Short: "Cloud cost analysis",
+	Short: "AWS cost analysis",
 }
 
 var costDiffCmd = &cobra.Command{

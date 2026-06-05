@@ -15,7 +15,7 @@ import (
 
 var quotaCmd = &cobra.Command{
 	Use:   "quota",
-	Short: "Check service quota utilization across cloud providers",
+	Short: "Check AWS service quota utilization vs limits",
 	RunE:  runQuota,
 }
 

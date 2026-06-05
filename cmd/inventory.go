@@ -15,8 +15,8 @@ import (
 
 var inventoryCmd = &cobra.Command{
 	Use:   "inventory",
-	Short: "List all cloud resources across providers",
-	Long: `List all cloud resources with type, region, tags, and creation date.
+	Short: "List all AWS resources",
+	Long: `List all AWS resources with type, region, tags, and creation date.
 Groups by type and region for a complete asset overview.
 
 Filter by resource type with --type, e.g. --type ec2,s3,lambda`,

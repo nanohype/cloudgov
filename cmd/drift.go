@@ -15,8 +15,8 @@ import (
 
 var driftCmd = &cobra.Command{
 	Use:   "drift <tfstate-path>",
-	Short: "Compare live cloud state vs Terraform state files",
-	Long: `Detect configuration drift between your Terraform state and live cloud resources.
+	Short: "Compare live AWS state vs Terraform state files",
+	Long: `Detect configuration drift between your Terraform state and live AWS resources.
 
 Reads a terraform.tfstate file and checks each managed resource against the AWS API.
 Supports AWS security groups, IAM policies, and S3 buckets.`,
