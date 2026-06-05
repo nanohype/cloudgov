@@ -172,7 +172,7 @@ type quotaReport struct {
 func WriteQuotas(w io.Writer, quotas []cloud.QuotaUsage) error {
 	var crit, high, med int
 	for _, q := range quotas {
-		switch cloud.QuotaSeverity(q.Utilization) {
+		switch q.EffectiveSeverity() {
 		case cloud.SeverityCritical:
 			crit++
 		case cloud.SeverityHigh:

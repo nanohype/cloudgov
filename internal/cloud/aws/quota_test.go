@@ -14,6 +14,7 @@ import (
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/aws-sdk-go-v2/service/servicequotas"
 	sqtypes "github.com/aws/aws-sdk-go-v2/service/servicequotas/types"
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 type quotaMockEC2 struct {
@@ -213,6 +214,15 @@ func TestListQuotas_AggregatesAll(t *testing.T) {
 	// IAM(1) + EC2(4) + S3(1) + Lambda(2) + RDS(1) = 9
 	if len(got) != 9 {
 		t.Errorf("expected 9 quotas, got %d", len(got))
+	}
+	// ListQuotas sets Severity on every quota (derived from utilization).
+	for _, q := range got {
+		if q.Severity == "" {
+			t.Errorf("quota %s/%s has no Severity set", q.Service, q.QuotaName)
+		}
+		if q.Severity != cloud.QuotaSeverity(q.Utilization) {
+			t.Errorf("quota %s: Severity=%q, want %q", q.QuotaName, q.Severity, cloud.QuotaSeverity(q.Utilization))
+		}
 	}
 }
 

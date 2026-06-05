@@ -48,7 +48,7 @@ type Summary struct {
 func Summarize(quotas []cloud.QuotaUsage) Summary {
 	s := Summary{Total: len(quotas)}
 	for _, q := range quotas {
-		switch cloud.QuotaSeverity(q.Utilization) {
+		switch q.EffectiveSeverity() {
 		case cloud.SeverityCritical:
 			s.Critical++
 		case cloud.SeverityHigh:

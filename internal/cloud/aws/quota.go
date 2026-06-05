@@ -77,6 +77,12 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		quotas = append(quotas, rdsQuotas...)
 	}
 
+	// Severity is derived from utilization; set it on the struct so it travels with
+	// the finding (JSON output, comparison) rather than being recomputed per reader.
+	for i := range quotas {
+		quotas[i].Severity = cloud.QuotaSeverity(quotas[i].Utilization)
+	}
+
 	return quotas, nil
 }
 
