@@ -22,25 +22,16 @@ jobs:
       - name: go build
         run: go build ./...
 
-      - name: go test with coverage
-        run: go test ./... -coverprofile=coverage.out -covermode=atomic
+      - name: test with per-package coverage floors
+        # Runs the suite with coverage and enforces .coverage-floors (each package
+        # has its own floor, ratcheting up as coverage lands). Produces coverage.out.
+        run: bash scripts/coverage.sh
 
       - name: go vet
         run: go vet ./...
 
-      - name: enforce coverage floor
-        # Phase 2 lifted internal/cloud/aws from 0% to ~65-85%. The 50% floor is
-        # the floor — it'll ratchet up as more code lands under test.
-        run: |
-          total=$(go tool cover -func=coverage.out | grep total: | awk '{print $3}' | sed 's/%//')
-          echo "total coverage: ${total}%"
-          # bash arithmetic on decimals via awk
-          if awk "BEGIN {exit !(${total} < 50)}"; then
-            echo "::error::coverage ${total}% is below the 50% floor"
-            exit 1
-          fi
-
       - name: upload coverage artifact
+        if: always() # keep the profile even when a floor fails, for debugging
         uses: actions/upload-artifact@v4
         with:
           name: coverage

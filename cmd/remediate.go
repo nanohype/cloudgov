@@ -121,43 +121,50 @@ type orphansEnvelope struct {
 
 func unmarshalStorageReport(data []byte) ([]cloud.BucketFinding, error) {
 	var env storageEnvelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("parse storage report: %w", err)
+	envErr := json.Unmarshal(data, &env)
+	if envErr == nil && len(env.Findings) > 0 {
+		return env.Findings, nil
 	}
-	if len(env.Findings) == 0 {
-		// Fall back to a bare-array shape some users hand-craft.
-		var bare []cloud.BucketFinding
-		if err := json.Unmarshal(data, &bare); err == nil && len(bare) > 0 {
-			return bare, nil
-		}
+	// Fall back to a bare-array shape some users hand-craft. A bare array fails the
+	// envelope unmarshal above, so this must be tried regardless of envErr.
+	var bare []cloud.BucketFinding
+	if err := json.Unmarshal(data, &bare); err == nil {
+		return bare, nil
 	}
-	return env.Findings, nil
+	if envErr != nil {
+		return nil, fmt.Errorf("parse storage report: %w", envErr)
+	}
+	return env.Findings, nil // valid envelope with no findings
 }
 
 func unmarshalNetworkReport(data []byte) ([]cloud.NetworkFinding, error) {
 	var env networkEnvelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("parse network report: %w", err)
+	envErr := json.Unmarshal(data, &env)
+	if envErr == nil && len(env.Findings) > 0 {
+		return env.Findings, nil
 	}
-	if len(env.Findings) == 0 {
-		var bare []cloud.NetworkFinding
-		if err := json.Unmarshal(data, &bare); err == nil && len(bare) > 0 {
-			return bare, nil
-		}
+	var bare []cloud.NetworkFinding
+	if err := json.Unmarshal(data, &bare); err == nil {
+		return bare, nil
+	}
+	if envErr != nil {
+		return nil, fmt.Errorf("parse network report: %w", envErr)
 	}
 	return env.Findings, nil
 }
 
 func unmarshalOrphansReport(data []byte) ([]cloud.OrphanResource, error) {
 	var env orphansEnvelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return nil, fmt.Errorf("parse orphans report: %w", err)
+	envErr := json.Unmarshal(data, &env)
+	if envErr == nil && len(env.Resources) > 0 {
+		return env.Resources, nil
 	}
-	if len(env.Resources) == 0 {
-		var bare []cloud.OrphanResource
-		if err := json.Unmarshal(data, &bare); err == nil && len(bare) > 0 {
-			return bare, nil
-		}
+	var bare []cloud.OrphanResource
+	if err := json.Unmarshal(data, &bare); err == nil {
+		return bare, nil
+	}
+	if envErr != nil {
+		return nil, fmt.Errorf("parse orphans report: %w", envErr)
 	}
 	return env.Resources, nil
 }
