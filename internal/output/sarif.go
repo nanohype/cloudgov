@@ -395,6 +395,44 @@ func sarifLevel(s cloud.Severity) string {
 	}
 }
 
+// WriteCertsSARIF writes certificate-expiry findings in SARIF 2.1.0 format. The
+// rule id is the cert status (EXPIRED, EXPIRING_7D, …); the level follows severity.
+func WriteCertsSARIF(w io.Writer, findings []cloud.CertFinding, version string) error {
+	results := make([]sarifResult, 0, len(findings))
+	for _, f := range findings {
+		results = append(results, sarifResult{
+			RuleID:  string(f.Status),
+			Level:   sarifLevel(f.Severity),
+			Message: sarifMessage{Text: f.Detail},
+			Kind:    "open",
+		})
+	}
+	return encodeSARIF(w, sarifReport(version, buildCertRules(), results))
+}
+
+func buildCertRules() []sarifRule {
+	statuses := []struct {
+		id          cloud.CertStatus
+		name, level string
+	}{
+		{cloud.CertExpired, "Expired", "error"},
+		{cloud.CertCritical, "Expiring7d", "error"},
+		{cloud.CertHigh, "Expiring30d", "error"},
+		{cloud.CertMedium, "Expiring60d", "warning"},
+		{cloud.CertLow, "Expiring90d", "note"},
+	}
+	rules := make([]sarifRule, 0, len(statuses))
+	for _, s := range statuses {
+		rules = append(rules, sarifRule{
+			ID:               string(s.id),
+			Name:             s.name,
+			ShortDescription: sarifMessage{Text: s.name},
+			DefaultConfig:    sarifRuleConfig{Level: s.level},
+		})
+	}
+	return rules
+}
+
 func buildStorageRules() []sarifRule {
 	types := []struct {
 		id    cloud.BucketFindingType

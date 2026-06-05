@@ -382,6 +382,9 @@ cloudgov certs --severity HIGH
 
 # JSON output
 cloudgov certs --output json --output-file certs.json
+
+# SARIF for CI ingestion
+cloudgov certs --output sarif --output-file certs.sarif
 ```
 
 **Flags**
@@ -390,7 +393,7 @@ cloudgov certs --output json --output-file certs.json
 |------|---------|-------------|
 | `--days` | `90` | Include certs expiring within this many days |
 | `--severity` | `LOW` | Minimum severity to report |
-| `--output` | `table` | Output format: `table`, `json` |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
 
 ---
