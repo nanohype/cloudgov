@@ -48,6 +48,10 @@ brews:
       owner: nanohype
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+      # homebrew-tap's main is branch-protected (requires a PR), so a direct push
+      # is rejected even with a valid token. Open a formula PR instead.
+      pull_request:
+        enabled: true
     directory: Formula
     homepage: "https://github.com/nanohype/cloudgov"
     description: "AWS governance CLI — IAM least-privilege, cost anomalies, posture, drift, compliance, and resource hygiene across AWS, plus a Kubernetes RBAC scanner"
