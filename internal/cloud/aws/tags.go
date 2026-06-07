@@ -81,6 +81,9 @@ func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.Ta
 }
 
 func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+	if p.ec2 == nil {
+		return nil, nil
+	}
 	pager := ec2.NewDescribeInstancesPaginator(p.ec2, &ec2.DescribeInstancesInput{})
 
 	var findings []cloud.TagFinding
@@ -116,6 +119,9 @@ func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud
 }
 
 func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+	if p.s3 == nil {
+		return nil, nil
+	}
 	listOut, err := p.s3.ListBuckets(ctx, &s3.ListBucketsInput{})
 	if err != nil {
 		return nil, fmt.Errorf("list buckets: %w", err)
@@ -157,6 +163,9 @@ func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.
 }
 
 func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+	if p.rds == nil {
+		return nil, nil
+	}
 	pager := rds.NewDescribeDBInstancesPaginator(p.rds, &rds.DescribeDBInstancesInput{})
 
 	var findings []cloud.TagFinding
@@ -190,6 +199,9 @@ func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud
 }
 
 func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+	if p.lambda == nil {
+		return nil, nil
+	}
 	var findings []cloud.TagFinding
 	var marker *string
 	for {

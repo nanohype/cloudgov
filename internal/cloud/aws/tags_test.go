@@ -120,6 +120,20 @@ func TestAuditTags_NoRequiredReturnsEmpty(t *testing.T) {
 	}
 }
 
+// A Provider with no clients wired (partial construction) must dispatch through
+// every auditor without panicking — each nil-guards its client. With required
+// tags set this exercises the dispatch path past the no-required early return.
+func TestAuditTags_NilClientsNoPanic(t *testing.T) {
+	p := &Provider{}
+	got, err := p.AuditTags(context.Background(), []string{"Owner"})
+	if err != nil {
+		t.Fatalf("expected no error with nil clients, got %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil findings with nil clients, got %v", got)
+	}
+}
+
 func TestAuditTags_EC2(t *testing.T) {
 	mock := &tagsMockEC2{
 		instances: []ec2types.Instance{

@@ -11,6 +11,12 @@ import (
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
+// Provider satisfies the full cloud.K8sRBACProvider interface (Name, Detect,
+// ContextName, ScanRBAC). Callers use the concrete type, so this assertion keeps
+// the interface contract compiler-enforced — and documents that Name/Detect are
+// interface requirements, not dead code.
+var _ cloud.K8sRBACProvider = (*Provider)(nil)
+
 // rbacAPI is the narrow K8s RBAC surface used by this package.
 type rbacAPI interface {
 	ListClusterRoles(ctx context.Context) ([]rbacv1.ClusterRole, error)
