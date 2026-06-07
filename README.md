@@ -150,7 +150,9 @@ Required IAM permissions for a read-only audit role:
         "sqs:ListQueueTags",
         "iam:GetAccountSummary",
         "servicequotas:GetServiceQuota",
-        "servicequotas:ListServiceQuotas"
+        "logs:DescribeLogGroups",
+        "events:ListRules",
+        "events:ListTagsForResource"
       ],
       "Resource": "*"
     }
