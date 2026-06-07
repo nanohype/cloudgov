@@ -54,7 +54,7 @@ brews:
         enabled: true
     directory: Formula
     homepage: "https://github.com/nanohype/cloudgov"
-    description: "AWS governance CLI — IAM least-privilege, cost anomalies, posture, drift, compliance, and resource hygiene across AWS, plus a Kubernetes RBAC scanner"
+    description: "AWS security & cost CLI - IAM, posture, drift, hygiene, K8s RBAC"
     license: "Apache-2.0"
     test: |
       system "#{bin}/cloudgov", "--version"
