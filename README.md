@@ -449,21 +449,29 @@ All findings are **MEDIUM** severity.
 # Require owner, env, and cost-center tags
 cloudgov tags --require owner,env,cost-center
 
-# Require a smaller tag set
-cloudgov tags --require owner,env
+# Gate on a published tagging standard's required AWS keys instead of typing them
+cloudgov tags --standard-file resource-tagging.json
+
+# Fail CI if anything is missing a required tag
+cloudgov tags --standard-file resource-tagging.json --fail-on medium
 
 # JSON output
 cloudgov tags --require owner,env --output json --output-file tags.json
 ```
 
+The required tag set comes from `--require` (ad-hoc) or `--standard-file` (the required AWS keys of a [nanohype resource-tagging standard](https://github.com/nanohype/nanohype/blob/main/standards/resource-tagging.json) JSON — `content.required_by_surface.aws`). `--require` wins when both are set. Pair with the global `--fail-on medium` to gate CI (all findings are MEDIUM, so `--fail-on medium` exits non-zero on any missing required tag).
+
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--require` | (required) | Comma-separated tag keys that must be present |
+| `--require` | | Comma-separated tag keys that must be present |
+| `--standard-file` | | Path to a resource-tagging standard JSON; gates on its required AWS keys |
 | `--severity` | `MEDIUM` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
+
+One of `--require` or `--standard-file` is required.
 
 ---
 
