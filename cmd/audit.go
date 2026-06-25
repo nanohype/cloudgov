@@ -54,8 +54,8 @@ func init() {
 		"optional URL embedded in sink notifications (e.g. link to full report in S3/GCS)")
 }
 
-func runAudit(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runAudit(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 
 	skip := make(map[string]bool)
 	for _, s := range auditSkip {

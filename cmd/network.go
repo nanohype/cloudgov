@@ -42,8 +42,8 @@ func init() {
 	networkCmd.AddCommand(networkAuditCmd)
 }
 
-func runNetworkAudit(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runNetworkAudit(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveNetworkProviders(ctx)
 	if err != nil {
 		return err

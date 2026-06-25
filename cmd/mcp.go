@@ -47,12 +47,12 @@ commands (standard SDK chains).`,
 	RunE: runMCP,
 }
 
-func runMCP(_ *cobra.Command, _ []string) error {
+func runMCP(cmd *cobra.Command, _ []string) error {
 	s := mcp.NewServer(&mcp.Implementation{Name: "cloudgov", Version: Version}, nil)
 	registerMCPTools(s)
 	// Run blocks until the client disconnects, which surfaces as io.EOF on the
 	// stdio transport — a clean shutdown, not an error.
-	if err := s.Run(context.Background(), &mcp.StdioTransport{}); err != nil && !errors.Is(err, io.EOF) {
+	if err := s.Run(cmd.Context(), &mcp.StdioTransport{}); err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	return nil

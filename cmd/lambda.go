@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -52,8 +51,8 @@ func init() {
 	lambdaCmd.AddCommand(lambdaAuditCmd)
 }
 
-func runLambdaAudit(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runLambdaAudit(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 
 	p, err := cloudaws.New(ctx)
 	if err != nil {

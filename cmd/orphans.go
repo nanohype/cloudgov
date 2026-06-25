@@ -31,8 +31,8 @@ func init() {
 	orphansCmd.Flags().StringVar(&orphanOutputFile, "output-file", "", "write output to file")
 }
 
-func runOrphans(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runOrphans(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveOrphansProviders(ctx)
 	if err != nil {
 		return err

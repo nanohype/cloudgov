@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/acm"
 	"github.com/aws/aws-sdk-go-v2/service/cloudformation"
@@ -27,6 +29,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	smithymiddleware "github.com/aws/smithy-go/middleware"
 )
 
 // Provider implements all CloudGov provider interfaces for AWS.
@@ -98,11 +101,38 @@ func New(ctx context.Context, opts ...Option) (*Provider, error) {
 	return NewWithProfile(ctx, "", opts...)
 }
 
+// awsHTTPTimeout bounds a single AWS HTTP request; awsOpTimeout bounds a whole
+// operation including its retries. Without them an unreachable endpoint would
+// hang a scan indefinitely — the command's signal-aware context (cmd.Context())
+// lets a user Ctrl-C, but these put a hard ceiling on each call regardless.
+const (
+	awsHTTPTimeout = 30 * time.Second
+	awsOpTimeout   = 60 * time.Second
+)
+
+// withOperationTimeout wraps each operation's context with a deadline. Initialize
+// runs once per operation, before the retry loop, so the deadline spans every
+// attempt.
+func withOperationTimeout(d time.Duration) func(*smithymiddleware.Stack) error {
+	return func(stack *smithymiddleware.Stack) error {
+		return stack.Initialize.Add(smithymiddleware.InitializeMiddlewareFunc(
+			"OperationTimeout",
+			func(ctx context.Context, in smithymiddleware.InitializeInput, next smithymiddleware.InitializeHandler) (smithymiddleware.InitializeOutput, smithymiddleware.Metadata, error) {
+				ctx, cancel := context.WithTimeout(ctx, d)
+				defer cancel()
+				return next.HandleInitialize(ctx, in)
+			},
+		), smithymiddleware.Before)
+	}
+}
+
 // NewWithProfile loads credentials using the named AWS profile. If profile is empty, the default chain is used.
 func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provider, error) {
 	loadOpts := []func(*config.LoadOptions) error{
 		config.WithRetryMaxAttempts(5),
 		config.WithRetryMode(awssdk.RetryModeStandard),
+		config.WithHTTPClient(awshttp.NewBuildableClient().WithTimeout(awsHTTPTimeout)),
+		config.WithAPIOptions([]func(*smithymiddleware.Stack) error{withOperationTimeout(awsOpTimeout)}),
 	}
 	if profile != "" {
 		loadOpts = append(loadOpts, config.WithSharedConfigProfile(profile))
@@ -168,7 +198,7 @@ func (p *Provider) Detect(ctx context.Context) bool {
 			}
 		}
 	}
-	cfg, err := config.LoadDefaultConfig(ctx)
+	cfg, err := config.LoadDefaultConfig(ctx, config.WithHTTPClient(awshttp.NewBuildableClient().WithTimeout(awsHTTPTimeout)))
 	if err != nil {
 		return false
 	}

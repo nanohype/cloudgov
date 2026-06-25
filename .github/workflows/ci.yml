@@ -33,6 +33,12 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: context-awareness check
+        # Every cobra handler must thread cmd.Context() (rooted in a SIGINT/SIGTERM
+        # context) instead of context.Background(), so an interrupt cancels in-flight
+        # cloud calls. Fails on any context.Background() in cmd/ outside Execute().
+        run: bash scripts/check-context.sh
+
       - name: upload coverage artifact
         if: always() # keep the profile even when a floor fails, for debugging
         uses: actions/upload-artifact@v4

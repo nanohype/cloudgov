@@ -38,8 +38,8 @@ func init() {
 	secretsCmd.AddCommand(secretsScanCmd)
 }
 
-func runSecretsScan(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runSecretsScan(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveSecretsProviders(ctx)
 	if err != nil {
 		return err

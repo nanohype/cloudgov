@@ -35,8 +35,8 @@ func init() {
 	inventoryCmd.Flags().StringVar(&inventoryOutputFile, "output-file", "", "write output to file")
 }
 
-func runInventory(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runInventory(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveInventoryProviders(ctx)
 	if err != nil {
 		return err

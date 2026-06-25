@@ -38,8 +38,8 @@ func init() {
 	driftCmd.Flags().StringVar(&driftOutputFile, "output-file", "", "write output to file")
 }
 
-func runDrift(_ *cobra.Command, args []string) error {
-	ctx := context.Background()
+func runDrift(cmd *cobra.Command, args []string) error {
+	ctx := cmd.Context()
 
 	resources, err := drift.ParseTFState(args[0])
 	if err != nil {
