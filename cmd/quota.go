@@ -31,8 +31,8 @@ func init() {
 	quotaCmd.Flags().StringVar(&quotaOutputFile, "output-file", "", "write output to file")
 }
 
-func runQuota(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runQuota(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveQuotaProviders(ctx)
 	if err != nil {
 		return err

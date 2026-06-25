@@ -199,12 +199,17 @@ func init() {
     groupCmd.AddCommand(groupSubCmd)
 }
 
-func runGroupAction(_ *cobra.Command, _ []string) error {
-    ctx := context.Background()
+func runGroupAction(cmd *cobra.Command, _ []string) error {
+    ctx := cmd.Context()
     // ...
     return nil
 }
 ```
+
+Handlers must derive their context from `cmd.Context()`, never `context.Background()`. The
+root command runs under a context cancelled on the first SIGINT/SIGTERM, so threading
+`cmd.Context()` into every cloud call lets an interrupt unwind in-flight requests instead of
+leaving them to run to completion. CI enforces this (`scripts/check-context.sh`).
 
 ### 2. Register with root
 

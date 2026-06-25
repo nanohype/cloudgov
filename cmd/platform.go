@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -62,8 +61,8 @@ func init() {
 	platformCmd.AddCommand(platformAuditCmd)
 }
 
-func runPlatformAudit(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runPlatformAudit(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	clients, err := cloudk8s.NewClients(ctx, platformKubeconfig)
 	if err != nil {
 		return fmt.Errorf("connect to kubernetes: %w", err)

@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -33,9 +36,13 @@ baselines, diffs, reports).`,
 	},
 }
 
-// Execute runs the root command.
+// Execute runs the root command under a context cancelled on the first
+// SIGINT/SIGTERM, so an interrupt unwinds in-flight cloud API calls — which all
+// take cmd.Context() — instead of leaving them to run to completion.
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

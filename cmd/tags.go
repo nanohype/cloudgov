@@ -35,7 +35,7 @@ func init() {
 	tagsCmd.Flags().StringVar(&tagsOutputFile, "output-file", "", "write output to file")
 }
 
-func runTags(_ *cobra.Command, _ []string) error {
+func runTags(cmd *cobra.Command, _ []string) error {
 	// Precedence: explicit --require wins (ad-hoc override); else the required
 	// AWS keys from --standard-file; else error. Keeps --require working for
 	// one-off checks while --standard-file is the CI gate's source of truth.
@@ -51,7 +51,7 @@ func runTags(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("specify required tag keys via --require or --standard-file")
 	}
 
-	ctx := context.Background()
+	ctx := cmd.Context()
 	providers, err := resolveTagProviders(ctx)
 	if err != nil {
 		return err

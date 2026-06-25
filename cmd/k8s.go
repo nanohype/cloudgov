@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -53,8 +52,8 @@ func init() {
 	k8sCmd.AddCommand(k8sRBACCmd)
 }
 
-func runK8sRBAC(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runK8sRBAC(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	p, err := cloudk8s.New(ctx, k8sKubeconfig)
 	if err != nil {
 		return fmt.Errorf("connect to kubernetes: %w", err)

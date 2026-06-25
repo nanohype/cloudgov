@@ -33,8 +33,8 @@ func init() {
 	certsCmd.Flags().StringVar(&certsOutputFile, "output-file", "", "write output to file")
 }
 
-func runCerts(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runCerts(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveCertProviders(ctx)
 	if err != nil {
 		return err

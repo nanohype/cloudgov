@@ -67,7 +67,7 @@ func init() {
 }
 
 func runIAMScan(cmd *cobra.Command, _ []string) error {
-	ctx := context.Background()
+	ctx := cmd.Context()
 	providers, err := resolveIAMProviders(ctx, iamProfile)
 	if err != nil {
 		return err
@@ -133,8 +133,8 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func runIAMFix(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runIAMFix(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 
 	data, err := os.ReadFile(iamFromFile)
 	if err != nil {

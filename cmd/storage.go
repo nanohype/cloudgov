@@ -42,8 +42,8 @@ func init() {
 	storageCmd.AddCommand(storageAuditCmd)
 }
 
-func runStorageAudit(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runStorageAudit(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveStorageProviders(ctx)
 	if err != nil {
 		return err

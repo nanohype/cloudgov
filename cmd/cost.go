@@ -40,8 +40,8 @@ func init() {
 	costCmd.AddCommand(costDiffCmd)
 }
 
-func runCostDiff(_ *cobra.Command, _ []string) error {
-	ctx := context.Background()
+func runCostDiff(cmd *cobra.Command, _ []string) error {
+	ctx := cmd.Context()
 	providers, err := resolveCostProviders(ctx)
 	if err != nil {
 		return err
