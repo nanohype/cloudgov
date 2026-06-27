@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -45,7 +44,6 @@ func writeProviderScript(path, provider string, findings []cloud.BucketFinding) 
 	sb.WriteString("\n")
 	sb.WriteString("# cloudgov storage audit --fix\n")
 	fmt.Fprintf(&sb, "# Provider: %s\n", provider)
-	fmt.Fprintf(&sb, "# Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
 	fmt.Fprintf(&sb, "# Findings: %d\n", len(findings))
 	sb.WriteString("\n")
 
