@@ -1,7 +1,9 @@
 package aws
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"sort"
@@ -509,6 +511,54 @@ func TestMinimalPolicy(t *testing.T) {
 				t.Errorf("actions: got %v, want %v", gotActions, tt.wantActions)
 			}
 		})
+	}
+}
+
+func TestMinimalPolicyDeterministic(t *testing.T) {
+	used := []cloud.Permission{
+		{Action: "s3:PutObject", Resource: "arn:aws:s3:::b/*"},
+		{Action: "s3:GetObject", Resource: "arn:aws:s3:::b/*"},
+		{Action: "ec2:DescribeInstances", Resource: "*"},
+		{Action: "s3:GetObject", Resource: "arn:aws:s3:::a/*"},
+	}
+	p := &Provider{}
+
+	first, err := p.MinimalPolicy(context.Background(), cloud.Principal{Name: "x"}, used)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Same input must yield byte-identical output regardless of map iteration order.
+	for i := 0; i < 5; i++ {
+		next, err := p.MinimalPolicy(context.Background(), cloud.Principal{Name: "x"}, used)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !bytes.Equal(first.Raw, next.Raw) {
+			t.Fatalf("non-deterministic output:\nfirst:\n%s\ngot:\n%s", first.Raw, next.Raw)
+		}
+	}
+
+	// Statements are sorted by resource; actions within a statement are sorted.
+	var doc struct {
+		Statement []struct {
+			Action   []string `json:"Action"`
+			Resource string   `json:"Resource"`
+		} `json:"Statement"`
+	}
+	if err := json.Unmarshal(first.Raw, &doc); err != nil {
+		t.Fatalf("unmarshal policy: %v", err)
+	}
+	wantResources := []string{"*", "arn:aws:s3:::a/*", "arn:aws:s3:::b/*"}
+	if len(doc.Statement) != len(wantResources) {
+		t.Fatalf("got %d statements, want %d", len(doc.Statement), len(wantResources))
+	}
+	for i, s := range doc.Statement {
+		if s.Resource != wantResources[i] {
+			t.Errorf("statement %d: resource %q, want %q", i, s.Resource, wantResources[i])
+		}
+		if !sort.StringsAreSorted(s.Action) {
+			t.Errorf("statement %d actions not sorted: %v", i, s.Action)
+		}
 	}
 }
 

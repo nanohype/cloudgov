@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -302,12 +303,20 @@ func (p *Provider) MinimalPolicy(_ context.Context, principal cloud.Principal, u
 	}
 	d := doc{Version: "2012-10-17"}
 	for resource, actions := range grouped {
+		acts := dedup(actions)
+		sort.Strings(acts)
 		d.Statement = append(d.Statement, statement{
 			Effect:   "Allow",
-			Action:   dedup(actions),
+			Action:   acts,
 			Resource: resource,
 		})
 	}
+	// Map iteration order is randomized; sort statements by resource so the
+	// generated policy (which `iam fix` emits as committed Terraform) is
+	// byte-stable across runs and diffs cleanly.
+	sort.Slice(d.Statement, func(i, j int) bool {
+		return d.Statement[i].Resource < d.Statement[j].Resource
+	})
 
 	raw, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
