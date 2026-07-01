@@ -12,7 +12,7 @@ import (
 // WriteFixScripts generates one shell remediation script per provider and writes them
 // to outDir. Scripts are named fix-<provider>.sh. Returns the list of files written.
 func WriteFixScripts(findings []cloud.BucketFinding, outDir string) ([]string, error) {
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -58,7 +58,8 @@ func writeProviderScript(path, provider string, findings []cloud.BucketFinding) 
 		sb.WriteString("\n\n")
 	}
 
-	if err := os.WriteFile(path, []byte(sb.String()), 0o755); err != nil {
+	// #nosec G306 -- remediation script must be executable; 0o700 keeps it owner-only
+	if err := os.WriteFile(path, []byte(sb.String()), 0o700); err != nil {
 		return err
 	}
 	return nil

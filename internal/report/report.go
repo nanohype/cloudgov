@@ -427,5 +427,6 @@ func openBrowser(path string) {
 		return
 	}
 
+	// #nosec G204 -- cmd is a fixed per-OS opener binary; only the report path varies
 	_ = exec.Command(cmd, args...).Start()
 }

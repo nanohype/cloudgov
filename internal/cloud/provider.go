@@ -33,11 +33,35 @@ type Permission struct {
 	LastUsed *string // ISO-8601 timestamp from audit logs; nil if never used
 }
 
+// PolicyFallbackReason explains why an action in a generated minimal policy
+// fell back to the unscoped Resource "*".
+type PolicyFallbackReason string
+
+const (
+	// FallbackNoResourceRecorded — the audit log recorded no resource for the
+	// action, typically because it doesn't support resource-level permissions.
+	FallbackNoResourceRecorded PolicyFallbackReason = "no resource recorded in audit events (action may not support resource-level permissions)"
+	// FallbackUnrecognizedResource — the audit log recorded a resource, but it
+	// isn't a recognizable ARN, so it can't safely scope a policy statement.
+	FallbackUnrecognizedResource PolicyFallbackReason = "recorded resource is not a recognizable ARN"
+)
+
+// PolicyFallback records one action that fell back to Resource "*" in a
+// generated minimal policy.
+type PolicyFallback struct {
+	Action   string
+	Resource string // resource as recorded in audit events; "" when none
+	Reason   PolicyFallbackReason
+}
+
 // Policy is a minimal policy document ready for rendering.
 type Policy struct {
 	Provider string // "aws"
 	Format   string // "aws-iam-json"
 	Raw      []byte
+	// Fallbacks lists actions granted the unscoped Resource "*" — the same
+	// actions carried by the statement marked Sid "UnscopedFallback" in Raw.
+	Fallbacks []PolicyFallback
 }
 
 // Severity of a finding.

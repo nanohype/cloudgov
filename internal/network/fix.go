@@ -15,7 +15,7 @@ import (
 // Returns the list of files written. Findings without a Remediation string
 // are skipped — there's nothing to script.
 func WriteFixScripts(findings []cloud.NetworkFinding, outDir string) ([]string, error) {
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -67,5 +67,6 @@ func writeNetworkScript(path, provider string, findings []cloud.NetworkFinding) 
 		sb.WriteString("\n\n")
 	}
 
-	return os.WriteFile(path, []byte(sb.String()), 0o755)
+	// #nosec G306 -- remediation script must be executable; 0o700 keeps it owner-only
+	return os.WriteFile(path, []byte(sb.String()), 0o700)
 }

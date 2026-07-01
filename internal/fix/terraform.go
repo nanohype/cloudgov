@@ -19,7 +19,7 @@ type Options struct {
 
 // GenerateTerraform writes one .tf file per principal with minimal policy resources.
 func GenerateTerraform(findings []cloud.Finding, policies map[string]cloud.Policy, opts Options) error {
-	if err := os.MkdirAll(opts.OutputDir, 0o755); err != nil {
+	if err := os.MkdirAll(opts.OutputDir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 
@@ -61,7 +61,7 @@ func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string
 		content = fmt.Sprintf("# no Terraform template available for provider %q\n", principal.Provider)
 	}
 
-	return os.WriteFile(filename, []byte(content), 0o644)
+	return os.WriteFile(filename, []byte(content), 0o600)
 }
 
 func formatAWSTF(s, name string, policy cloud.Policy) string {

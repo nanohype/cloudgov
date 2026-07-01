@@ -30,7 +30,7 @@ func DefaultStore() (*Store, error) {
 		return nil, fmt.Errorf("home directory: %w", err)
 	}
 	dir := filepath.Join(home, ".cloudgov", "baselines")
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, fmt.Errorf("create baselines dir: %w", err)
 	}
 	return NewStore(dir), nil
@@ -59,7 +59,7 @@ func (s *Store) Save(name string, report json.RawMessage, source string) error {
 	// Atomic write via temp file + rename
 	path := s.path(name)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
