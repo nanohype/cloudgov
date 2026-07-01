@@ -24,7 +24,7 @@ import (
 // left untouched, so re-running remediate is idempotent and won't clobber a file
 // that hasn't changed.
 func WriteFixScripts(orphans []cloud.OrphanResource, outDir string) ([]string, error) {
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
+	if err := os.MkdirAll(outDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -149,5 +149,6 @@ func writeIfChanged(path string, data []byte) error {
 	if existing, err := os.ReadFile(path); err == nil && bytes.Equal(existing, data) {
 		return nil
 	}
-	return os.WriteFile(path, data, 0o755)
+	// #nosec G306 -- remediation script must be executable; 0o700 keeps it owner-only
+	return os.WriteFile(path, data, 0o700)
 }

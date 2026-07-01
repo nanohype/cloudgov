@@ -6,8 +6,8 @@ import "context"
 type SecretFindingType string
 
 const (
-	SecretAWSAccessKey          SecretFindingType = "AWS_ACCESS_KEY"
-	SecretGCPServiceAccountKey  SecretFindingType = "GCP_SERVICE_ACCOUNT_KEY"
+	SecretAWSAccessKey          SecretFindingType = "AWS_ACCESS_KEY"          // #nosec G101 -- finding-type label, not a credential
+	SecretGCPServiceAccountKey  SecretFindingType = "GCP_SERVICE_ACCOUNT_KEY" // #nosec G101 -- finding-type label, not a credential
 	SecretPrivateKey            SecretFindingType = "PRIVATE_KEY"
 	SecretAzureConnectionString SecretFindingType = "AZURE_CONNECTION_STRING"
 	SecretPassword              SecretFindingType = "PASSWORD"

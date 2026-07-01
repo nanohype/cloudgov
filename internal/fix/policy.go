@@ -10,7 +10,7 @@ import (
 
 // WriteRawPolicies writes raw policy JSON/YAML files (one per principal) to dir.
 func WriteRawPolicies(policies map[string]cloud.Policy, dir string) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
 	}
 	for principalID, pol := range policies {
@@ -19,7 +19,7 @@ func WriteRawPolicies(policies map[string]cloud.Policy, dir string) error {
 		}
 		ext := ".json"
 		filename := filepath.Join(dir, slug(principalID)+ext)
-		if err := os.WriteFile(filename, pol.Raw, 0o644); err != nil {
+		if err := os.WriteFile(filename, pol.Raw, 0o600); err != nil {
 			return fmt.Errorf("write policy %s: %w", principalID, err)
 		}
 	}
