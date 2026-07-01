@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -180,6 +181,9 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		policies[f.Principal.ID] = pol
+		if !quiet {
+			writePolicyFallbackWarnings(os.Stderr, f.Principal.Name, pol.Fallbacks)
+		}
 	}
 
 	opts := fix.Options{
@@ -199,6 +203,24 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	return nil
+}
+
+// writePolicyFallbackWarnings surfaces actions the minimal-policy generator
+// could not scope: they land in the generated policy under Resource "*"
+// (statement Sid "UnscopedFallback"), which a least-privilege fix must never
+// do silently.
+func writePolicyFallbackWarnings(w io.Writer, principal string, fallbacks []cloud.PolicyFallback) {
+	if len(fallbacks) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "warn: %s: %d action(s) could not be scoped and were granted Resource \"*\" (statement Sid %q):\n", principal, len(fallbacks), "UnscopedFallback")
+	for _, fb := range fallbacks {
+		if fb.Resource != "" {
+			fmt.Fprintf(w, "  - %s: %s (recorded resource %q)\n", fb.Action, fb.Reason, fb.Resource)
+		} else {
+			fmt.Fprintf(w, "  - %s: %s\n", fb.Action, fb.Reason)
+		}
+	}
 }
 
 func resolveIAMProviders(ctx context.Context, profile string) ([]cloud.IAMProvider, error) {

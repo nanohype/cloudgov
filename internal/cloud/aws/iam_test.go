@@ -562,6 +562,118 @@ func TestMinimalPolicyDeterministic(t *testing.T) {
 	}
 }
 
+func TestMinimalPolicyFallbacks(t *testing.T) {
+	tests := []struct {
+		name          string
+		used          []cloud.Permission
+		wantFallbacks []cloud.PolicyFallback
+		wantResources map[string]string // statement Resource → expected Sid
+	}{
+		{
+			name:          "scoped ARN produces no fallback and no Sid",
+			used:          []cloud.Permission{{Action: "s3:GetObject", Resource: "arn:aws:s3:::a/*"}},
+			wantFallbacks: nil,
+			wantResources: map[string]string{"arn:aws:s3:::a/*": ""},
+		},
+		{
+			name: "empty resource falls back as no-resource-recorded",
+			used: []cloud.Permission{{Action: "ec2:DescribeInstances", Resource: ""}},
+			wantFallbacks: []cloud.PolicyFallback{
+				{Action: "ec2:DescribeInstances", Reason: cloud.FallbackNoResourceRecorded},
+			},
+			wantResources: map[string]string{"*": "UnscopedFallback"},
+		},
+		{
+			name: "wildcard resource from audit events falls back as no-resource-recorded",
+			used: []cloud.Permission{{Action: "sts:GetCallerIdentity", Resource: "*"}},
+			wantFallbacks: []cloud.PolicyFallback{
+				{Action: "sts:GetCallerIdentity", Reason: cloud.FallbackNoResourceRecorded},
+			},
+			wantResources: map[string]string{"*": "UnscopedFallback"},
+		},
+		{
+			name: "non-ARN resource falls back as unrecognized and keeps the recorded value",
+			used: []cloud.Permission{{Action: "s3:PutObject", Resource: "my-bucket"}},
+			wantFallbacks: []cloud.PolicyFallback{
+				{Action: "s3:PutObject", Resource: "my-bucket", Reason: cloud.FallbackUnrecognizedResource},
+			},
+			wantResources: map[string]string{"*": "UnscopedFallback"},
+		},
+		{
+			name: "mixed input: only unscopable actions fall back, sorted by action",
+			used: []cloud.Permission{
+				{Action: "sts:GetCallerIdentity", Resource: "*"},
+				{Action: "s3:GetObject", Resource: "arn:aws:s3:::a/*"},
+				{Action: "s3:PutObject", Resource: "my-bucket"},
+				{Action: "ec2:DescribeInstances", Resource: ""},
+			},
+			wantFallbacks: []cloud.PolicyFallback{
+				{Action: "ec2:DescribeInstances", Reason: cloud.FallbackNoResourceRecorded},
+				{Action: "s3:PutObject", Resource: "my-bucket", Reason: cloud.FallbackUnrecognizedResource},
+				{Action: "sts:GetCallerIdentity", Reason: cloud.FallbackNoResourceRecorded},
+			},
+			wantResources: map[string]string{
+				"*":                "UnscopedFallback",
+				"arn:aws:s3:::a/*": "",
+			},
+		},
+		{
+			name: "duplicate unscopable permissions produce one fallback entry",
+			used: []cloud.Permission{
+				{Action: "ec2:DescribeInstances", Resource: ""},
+				{Action: "ec2:DescribeInstances", Resource: ""},
+			},
+			wantFallbacks: []cloud.PolicyFallback{
+				{Action: "ec2:DescribeInstances", Reason: cloud.FallbackNoResourceRecorded},
+			},
+			wantResources: map[string]string{"*": "UnscopedFallback"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Provider{}
+			pol, err := p.MinimalPolicy(context.Background(), cloud.Principal{Name: "x"}, tt.used)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if len(pol.Fallbacks) != len(tt.wantFallbacks) {
+				t.Fatalf("fallbacks: got %v, want %v", pol.Fallbacks, tt.wantFallbacks)
+			}
+			for i, fb := range pol.Fallbacks {
+				if fb != tt.wantFallbacks[i] {
+					t.Errorf("fallback %d: got %+v, want %+v", i, fb, tt.wantFallbacks[i])
+				}
+			}
+
+			var doc struct {
+				Statement []struct {
+					Sid      string   `json:"Sid"`
+					Action   []string `json:"Action"`
+					Resource string   `json:"Resource"`
+				} `json:"Statement"`
+			}
+			if err := json.Unmarshal(pol.Raw, &doc); err != nil {
+				t.Fatalf("unmarshal policy: %v", err)
+			}
+			if len(doc.Statement) != len(tt.wantResources) {
+				t.Fatalf("got %d statements, want %d: %s", len(doc.Statement), len(tt.wantResources), pol.Raw)
+			}
+			for _, s := range doc.Statement {
+				wantSid, ok := tt.wantResources[s.Resource]
+				if !ok {
+					t.Errorf("unexpected statement resource %q", s.Resource)
+					continue
+				}
+				if s.Sid != wantSid {
+					t.Errorf("statement %q: Sid %q, want %q", s.Resource, s.Sid, wantSid)
+				}
+			}
+		})
+	}
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 func TestToStringSlice(t *testing.T) {

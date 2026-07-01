@@ -281,18 +281,56 @@ func (p *Provider) UsedPermissions(ctx context.Context, principal cloud.Principa
 	return p.cloudtrailUsedPermissions(ctx, principal, since)
 }
 
+// unscopedFallbackSid marks the generated statement whose Resource is the
+// wildcard fallback, so the widened grant is visible in the policy itself.
+const unscopedFallbackSid = "UnscopedFallback"
+
 // MinimalPolicy builds an AWS IAM policy document from the used permission set.
+// Actions whose audit events carried no resource, or a resource that isn't a
+// recognizable ARN, can't be scoped and fall back to Resource "*". That
+// statement is marked with Sid "UnscopedFallback" and every fallback is
+// reported on the returned Policy so callers can surface it.
 func (p *Provider) MinimalPolicy(_ context.Context, principal cloud.Principal, used []cloud.Permission) (cloud.Policy, error) {
 	grouped := make(map[string][]string)
+	var fallbacks []cloud.PolicyFallback
+	seenFallback := make(map[string]bool)
 	for _, perm := range used {
 		r := perm.Resource
-		if r == "" {
+		var reason cloud.PolicyFallbackReason
+		switch {
+		case r == "" || r == "*":
+			// extractResource yields "*" when the CloudTrail event carried no
+			// resource — common for actions without resource-level support.
+			reason = cloud.FallbackNoResourceRecorded
+		case !strings.HasPrefix(r, "arn:"):
+			// CloudTrail's ResourceName can be a bare name (e.g. a bucket
+			// name), which is not a valid statement Resource; scoping to it
+			// would produce a policy IAM rejects.
+			reason = cloud.FallbackUnrecognizedResource
+		}
+		if reason != "" {
+			key := perm.Action + "|" + perm.Resource
+			if !seenFallback[key] {
+				seenFallback[key] = true
+				fb := cloud.PolicyFallback{Action: perm.Action, Reason: reason}
+				if reason == cloud.FallbackUnrecognizedResource {
+					fb.Resource = perm.Resource
+				}
+				fallbacks = append(fallbacks, fb)
+			}
 			r = "*"
 		}
 		grouped[r] = append(grouped[r], perm.Action)
 	}
+	sort.Slice(fallbacks, func(i, j int) bool {
+		if fallbacks[i].Action != fallbacks[j].Action {
+			return fallbacks[i].Action < fallbacks[j].Action
+		}
+		return fallbacks[i].Resource < fallbacks[j].Resource
+	})
 
 	type statement struct {
+		Sid      string   `json:"Sid,omitempty"`
 		Effect   string   `json:"Effect"`
 		Action   []string `json:"Action"`
 		Resource string   `json:"Resource"`
@@ -305,11 +343,15 @@ func (p *Provider) MinimalPolicy(_ context.Context, principal cloud.Principal, u
 	for resource, actions := range grouped {
 		acts := dedup(actions)
 		sort.Strings(acts)
-		d.Statement = append(d.Statement, statement{
+		s := statement{
 			Effect:   "Allow",
 			Action:   acts,
 			Resource: resource,
-		})
+		}
+		if resource == "*" {
+			s.Sid = unscopedFallbackSid
+		}
+		d.Statement = append(d.Statement, s)
 	}
 	// Map iteration order is randomized; sort statements by resource so the
 	// generated policy (which `iam fix` emits as committed Terraform) is
@@ -323,9 +365,10 @@ func (p *Provider) MinimalPolicy(_ context.Context, principal cloud.Principal, u
 		return cloud.Policy{}, err
 	}
 	return cloud.Policy{
-		Provider: "aws",
-		Format:   "aws-iam-json",
-		Raw:      raw,
+		Provider:  "aws",
+		Format:    "aws-iam-json",
+		Raw:       raw,
+		Fallbacks: fallbacks,
 	}, nil
 }
 
