@@ -1,11 +1,8 @@
-// Package providers resolves the cloud providers available in the current
+// Package providers resolves the providers available in the current
 // environment. It is the single seam through which commands obtain providers:
-// rather than each command hardcoding one cloud, it asks the registry for every
-// provider whose credentials are present that implements the capability it needs.
-//
-// Adding a cloud is "implement the cloud.Provider capability interfaces in
-// internal/cloud/<cloud> + register a Factory in Default" — no command changes.
-// Today only AWS is registered; GCP/Azure are commented slots in Default.
+// rather than each command hardcoding SDK wiring, it asks the registry for
+// every provider whose credentials are present that implements the capability
+// it needs. The registry is built in Default; AWS is the registered provider.
 package providers
 
 import (
@@ -92,8 +89,8 @@ func WithQuiet(quiet bool) Option {
 	return func(o *options) { o.quiet = quiet }
 }
 
-// Default builds the registry of all built-in providers — the single place a
-// new cloud is registered.
+// Default builds the registry of built-in providers — the single place
+// provider factories are registered.
 func Default(opts ...Option) *Registry {
 	var o options
 	for _, opt := range opts {
@@ -101,8 +98,6 @@ func Default(opts ...Option) *Registry {
 	}
 	return NewRegistry(
 		newAWSFactory(o.profile, o.quiet),
-		// gcp/azure factories — register here once implemented; the capability
-		// interfaces and finding.Provider field already accommodate them.
 	)
 }
 

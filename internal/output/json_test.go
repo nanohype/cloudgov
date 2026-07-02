@@ -46,7 +46,7 @@ func TestWriteIAM(t *testing.T) {
 		{
 			Severity:  cloud.SeverityLow,
 			Type:      cloud.FindingWildcardResource,
-			Provider:  "gcp",
+			Provider:  "gamma",
 			Principal: nil,
 			Resource:  "*",
 			Detail:    "wildcard resource",
@@ -81,7 +81,7 @@ func TestWriteIAM(t *testing.T) {
 	}{
 		{0, "CRITICAL", "ADMIN_ACCESS", "aws"},
 		{1, "HIGH", "UNUSED_PERMISSION", "aws"},
-		{2, "LOW", "WILDCARD_RESOURCE", "gcp"},
+		{2, "LOW", "WILDCARD_RESOURCE", "gamma"},
 	}
 	for _, tc := range tests {
 		var f map[string]interface{}
@@ -119,7 +119,7 @@ func TestWriteIAMEmpty(t *testing.T) {
 
 func TestWriteIAMPrincipalNil(t *testing.T) {
 	findings := []cloud.Finding{
-		{Severity: cloud.SeverityInfo, Type: cloud.FindingBroadScope, Provider: "azure", Principal: nil, Resource: "/subscriptions/*"},
+		{Severity: cloud.SeverityInfo, Type: cloud.FindingBroadScope, Provider: "beta", Principal: nil, Resource: "/accounts/*"},
 	}
 	type iamOut struct {
 		Findings []json.RawMessage `json:"findings"`
@@ -154,17 +154,17 @@ func TestWriteStorage(t *testing.T) {
 		{
 			Severity: cloud.SeverityHigh,
 			Type:     cloud.BucketUnencrypted,
-			Provider: "gcp",
+			Provider: "gamma",
 			Bucket:   "unencrypted-data",
-			Region:   "us-central1",
+			Region:   "region-1",
 			Detail:   "bucket has no encryption",
 		},
 		{
 			Severity: cloud.SeverityMedium,
 			Type:     cloud.BucketNoVersioning,
-			Provider: "azure",
+			Provider: "beta",
 			Bucket:   "no-version-container",
-			Region:   "eastus",
+			Region:   "region-2",
 		},
 	}
 
@@ -393,8 +393,8 @@ func TestWriteCostEmpty(t *testing.T) {
 func TestWriteCostMultipleProviders(t *testing.T) {
 	diffs := []cloud.CostDiff{
 		{Provider: "aws", TotalBefore: 200, TotalAfter: 210, TotalDelta: 10},
-		{Provider: "gcp", TotalBefore: 80, TotalAfter: 75, TotalDelta: -5},
-		{Provider: "azure", TotalBefore: 50, TotalAfter: 50, TotalDelta: 0},
+		{Provider: "gamma", TotalBefore: 80, TotalAfter: 75, TotalDelta: -5},
+		{Provider: "beta", TotalBefore: 50, TotalAfter: 50, TotalDelta: 0},
 	}
 
 	type diffItem struct {
@@ -412,7 +412,7 @@ func TestWriteCostMultipleProviders(t *testing.T) {
 	if len(out.Diffs) != 3 {
 		t.Fatalf("diffs length: got %d, want 3", len(out.Diffs))
 	}
-	providers := []string{"aws", "gcp", "azure"}
+	providers := []string{"aws", "gamma", "beta"}
 	deltas := []float64{10, -5, 0}
 	for i, d := range out.Diffs {
 		if d.Provider != providers[i] {

@@ -60,9 +60,9 @@ func TestScan_MultipleProviders(t *testing.T) {
 		},
 	}
 	p2 := &mockInventoryProvider{
-		name: "gcp",
+		name: "gamma",
 		resources: []cloud.InventoryResource{
-			{Kind: cloud.ResourceCompute, Type: "compute:instance", ID: "vm-1", Provider: "gcp", Region: "us-central1"},
+			{Kind: cloud.ResourceCompute, Type: "compute:instance", ID: "vm-1", Provider: "gamma", Region: "region-1"},
 		},
 	}
 
@@ -75,12 +75,12 @@ func TestScan_MultipleProviders(t *testing.T) {
 		t.Fatalf("expected 2 resources, got %d", len(resources))
 	}
 
-	// Should be sorted by provider: aws < gcp
+	// Should be sorted by provider: aws < gamma
 	if resources[0].Provider != "aws" {
 		t.Errorf("expected first resource from aws, got %s", resources[0].Provider)
 	}
-	if resources[1].Provider != "gcp" {
-		t.Errorf("expected second resource from gcp, got %s", resources[1].Provider)
+	if resources[1].Provider != "gamma" {
+		t.Errorf("expected second resource from gamma, got %s", resources[1].Provider)
 	}
 }
 

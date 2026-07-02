@@ -77,7 +77,7 @@ func TestScan(t *testing.T) {
 			name: "multiple providers merged and sorted",
 			providers: []cloud.StorageProvider{
 				&mockStorageProvider{name: "aws", findings: []cloud.BucketFinding{medium}},
-				&mockStorageProvider{name: "gcp", findings: []cloud.BucketFinding{critical, high}},
+				&mockStorageProvider{name: "gamma", findings: []cloud.BucketFinding{critical, high}},
 			},
 			opts:        ScanOptions{},
 			wantBuckets: []string{"public-bucket", "unenc-bucket", "noversion-bucket"},
@@ -119,7 +119,7 @@ func TestScan(t *testing.T) {
 			name: "error from second provider is returned",
 			providers: []cloud.StorageProvider{
 				&mockStorageProvider{name: "aws", findings: []cloud.BucketFinding{critical}},
-				&mockStorageProvider{name: "gcp", err: errors.New("quota exceeded")},
+				&mockStorageProvider{name: "gamma", err: errors.New("quota exceeded")},
 			},
 			opts:    ScanOptions{},
 			wantErr: true,

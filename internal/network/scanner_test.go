@@ -68,7 +68,7 @@ func TestScan(t *testing.T) {
 			name: "multiple providers merged and sorted",
 			providers: []cloud.NetworkProvider{
 				&mockNetworkProvider{name: "aws", findings: []cloud.NetworkFinding{medium}},
-				&mockNetworkProvider{name: "gcp", findings: []cloud.NetworkFinding{critical, high}},
+				&mockNetworkProvider{name: "gamma", findings: []cloud.NetworkFinding{critical, high}},
 			},
 			opts:          ScanOptions{},
 			wantResources: []string{"sg-001", "sg-002", "sg-003"},

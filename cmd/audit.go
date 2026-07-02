@@ -51,7 +51,7 @@ func init() {
 	auditCmd.Flags().StringSliceVar(&auditSinks, "sink", []string{},
 		"notification sink (repeatable): slack:<webhook-url>, webhook:<url>, or pagerduty:<routing-key>")
 	auditCmd.Flags().StringVar(&auditReportURL, "report-url", "",
-		"optional URL embedded in sink notifications (e.g. link to full report in S3/GCS)")
+		"optional URL embedded in sink notifications (e.g. link to full report in S3)")
 }
 
 func runAudit(cmd *cobra.Command, _ []string) error {
@@ -256,8 +256,8 @@ func sortFindingsBySeverity(fs []sinks.Finding) {
 }
 
 func buildAuditProviders(ctx context.Context) (audit.Providers, error) {
-	// Each available provider contributes to the capabilities it implements, so a
-	// future GCP/Azure provider joins the audit with no change here.
+	// Each available registry provider contributes to the capabilities it
+	// implements, so the audit tracks the registry with no change here.
 	all := providers.Default(providers.WithQuiet(quiet)).Available(ctx)
 	if len(all) == 0 {
 		return audit.Providers{}, errors.New("no cloud provider detected")

@@ -80,7 +80,7 @@ func TestScan(t *testing.T) {
 			name: "multiple providers merged and sorted",
 			providers: []cloud.CertProvider{
 				&mockCertProvider{name: "aws", findings: []cloud.CertFinding{month}},
-				&mockCertProvider{name: "gcp", findings: []cloud.CertFinding{expired, week}},
+				&mockCertProvider{name: "gamma", findings: []cloud.CertFinding{expired, week}},
 			},
 			opts:        ScanOptions{},
 			wantDomains: []string{"expired.example.com", "week.example.com", "month.example.com"},
