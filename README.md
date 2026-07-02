@@ -238,6 +238,7 @@ ls ./fixes/
 | `--format` | `terraform` | Output format: `terraform`, `json` |
 | `--out` | `./cloudgov-fixes` | Output directory for generated files |
 | `--severity` | `HIGH` | Minimum severity to generate fixes for |
+| `--profile` | (default chain) | AWS named profile to use for credentials (match the profile used for the scan) |
 
 ---
 
@@ -336,6 +337,8 @@ cloudgov storage audit --output json --output-file storage-findings.json
 | `--severity` | `LOW` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
+| `--fix` | `false` | Generate shell remediation scripts for each finding |
+| `--out` | `.` | Directory to write fix scripts (used with `--fix`) |
 
 ---
 
@@ -378,7 +381,7 @@ cloudgov network audit --fix --out fixes/
 
 Read a previously-saved JSON scan report and emit shell scripts that remediate each finding. The offline equivalent of `<domain> audit --fix` — useful when you want to review findings first, gate remediation behind code review, or apply a subset by severity.
 
-Supported report types: `storage`, `network`. Reports are read from files written via `--output json --output-file <path>` on the corresponding scan command.
+Supported report types: `storage`, `network`, `orphans`. Reports are read from files written via `--output json --output-file <path>` on the corresponding scan command.
 
 ```sh
 # Generate fix scripts from a saved storage scan
@@ -394,7 +397,7 @@ cloudgov remediate --type network --from network.json --severity CRITICAL --out 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--type` | (required) | Report type: `storage` or `network` |
+| `--type` | (required) | Report type: `storage`, `network`, or `orphans` |
 | `--from` | (required) | Path to JSON scan report |
 | `--out` | `.` | Directory to write fix scripts |
 | `--severity` | `LOW` | Minimum severity to include in fix scripts |
@@ -500,7 +503,7 @@ cloudgov lambda audit --severity CRITICAL --output json --output-file lambda.jso
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--severity` | `LOW` | Minimum severity to report |
-| `--output` | `table` | Output format: `table`, `json` |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
 
 ---
@@ -531,7 +534,7 @@ cloudgov k8s rbac --severity HIGH
 |------|---------|-------------|
 | `--kubeconfig` | (chain) | Path to kubeconfig file |
 | `--severity` | `LOW` | Minimum severity to report |
-| `--output` | `table` | Output format: `table`, `json` |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
 
 ---
@@ -588,7 +591,7 @@ cloudgov compliance soc2 --iam-report iam.json --output json --output-file soc2.
 | `--network-report` | | Path to JSON report from `network audit` |
 | `--certs-report` | | Path to JSON report from `certs` |
 | `--tags-report` | | Path to JSON report from `tags` |
-| `--output` | `table` | Output format: `table`, `json` |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
 
 ---
@@ -617,7 +620,7 @@ cloudgov drift terraform.tfstate --output json --output-file drift.json
 |------|---------|-------------|
 | `--resource-type` | | Filter to a single Terraform resource type |
 | `--concurrency` | `10` | Max concurrent API calls |
-| `--output` | `table` | Output format: `table`, `json` |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
 | `--output-file` | | Write output to file instead of stdout |
 
 ---
@@ -986,7 +989,7 @@ All formats can be written to a file with `--output-file path/to/file`.
 
 ```sh
 cloudgov --version
-# v0.1.0 (commit abc1234, built 2026-03-01T12:00:00Z)
+# cloudgov version v0.1.0 (commit abc1234, built 2026-03-01T12:00:00Z)
 ```
 
 ---
