@@ -23,7 +23,7 @@ func (m *mockQuotaProvider) ListQuotas(_ context.Context) ([]cloud.QuotaUsage, e
 func TestScan(t *testing.T) {
 	high := cloud.QuotaUsage{Provider: "aws", Service: "EC2", QuotaName: "Instances", Used: 95, Limit: 100, Utilization: 95.0, Region: "us-east-1"}
 	medium := cloud.QuotaUsage{Provider: "aws", Service: "IAM", QuotaName: "Roles", Used: 600, Limit: 1000, Utilization: 60.0, Region: "global"}
-	low := cloud.QuotaUsage{Provider: "gcp", Service: "Compute", QuotaName: "CPUs", Used: 10, Limit: 100, Utilization: 10.0, Region: "us-central1"}
+	low := cloud.QuotaUsage{Provider: "gamma", Service: "Compute", QuotaName: "CPUs", Used: 10, Limit: 100, Utilization: 10.0, Region: "region-1"}
 
 	tests := []struct {
 		name      string
@@ -44,7 +44,7 @@ func TestScan(t *testing.T) {
 			name: "multiple providers merged and sorted",
 			providers: []cloud.QuotaProvider{
 				&mockQuotaProvider{name: "aws", quotas: []cloud.QuotaUsage{high, medium}},
-				&mockQuotaProvider{name: "gcp", quotas: []cloud.QuotaUsage{low}},
+				&mockQuotaProvider{name: "gamma", quotas: []cloud.QuotaUsage{low}},
 			},
 			opts:      ScanOptions{},
 			wantNames: []string{"Instances", "Roles", "CPUs"},
@@ -87,7 +87,7 @@ func TestScan(t *testing.T) {
 			name: "error from second provider is returned",
 			providers: []cloud.QuotaProvider{
 				&mockQuotaProvider{name: "aws", quotas: []cloud.QuotaUsage{high}},
-				&mockQuotaProvider{name: "gcp", err: errors.New("quota exceeded")},
+				&mockQuotaProvider{name: "gamma", err: errors.New("quota exceeded")},
 			},
 			opts:    ScanOptions{},
 			wantErr: true,

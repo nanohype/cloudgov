@@ -23,7 +23,7 @@ func (m *mockOrphansProvider) ListOrphans(_ context.Context) ([]cloud.OrphanReso
 func TestScan(t *testing.T) {
 	disk := cloud.OrphanResource{Kind: cloud.OrphanDisk, ID: "vol-1", Provider: "aws", MonthlyCost: 10.0}
 	ip := cloud.OrphanResource{Kind: cloud.OrphanIP, ID: "eip-1", Provider: "aws", MonthlyCost: 3.6}
-	lb := cloud.OrphanResource{Kind: cloud.OrphanLoadBalancer, ID: "lb-1", Provider: "gcp", MonthlyCost: 20.0}
+	lb := cloud.OrphanResource{Kind: cloud.OrphanLoadBalancer, ID: "lb-1", Provider: "gamma", MonthlyCost: 20.0}
 	cheap := cloud.OrphanResource{Kind: cloud.OrphanSnapshot, ID: "snap-1", Provider: "aws", MonthlyCost: 0.5}
 
 	tests := []struct {
@@ -45,7 +45,7 @@ func TestScan(t *testing.T) {
 			name: "multiple providers merged and sorted by cost descending",
 			providers: []cloud.OrphansProvider{
 				&mockOrphansProvider{name: "aws", orphans: []cloud.OrphanResource{disk, ip}},
-				&mockOrphansProvider{name: "gcp", orphans: []cloud.OrphanResource{lb}},
+				&mockOrphansProvider{name: "gamma", orphans: []cloud.OrphanResource{lb}},
 			},
 			opts:    ScanOptions{},
 			wantIDs: []string{"lb-1", "vol-1", "eip-1"},
@@ -92,7 +92,7 @@ func TestScan(t *testing.T) {
 			name: "error from second provider is returned",
 			providers: []cloud.OrphansProvider{
 				&mockOrphansProvider{name: "aws", orphans: []cloud.OrphanResource{disk}},
-				&mockOrphansProvider{name: "gcp", err: errors.New("quota exceeded")},
+				&mockOrphansProvider{name: "gamma", err: errors.New("quota exceeded")},
 			},
 			opts:    ScanOptions{},
 			wantErr: true,

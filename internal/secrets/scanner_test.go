@@ -31,7 +31,7 @@ func TestScanProviders(t *testing.T) {
 	}
 	mediumFinding := cloud.SecretFinding{
 		Severity: cloud.SeverityMedium, Type: cloud.SecretGenericSecret,
-		Provider: "gcp", Resource: "cloud-function:func-c",
+		Provider: "gamma", Resource: "function:func-c",
 	}
 
 	tests := []struct {
@@ -53,10 +53,10 @@ func TestScanProviders(t *testing.T) {
 			name: "multiple providers merged and sorted by severity",
 			providers: []cloud.SecretsProvider{
 				&mockSecretsProvider{name: "aws", findings: []cloud.SecretFinding{highFinding}},
-				&mockSecretsProvider{name: "gcp", findings: []cloud.SecretFinding{mediumFinding, criticalFinding}},
+				&mockSecretsProvider{name: "gamma", findings: []cloud.SecretFinding{mediumFinding, criticalFinding}},
 			},
 			opts:          ScanOptions{},
-			wantResources: []string{"lambda:func-a", "lambda:func-b", "cloud-function:func-c"},
+			wantResources: []string{"lambda:func-a", "lambda:func-b", "function:func-c"},
 		},
 		{
 			name: "severity filter excludes medium",
@@ -92,7 +92,7 @@ func TestScanProviders(t *testing.T) {
 			name: "error from second provider is returned",
 			providers: []cloud.SecretsProvider{
 				&mockSecretsProvider{name: "aws", findings: []cloud.SecretFinding{criticalFinding}},
-				&mockSecretsProvider{name: "gcp", err: errors.New("quota exceeded")},
+				&mockSecretsProvider{name: "gamma", err: errors.New("quota exceeded")},
 			},
 			opts:    ScanOptions{},
 			wantErr: true,

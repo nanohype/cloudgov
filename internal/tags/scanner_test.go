@@ -23,7 +23,7 @@ func (m *mockTagProvider) AuditTags(_ context.Context, _ []string) ([]cloud.TagF
 func TestScan(t *testing.T) {
 	f1 := cloud.TagFinding{Severity: cloud.SeverityMedium, Provider: "aws", ResourceType: "ec2:instance", ResourceID: "i-001", MissingTags: []string{"owner"}}
 	f2 := cloud.TagFinding{Severity: cloud.SeverityMedium, Provider: "aws", ResourceType: "s3:bucket", ResourceID: "my-bucket", MissingTags: []string{"env", "cost-center"}}
-	f3 := cloud.TagFinding{Severity: cloud.SeverityMedium, Provider: "gcp", ResourceType: "compute:instance", ResourceID: "vm-001", MissingTags: []string{"env"}}
+	f3 := cloud.TagFinding{Severity: cloud.SeverityMedium, Provider: "gamma", ResourceType: "compute:instance", ResourceID: "vm-001", MissingTags: []string{"env"}}
 
 	tests := []struct {
 		name        string
@@ -44,7 +44,7 @@ func TestScan(t *testing.T) {
 			name: "multiple providers merged",
 			providers: []cloud.TagProvider{
 				&mockTagProvider{name: "aws", findings: []cloud.TagFinding{f1, f2}},
-				&mockTagProvider{name: "gcp", findings: []cloud.TagFinding{f3}},
+				&mockTagProvider{name: "gamma", findings: []cloud.TagFinding{f3}},
 			},
 			opts:      ScanOptions{Required: []string{"owner", "env"}},
 			wantCount: 3,
@@ -123,7 +123,7 @@ func TestScanErrorWrapsProviderName(t *testing.T) {
 
 func TestScanSortsByProviderThenTypeTheniID(t *testing.T) {
 	findings := []cloud.TagFinding{
-		{Severity: cloud.SeverityMedium, Provider: "gcp", ResourceType: "compute:instance", ResourceID: "z"},
+		{Severity: cloud.SeverityMedium, Provider: "gamma", ResourceType: "compute:instance", ResourceID: "z"},
 		{Severity: cloud.SeverityMedium, Provider: "aws", ResourceType: "s3:bucket", ResourceID: "b"},
 		{Severity: cloud.SeverityMedium, Provider: "aws", ResourceType: "ec2:instance", ResourceID: "a"},
 	}
@@ -136,8 +136,8 @@ func TestScanSortsByProviderThenTypeTheniID(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %d findings, want 3", len(got))
 	}
-	// Sorted by provider first: aws before gcp
-	if got[0].Provider != "aws" || got[2].Provider != "gcp" {
+	// Sorted by provider first: aws before gamma
+	if got[0].Provider != "aws" || got[2].Provider != "gamma" {
 		t.Errorf("not sorted by provider: got [%s, %s, %s]", got[0].Provider, got[1].Provider, got[2].Provider)
 	}
 }

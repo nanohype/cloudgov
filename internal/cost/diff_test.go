@@ -74,8 +74,8 @@ func TestScan_ProviderError(t *testing.T) {
 
 func TestScan_MultipleProviders(t *testing.T) {
 	aws := &mockCostProvider{name: "aws", diff: cloud.CostDiff{Provider: "aws"}}
-	gcp := &mockCostProvider{name: "gcp", diff: cloud.CostDiff{Provider: "gcp"}}
-	got, err := Scan(context.Background(), []cloud.CostProvider{aws, gcp}, ScanOptions{Days: 30})
+	gamma := &mockCostProvider{name: "gamma", diff: cloud.CostDiff{Provider: "gamma"}}
+	got, err := Scan(context.Background(), []cloud.CostProvider{aws, gamma}, ScanOptions{Days: 30})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

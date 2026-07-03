@@ -25,8 +25,8 @@ func TestWriteFixScripts_GroupsByProvider(t *testing.T) {
 		},
 		{
 			Severity: cloud.SeverityHigh, Type: cloud.BucketNoVersioning,
-			Provider: "gcp", Bucket: "gcs-bucket",
-			Remediation: "gcloud storage buckets update gs://gcs-bucket --versioning",
+			Provider: "gamma", Bucket: "gamma-bucket",
+			Remediation: "fakectl buckets update gamma-bucket --enable-versioning",
 		},
 	}
 
@@ -35,7 +35,7 @@ func TestWriteFixScripts_GroupsByProvider(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(files) != 2 {
-		t.Errorf("expected 2 scripts (aws + gcp), got %d: %v", len(files), files)
+		t.Errorf("expected 2 scripts (aws + gamma), got %d: %v", len(files), files)
 	}
 
 	awsBytes, err := os.ReadFile(filepath.Join(tmp, "fix-aws.sh"))
@@ -57,10 +57,10 @@ func TestWriteFixScripts_GroupsByProvider(t *testing.T) {
 		}
 	}
 
-	gcpBytes, _ := os.ReadFile(filepath.Join(tmp, "fix-gcp.sh"))
-	gcp := string(gcpBytes)
-	if !strings.Contains(gcp, "gcloud storage buckets update gs://gcs-bucket --versioning") {
-		t.Errorf("gcp script missing remediation command")
+	gammaBytes, _ := os.ReadFile(filepath.Join(tmp, "fix-gamma.sh"))
+	gamma := string(gammaBytes)
+	if !strings.Contains(gamma, "fakectl buckets update gamma-bucket --enable-versioning") {
+		t.Errorf("gamma script missing remediation command")
 	}
 }
 

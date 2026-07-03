@@ -9,34 +9,32 @@ Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecu
 
 ---
 
-## Cloud support
+## Scope
 
-cloudgov is **AWS-native today**. Every domain is implemented against AWS, and a
-Kubernetes RBAC scanner covers the cluster side. The architecture is
-provider-pluggable — each domain is a capability interface (`cloud.IAMProvider`,
-`cloud.StorageProvider`, …) resolved through a provider registry — so adding GCP or
-Azure is *additive*: implement the interface for a domain and register a factory, with
-no command changes. Those providers are **not implemented yet**.
+cloudgov is an **AWS governance CLI**. Every cloud domain is implemented against AWS,
+and a Kubernetes RBAC scanner covers the cluster side. Internally each domain is a
+capability interface (`cloud.IAMProvider`, `cloud.StorageProvider`, …) resolved through
+a provider registry, so commands stay decoupled from SDK wiring.
 
-| Domain (command) | AWS | GCP | Azure | Kubernetes |
-|------------------|:---:|:---:|:-----:|:----------:|
-| IAM (`iam scan` / `iam fix`) | ✅ | ⬡ | ⬡ | — |
-| Cost (`cost diff`) | ✅ | ⬡ | ⬡ | — |
-| Orphans (`orphans`) | ✅ | ⬡ | ⬡ | — |
-| Storage (`storage audit`) | ✅ | ⬡ | ⬡ | — |
-| Network (`network audit`) | ✅ | ⬡ | ⬡ | — |
-| Certs (`certs`) | ✅ | ⬡ | ⬡ | — |
-| Tags (`tags`) | ✅ | ⬡ | ⬡ | — |
-| Secrets (`secrets scan`) | ✅ | ⬡ | ⬡ | — |
-| Drift (`drift`) | ✅ | ⬡ | ⬡ | — |
-| Inventory (`inventory`) | ✅ | ⬡ | ⬡ | — |
-| Quota (`quota`) | ✅ | ⬡ | ⬡ | — |
-| Consolidated (`audit`) | ✅ | ⬡ | ⬡ | — |
-| Lambda policy (`lambda audit`) | ✅ | — | — | — |
-| RBAC (`k8s rbac`) | — | — | — | ✅ |
-| Platform tenant (`platform audit`) | ✅<sup>†</sup> | — | — | ✅ |
+| Domain (command) | AWS | Kubernetes |
+|------------------|:---:|:----------:|
+| IAM (`iam scan` / `iam fix`) | ✅ | — |
+| Cost (`cost diff`) | ✅ | — |
+| Orphans (`orphans`) | ✅ | — |
+| Storage (`storage audit`) | ✅ | — |
+| Network (`network audit`) | ✅ | — |
+| Certs (`certs`) | ✅ | — |
+| Tags (`tags`) | ✅ | — |
+| Secrets (`secrets scan`) | ✅ | — |
+| Drift (`drift`) | ✅ | — |
+| Inventory (`inventory`) | ✅ | — |
+| Quota (`quota`) | ✅ | — |
+| Consolidated (`audit`) | ✅ | — |
+| Lambda policy (`lambda audit`) | ✅ | — |
+| RBAC (`k8s rbac`) | — | ✅ |
+| Platform tenant (`platform audit`) | ✅<sup>†</sup> | ✅ |
 
-✅ implemented · ⬡ seam-ready (capability interface exists; no provider yet) · — not applicable
+✅ implemented · — not applicable
 
 <sup>†</sup> Platform audit reads AWS IAM roles (IRSA conformance) and Platform-tenant
 cluster objects (namespace, ResourceQuota, NetworkPolicy, ServiceAccount) — not RBAC,

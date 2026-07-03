@@ -20,7 +20,7 @@ const validStandard = `{
   "content": {
     "required_by_surface": {
       "aws": ["Environment", "ManagedBy", "CostCenter"],
-      "gcp": ["environment"]
+      "k8s": ["environment"]
     }
   }
 }`
@@ -62,7 +62,7 @@ func TestLoadRequired(t *testing.T) {
 	})
 
 	t.Run("empty aws list errors", func(t *testing.T) {
-		body := `{"kind":"nanohype/standards/resource-tagging","content":{"required_by_surface":{"gcp":["environment"]}}}`
+		body := `{"kind":"nanohype/standards/resource-tagging","content":{"required_by_surface":{"k8s":["environment"]}}}`
 		if _, err := LoadRequired(writeTemp(t, body)); err == nil {
 			t.Error("expected error for empty aws list")
 		}

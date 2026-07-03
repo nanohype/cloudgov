@@ -64,7 +64,7 @@ func TestDiff_Mixed(t *testing.T) {
 	baseline := []NormalizedFinding{
 		{Provider: "aws", Type: "ADMIN_ACCESS", ResourceID: "role/admin", Detail: "admin"},       // will be resolved
 		{Provider: "aws", Type: "PUBLIC_ACCESS", ResourceID: "bucket-1", Detail: "public"},        // unchanged
-		{Provider: "gcp", Type: "WILDCARD_RESOURCE", ResourceID: "sa-1", Detail: "wildcard"},      // will be resolved
+		{Provider: "gamma", Type: "WILDCARD_RESOURCE", ResourceID: "sa-1", Detail: "wildcard"},    // will be resolved
 	}
 
 	current := []NormalizedFinding{

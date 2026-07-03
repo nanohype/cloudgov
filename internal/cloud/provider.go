@@ -17,7 +17,7 @@ const (
 	PrincipalRole PrincipalType = "role"
 )
 
-// Principal represents an IAM identity on any cloud.
+// Principal represents an IAM identity.
 type Principal struct {
 	ID       string
 	Name     string

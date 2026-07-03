@@ -26,8 +26,8 @@ func TestWriteFixScripts_GroupsByProvider(t *testing.T) {
 		},
 		{
 			Severity: cloud.SeverityCritical, Type: cloud.NetworkAdminPortOpen,
-			Provider: "gcp", Resource: "fw-1",
-			Remediation: "gcloud compute firewall-rules delete fw-1",
+			Provider: "gamma", Resource: "fw-1",
+			Remediation: "fakectl firewall-rules delete fw-1",
 		},
 	}
 
@@ -36,7 +36,7 @@ func TestWriteFixScripts_GroupsByProvider(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(files) != 2 {
-		t.Errorf("expected 2 scripts (aws + gcp), got %d: %v", len(files), files)
+		t.Errorf("expected 2 scripts (aws + gamma), got %d: %v", len(files), files)
 	}
 
 	// Verify aws script content
@@ -59,11 +59,11 @@ func TestWriteFixScripts_GroupsByProvider(t *testing.T) {
 		}
 	}
 
-	// Verify gcp script content
-	gcpBytes, _ := os.ReadFile(filepath.Join(tmp, "fix-network-gcp.sh"))
-	gcp := string(gcpBytes)
-	if !strings.Contains(gcp, "gcloud compute firewall-rules delete fw-1") {
-		t.Errorf("gcp script missing remediation command")
+	// Verify gamma script content
+	gammaBytes, _ := os.ReadFile(filepath.Join(tmp, "fix-network-gamma.sh"))
+	gamma := string(gammaBytes)
+	if !strings.Contains(gamma, "fakectl firewall-rules delete fw-1") {
+		t.Errorf("gamma script missing remediation command")
 	}
 }
 

@@ -64,7 +64,7 @@ func TestSeverityOrdering(t *testing.T) {
 }
 
 func TestPrincipalTypeConstants(t *testing.T) {
-	// Verify the canonical string values used across providers
+	// Verify the canonical string values providers must emit
 	tests := []struct {
 		pt   PrincipalType
 		want string
