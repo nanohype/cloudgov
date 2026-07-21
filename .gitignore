@@ -6,3 +6,6 @@ coverage.txt
 .task/
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Local planning notes
+.plans/
