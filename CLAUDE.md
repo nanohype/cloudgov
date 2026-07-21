@@ -1,206 +1,160 @@
-# cloudgov — development brief
+# CLAUDE.md — cloudgov
 
-AWS security and cost swiss army knife CLI. Written in Go 1.26.
-Module: `github.com/nanohype/cloudgov`
-Build: `task build`
+## Overview
 
-## project goal
+AWS security and cost governance CLI. A single static Go binary that scans a live
+AWS account (plus the cluster side: Kubernetes RBAC and nanohype Platform-tenant
+conformance) and reports findings as tables, JSON, or SARIF. Read-only — the one
+exception is `iam fix` / `remediate`, which write remediation *files* to disk and
+never call a mutating cloud API.
 
-Production-quality open-source CLI for public release on GitHub.
-Target users: platform engineers, security engineers, DevOps teams.
-Differentiator: single binary, AWS-native, five domains spanning IAM, cost, infrastructure hygiene, security posture, and operational visibility. A Kubernetes RBAC scanner (`cloudgov k8s rbac`) rounds out the cluster side.
+Module: `github.com/nanohype/cloudgov`. Go 1.26.
 
-## commands
+Peer to the rest of the org: it audits what `landing-zone` provisions,
+`eks-gitops` installs, and the `eks-agent-platform` operator reconciles. It does
+not enforce — the operator does that. It does not grade build-time standards —
+fab's quality-check skill does that.
 
-**IAM**
-- `cloudgov iam scan` — unused/overprivileged IAM permissions vs CloudTrail/Audit Logs
-- `cloudgov iam fix` — generate Terraform fix files from scan report
+## Command surface
 
-**Cost**
-- `cloudgov cost diff` — spend delta between two time windows
+| Group | Commands |
+|-------|----------|
+| IAM | `iam scan` (unused/overprivileged permissions vs CloudTrail), `iam fix` (Terraform fix files from a scan report) |
+| Cost | `cost diff` (spend delta between two windows) |
+| Infrastructure hygiene | `orphans`, `storage audit`, `network audit`, `certs`, `tags` |
+| Security posture | `secrets scan`, `lambda audit`, `compliance`, `drift`, `audit` (orchestrates all of the above) |
+| Cluster | `k8s rbac`, `platform audit` (Platform-tenant conformance) |
+| Operational | `inventory`, `quota`, `baseline`, `compare`, `report` |
+| Integration | `mcp` (serves the scanners over stdio as an MCP server) |
 
-**Infrastructure hygiene**
-- `cloudgov orphans` — unused disks, IPs, load balancers
-- `cloudgov storage audit` — public buckets, unencrypted storage, versioning, logging
-- `cloudgov network audit` — overly permissive security groups
-- `cloudgov certs` — TLS certificates expiring within configurable thresholds
-- `cloudgov tags` — resources missing required tags/labels
+`AGENTS.md` is the agent-facing front door — MCP tool table, exit codes, merge-gate
+usage. Keep it in sync when the command surface changes.
 
-**Security posture**
-- `cloudgov secrets scan` — credential/key leakage in code, env, storage
-- `cloudgov compliance` — map findings to benchmarks (CIS, etc.) from a scan report
-- `cloudgov drift` — live cloud state vs Terraform state
-- `cloudgov audit` — orchestrates all the above into one consolidated run
+## Architecture
 
-**Operational visibility & workflow**
-- `cloudgov inventory` — list all AWS resources
-- `cloudgov quota` — service quota utilization vs limits
-- `cloudgov baseline` — save/list/delete named scan baselines
-- `cloudgov compare` — diff a current report against a saved baseline
-- `cloudgov report` — generate HTML report from a JSON scan output
+```
+main.go
+cmd/                      cobra command tree — one file per command group
+internal/
+  cloud/                  capability interfaces (IAMProvider, CostProvider, …) + shared types
+    aws/                  the AWS provider — one file per domain, narrow SDK interfaces
+    k8s/                  the Kubernetes provider (RBAC)
+  providers/              provider registry: Factory + Registry + generic Resolve[T]
+  <domain>/               scanner logic per domain (iam, cost, orphans, storage, …)
+  platform/               Platform-tenant conformance auditor
+  fix/                    Terraform + shell remediation generators
+  compare/                report normalization for compare/report
+  output/                 renderers — one file per domain, shared infra in style.go/jsoncore.go
+  integration/            provider→scanner→output end-to-end suite
+scripts/                  coverage.sh, check-context.sh (CI gates)
+```
 
-## code conventions
+The three seams that matter:
 
-- Idiomatic Go. No magic. Keep packages small and focused.
-- Errors: wrap with `fmt.Errorf("context: %w", err)`. Never swallow.
-- All cloud API calls must be context-aware.
-- Table output via lipgloss + tabwriter. No bubbletea (no interactive TUI needed).
-- No global state. No init() side effects beyond cobra command registration.
-- `task build` must always pass before marking any backlog item complete.
-- `go test ./...` must always pass (no failing tests).
+### Capability interfaces, not a monolithic provider
+`internal/cloud/*.go` defines one narrow interface per domain (`IAMProvider`,
+`StorageProvider`, `QuotaProvider`, …). A provider implements whichever it
+supports. Domain scanners in `internal/<domain>/` take a slice of the interface
+and know nothing about SDKs, which is what makes them mock-testable without
+credentials.
 
-## import aliases (use these consistently)
+### The registry is the only place SDK wiring lives
+Commands never construct a provider. Every `resolveXxxProviders` in `cmd/` is a
+one-liner over `providers.Resolve[T](ctx, …)`, which builds `providers.Default()`
+and returns every available provider implementing `T`. Adding a provider means
+registering a `Factory{Name, Detect, New}` in `internal/providers/registry.go` —
+no `cmd/` file changes. `Default()` is a constructor; there is no package-level
+mutable registry and no global state.
+
+### Narrow SDK interfaces on the AWS provider
+Each file in `internal/cloud/aws/` declares the minimal AWS API surface it needs
+(`iamAPI`, `ec2API`, `sqsAPI`, …) and holds it on `Provider`, so tests inject
+hand-written mocks. Non-fatal warnings go through `p.warnf`, backed by a
+`warnw io.Writer` that `WithQuiet` routes to `io.Discard` — never a bare
+`fmt.Fprintf(os.Stderr, …)`.
+
+## Conventions
+
+- Idiomatic Go, small focused packages, no magic.
+- Wrap errors with `fmt.Errorf("context: %w", err)`. Never swallow.
+- Every cloud API call takes a `context.Context`, derived from `cmd.Context()` in
+  handlers — never `context.Background()`. The root context is cancelled on the
+  first SIGINT/SIGTERM so an interrupt unwinds in-flight requests. CI enforces
+  this (`scripts/check-context.sh`).
+- No global state. No `init()` side effects beyond cobra registration.
+- Business logic lives in `internal/`, not `cmd/`. A `cmd/` file resolves
+  providers, calls a scanner, and renders.
+- Table output via lipgloss + tabwriter. No bubbletea — there is no interactive TUI.
+- A paginator error logs a warning and continues rather than aborting the scan.
+- Cost figures are on-demand list-price estimates; say so in the finding `Detail`.
+
+### Import aliases
 
 ```go
-awssdk   "github.com/aws/aws-sdk-go-v2/aws"
-cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
-cloudk8s "github.com/nanohype/cloudgov/internal/cloud/k8s"
+awssdk        "github.com/aws/aws-sdk-go-v2/aws"
+cloudaws      "github.com/nanohype/cloudgov/internal/cloud/aws"
+cloudk8s      "github.com/nanohype/cloudgov/internal/cloud/k8s"
 orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
 ```
 
-## guardrails — do not do these
+### Tests
 
-- Do not refactor, rename, or clean up code that is not directly required by the current backlog item.
-- Do not add new external dependencies unless the backlog item explicitly requires one and nothing in stdlib or existing deps works.
-- Do not change any public interface (Provider, IAMProvider, CostProvider, etc.) without updating every implementation and every call site.
-- Do not add comments or docstrings to functions you didn't modify.
-- Do not add features, flags, or options that aren't in the current backlog item, even if they seem useful.
-- Do not split one backlog item into multiple commits or partial implementations. Each item must be complete and working before marking [x].
-- Do not mark an item [x] if `task build` or `go test ./...` fails.
-
-## what "done" means for a backlog item
-
-1. The feature/fix/file described in the item is fully implemented.
-2. `task build` exits 0.
-3. `go test ./...` exits 0 with no skipped tests related to the item.
-4. No regressions in packages not mentioned in the backlog item.
-
-## recovery — if the build breaks mid-pass
-
-1. Read the error output carefully.
-2. Fix only what the error points to — do not rewrite the surrounding code.
-3. If a dependency or type doesn't exist, check the actual module in `~/go/pkg/mod` before guessing alternatives.
-4. If stuck after two fix attempts, revert the failing file to its last working state and add a note to the backlog item instead of marking it [x].
-
-## mock pattern for tests
-
-All tests must run with `go test ./...` and no cloud credentials. Use interface mocks:
+All tests run under `go test ./...` with no cloud credentials. Hand-written
+interface mocks only — no `gomock`, no `testify/mock`, no generated mocks. Table-driven
+(`[]struct{...}` + `t.Run()`). Don't `t.Skip()` around missing credentials; mock instead.
 
 ```go
-// implement only the methods needed for the test
+// implement only the methods the test needs
 type mockOrphansProvider struct {
     orphans []cloud.OrphanResource
     err     error
 }
-func (m *mockOrphansProvider) Name() string { return "mock" }
+
+func (m *mockOrphansProvider) Name() string                 { return "mock" }
 func (m *mockOrphansProvider) Detect(_ context.Context) bool { return true }
 func (m *mockOrphansProvider) ListOrphans(_ context.Context) ([]cloud.OrphanResource, error) {
     return m.orphans, m.err
 }
 ```
 
-Do not use `gomock`, `testify/mock`, or any mock-generation library. Hand-written mocks only.
+## Making changes
 
-## known bugs in the current code
+### Add a domain
+1. Define the capability interface in `internal/cloud/<domain>.go`.
+2. Implement it on the AWS provider in `internal/cloud/aws/<domain>.go` behind a
+   narrow SDK interface, with a mock-backed test.
+3. Add the scanner in `internal/<domain>/`.
+4. Add the renderer in `internal/output/<domain>.go` — that one file owns the
+   domain's table renderer, JSON report struct, and writer.
+5. Add `cmd/<domain>.go` and register it in `cmd/root.go`.
+6. Add a floor for the new package to `.coverage-floors` (CI fails on a tested
+   package with no floor).
+7. Update the README command reference and the `AGENTS.md` MCP table.
 
-(none currently outstanding — the three previous bugs are fixed and verified)
+### Add a provider
+Register a `Factory{Name, Detect, New}` in `internal/providers/registry.go`.
+`Detect` must be cheap (credential resolution, no API calls). The command
+resolvers need no edits — they resolve by capability.
 
-## backlog
-
-Work through these in order. Mark items `[x]` when done.
-When all items in a section are done, move to the next section.
-
-### section 1 — tests (required for public release)
-
-- [x] `internal/iam/analyzer_test.go` — unit tests for `analyze()`: admin action detection, wildcard resource, unused permission, stale principal, cross-account, dedup. Use table-driven tests with mock principals and permissions.
-- [x] `internal/iam/suggest_test.go` — test `BuildMinimalPermissions` and `GroupByResource`
-- [x] `internal/fix/terraform_test.go` — test `formatAWSTF`, `slug`
-- [x] `internal/output/json_test.go` — test JSON marshaling round-trips for all report types
-- [x] `internal/orphans/scanner_test.go` — test `Scan` with a mock provider, `TotalMonthlyCost`
-- [x] `internal/storage/scanner_test.go` — test `Scan` with a mock provider, severity filtering
-
-### section 2 — robustness
-
-- [x] Add concurrency to `iam.Scan`: scan principals in parallel with `errgroup`, cap goroutines at 10. Add `--concurrency` flag to `iam scan`.
-- [x] Add exponential backoff retry wrapper for all AWS API calls (use `aws-sdk-go-v2`'s built-in retry with `RetryMaxAttempts: 5`).
-- [x] Handle AWS paginator errors gracefully — log warning and continue rather than aborting the whole scan.
-- [x] `internal/cloud/aws/iam.go`: handle `NoSuchEntity` errors when fetching individual policy versions (policy may have been deleted between list and get).
-- [x] `cmd/iam.go` `runIAMFix`: currently generates empty policies. Fix: load used permissions from the scan report JSON (not by re-querying the API) and pass them to `MinimalPolicy`.
-
-### section 3 — user experience
-
-- [x] Add `--version` output that includes build date and git commit hash (already have Version ldflags, add `BuildDate` and `Commit` vars, set in Taskfile).
-- [x] Add progress output to stderr during long scans: "scanning aws: 12/47 principals..." using a simple counter, not a spinner.
-- [x] `cloudgov iam scan` table output: add a summary line at the bottom: "X critical, Y high, Z medium across N principals".
-- [x] `cloudgov orphans` table: add a TOTAL row at the bottom showing sum of monthly cost.
-- [x] Add `--quiet` flag to root command that suppresses all stderr progress/summary output (for use in scripts).
-- [x] Color-code the cost diff table: red for cost increases >10%, green for decreases.
-
-### section 4 — distribution
-
-- [x] Write `.goreleaser.yaml`: build for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64. Include checksums. Use ldflags for version/commit/date.
-- [x] Write `.github/workflows/release.yml`: trigger on tag push `v*`, run goreleaser.
-- [x] Write `.github/workflows/ci.yml`: on push/PR — `go build ./...`, `go test ./...`, `go vet ./...`.
-- [x] Write `README.md`: installation (brew tap + go install + direct download), quickstart for each command, credentials setup for each provider, CI usage example (SARIF output), screenshot placeholder.
-- [x] Write `CONTRIBUTING.md`: how to add a new provider, how to add a new command group, test requirements.
-
-### section 5 — completeness
-
-- [x] `cloudgov iam scan --output sarif`: currently only works for IAM findings. Route storage findings through SARIF too (add `WriteStorageSARIF` to output package).
-- [x] Add `cloudgov storage audit --fix`: generate remediation scripts (shell, not Terraform) for each finding. Write to `--out` directory.
-- [x] Add `cloudgov cost diff --threshold 20` flag: only show services with >20% change.
-- [x] Add `--profile` flag to `iam scan` for AWS named profiles (pass through to `config.LoadDefaultConfig` with `config.WithSharedConfigProfile`).
-
-### section 6 — coverage (Phase 2 of maintenance plan)
-
-Goal: get `internal/cloud/{aws,k8s}` from 0% to meaningful coverage by extracting per-domain SDK interfaces and injecting them. Reference pattern: `internal/orphans/scanner_test.go:11-22`.
-
-- [x] `internal/cloud/aws/iam.go` — extract narrow `iamAPI` interface, hold it on `Provider`, add `aws/iam_test.go` with hand-written mock. This is the reference implementation; update this section with the proven pattern before fanning out.
-- [x] Repeat for every file in `internal/cloud/aws/` (cloudtrail, cost, orphans, storage, network, certs, tags, drift, inventory, quota, secrets).
-- [x] Repeat for `internal/cloud/k8s/` (rbac).
-- [x] `internal/output/table.go` — `table_test.go` has a smoke test per report renderer (substring assertions, not golden files).
-- [x] `internal/output/sarif.go` — add `sarif_test.go` for SARIF round-trip.
-- [x] `internal/cloud/provider_test.go` — small unit test for `SeverityRank` and constant tables.
-- [x] config loading is covered where it lives — the AWS SDK `config.LoadDefaultConfig` in `internal/cloud/aws` + the per-domain loaders are already tested; there is no separate `internal/config` package.
-- [x] `internal/cost/*_test.go` — add tests for cost-domain logic.
-- [x] `.github/workflows/ci.yml` — runs per-package ratcheting coverage floors (`.coverage-floors` via `scripts/coverage.sh`, which fails below floor or on a floored-but-uncovered / covered-but-unfloored package) + `golangci-lint run`.
-
-### section 7 — uplift (production-grade AWS governance)
-
-Dependency-ordered. cloudgov is **AWS-only**; keep the capability-interface + registry
-architecture clean (domains resolve providers through `internal/providers`, never by
-hardcoding SDK wiring in commands). Do each item completely; `task build` +
-`go test ./...` green before marking `[x]`.
-
-- [x] **Provider registry** (`internal/providers`): collapse the per-command `resolveXProviders` + `buildAuditProviders` into one `Factory{Name,Detect,New}` + `Registry` with generic `Resolve[T]`/`Capable[T]`. Commands resolve providers by capability through the registry instead of hardcoding SDK wiring (proven by `registry_test.go`). No global state — `Default()` is a constructor.
-- [x] **Resolver/flag correctness**: `iam fix` gains `--profile` and passes it (was hardcoded `""` — silent multi-account bug); a root `PersistentPreRun` resets `exitCode`/`failOn`/`quiet` run-state so the command tree is safe to re-drive in one process (MCP/agent loops) — flags reset only when not explicitly passed. The registry already supplies the provider-agnostic "no cloud provider detected" message.
-- [x] **Thread `--quiet` to provider warnings**: the 18 unconditional `os.Stderr` warn spots across `internal/cloud/aws/{iam,cloudtrail,quota,orphans}.go` now go through a `p.warnf` helper backed by a `warnw io.Writer` (os.Stderr by default; `cloudaws.WithQuiet` routes it to `io.Discard`). Threaded via `providers.WithQuiet` through every resolver + `buildAuditProviders` + the `platform` command, all fed by the root `--quiet` flag.
-- [x] **Valid-HCL fix generator**: `formatAWSTF` emitted `jsonencode(<raw policy JSON>)`. The real defect wasn't object syntax (HCL2 accepts JSON-style `{"k": v}`) — it was that Terraform **interpolated IAM policy variables** (`${aws:username}` → "Extra characters after interpolation expression") and rejected JSON escapes HCL doesn't accept (`\/`, `\b`). Now emits the policy as a literal heredoc (backslashes stay literal) with `${`/`%{` escaped so policy variables survive verbatim. Proven by a `tofu fmt` parse test over a `${aws:username}` policy (skips without tofu) + an escaping unit test; spot-checked with `tofu validate`.
-- [x] **Real Service Quotas + honest orphan cost**: `quota.go` now reads the applied EC2/VPC/S3/RDS limits via a `p.quotaLimit(serviceCode, quotaCode, fallback)` helper (`servicequotas:GetServiceQuota`) instead of hardcoded defaults — fixes false near-limit alarms for accounts that raised limits; any unknown code / denied call / nil client falls back to the old default (strictly no-worse). Quota codes verified against AWS docs (EIP `L-0263D0A3`, VPC `L-F678F1CE`, IGW `L-A4707A72`, RDS `L-7B6409FD`; SG `L-E79EC296`, S3 `L-DC2B2D3D` are best-effort + fallback-protected). orphan `Detail` strings now flag the cost as an on-demand list-price estimate (README caveat added); the Pricing API stays deferred. `quotaLimit` mock-tested (applied value vs fallback).
-- [x] **Cluster-residue orphans**: `internal/cloud/aws/cluster_residue.go` adds `orphanClusterResidue()` — EKS `/aws/eks/<cluster>/cluster` log groups (logs), `Karpenter-<cluster>` SQS (sqs), `Karpenter*` EventBridge rules (eventbridge; `ClusterName` tag, missing-tag = failed-create debris), all matched against live `eks:ListClusters` so a live cluster is never flagged; liveness-unknown skips the scan. New `OrphanKind`s + a `Kind.AlwaysReport()` so the `scanner.go` min-cost filter can't hide the ~$0 conflict residue. Mock-tested (live skipped / dead flagged / untagged debris). Adds eks/cloudwatchlogs/sqs/eventbridge clients. **NOTE:** this is DETECTION only; `eks-fleet/scripts/reap-orphans.sh` is fully retired to a pointer once remediate (item 6) gives orphans a delete path.
-- [x] **Wire remediate for the runnable-remediation domains**: `cmd/remediate.go` emits orphan DELETE scripts (`--type orphans`, `internal/orphans/fix.go`) alongside storage/network, synthesizing each delete from the resource's kind+id — EBS `delete-volume`, EIP `release-address`, ELB `delete-load-balancer`, EKS log group `delete-log-group`, Karpenter SQS `delete-queue`, and the Karpenter EventBridge rule's two-step name-keyed teardown (list-targets → remove-targets → delete-rule) — skipping any kind with no single-command delete or an empty id. Output is deterministic (no embedded timestamp) and diff-before-write (an identical script on disk is left untouched, so re-runs are idempotent). Empirically the other audit domains aren't shell-remediable: iam/secrets `Remediation` strings are prose (iam routes through `iam fix`'s Terraform), and certs/tags carry no per-finding remediation — so remediate's contract ("emit shell scripts that remediate each finding") covers exactly storage, network, orphans, and the help text says so. This gives orphans the delete path that retires `eks-fleet/scripts/reap-orphans.sh` to a pointer (an eks-fleet change).
-- **In-domain gaps** (split into ordered sub-items):
-  - [x] **7a — dead `OrphanSnapshot`/`OrphanImage`**: `orphans.go` scans both (extends `ec2API` with `DescribeSnapshots`/`DescribeImages`). Snapshots: self-owned EBS snapshots stranded by AMI deregistration — flagged only when the snapshot's AWS-generated description (`Created by CreateImage(…) for ami-XXXX …`) names an AMI no longer in `DescribeImages(Owners=self)` and no live AMI references it; manual/backup snapshots (no such description) are never flagged (low false-positive). AMIs: self-owned images not referenced by any instance's `ImageId`, framed in `Detail` as a review signal (AMIs kept for future launches also match). Cost = backing GiB × $0.05/mo snapshot list price. Both are first-class through remediate (`delete-snapshot` / `deregister-image` — deregister leaves snapshots, which the next scan flags). Mock-tested; the new kinds carry real cost so they respect `--min-cost` (not `AlwaysReport`).
-  - [x] **7b — `DriftResult` normalization**: `compare/normalize.go` gains a `ReportTypeDrift` (detected by the `results` envelope key) and `normalizeDrift`/`normalizeDriftResult`, so `cloudgov compare` (and `report`) handle drift reports instead of erroring "unknown report type". Each `DriftResult` maps to a `NormalizedFinding` keyed on the Terraform address (`resource_name`, falling back to the cloud id), `Type` = the drift status, `Detail` = the result's detail or a summary of the drifted field names, and severity ranked DELETED→HIGH / MODIFIED→MEDIUM / ERROR→LOW. `IN_SYNC` results are skipped (absence of drift isn't a finding). Mock-tested (status mapping, IN_SYNC exclusion, tf-address keying, field summary).
-  - [x] **7c — tags coverage**: `AuditTags` now also checks ECS clusters, EKS clusters, DynamoDB tables, SNS topics, and SQS queues for missing required tags (was EC2/S3/RDS/Lambda only). New `dynamodbAPI`/`snsAPI` narrow interfaces + `dynamodb`/`sns` clients; `eksAPI` gained `DescribeCluster` and `sqsAPI` gained `ListQueueTags` (extended in place); ECS reuses the existing `ecsAPI` via `DescribeClusters` with `include=TAGS`. Each auditor paginates, derives the resource name (ARN/URL tail), and nil-guards its client so partial test construction doesn't panic. Mock-tested per service. README least-privilege policy + the tags section updated with the new resource types and read/tag IAM actions.
-  - [x] **7d — certs SARIF + Days**: `output.WriteCertsSARIF` + `buildCertRules` (rule id = cert status, level follows severity) wired as `cloudgov certs --output sarif`. `opts.Days` is now authoritative: `ListCertificates` dropped its hardcoded `>180` cap so the certs scanner's `--days` filter is the single window gate (cmd + audit both pass it, default 90) — `--days 365` now surfaces certs expiring in 181+ days, no change at the default. README certs flags table + a SARIF usage example added. Verified by an adversarial review workflow (both correctness dimensions clean; confirmed doc/test-parity nits fixed: README `--output` row, `buildCertRules` in the `TestBuildRules_NonEmpty` map, and `TestWriteCertsSARIF` now asserts the driver rules table levels).
-- [x] **Honest AWS identity + scope matrix**: an audit workflow verified every user-facing surface names AWS explicitly — command help strings (`inventory`, `quota`, `secrets`/`secrets scan`, `cost`/`orphans`/`drift`) name the AWS services they scan, and the README `## Scope` section carries a domain×surface matrix (✅ implemented / — n/a): AWS full across all cloud domains, k8s for RBAC + platform-tenant objects; offline commands (`compliance`, `compare`, `baseline`, `report`, `remediate`) noted as operating on saved reports, `mcp` as exposing the AWS scanners over stdio. Verified by an adversarial review workflow (every matrix row accurate; fixed its 4 LOW nits — inventory/drift H3 headings, the cost/orphans/drift Shorts, the Platform footnote which had said "RBAC" instead of IRSA + tenant cluster objects, and `mcp` missing from the matrix note).
-- **Output renderer cleanup** (split into ordered sub-items):
-  - [x] **9a — Severity on domain structs**: `cloud.QuotaUsage` gains a `Severity` field (`json:"severity"`), set at construction in the AWS provider's `ListQuotas` (derived from utilization). All readers — `output.WriteQuotas`, `quota.Summarize`, `compare.normalizeQuotas`, and the `report` HTML generator — now read it via a `QuotaUsage.EffectiveSeverity()` accessor that falls back to computing from `Utilization` when unset (back-compat for reports saved before the field + hand-built test data). QuotaUsage was the one struct recomputing severity per-reader; the other findingless structs (OrphanResource/CostDiff/InventoryResource) carry no severity by nature. Mock-tested; verified all read sites converted by grep.
-  - [x] **9b — split the monolithic renderer files**: the 715-line `output/table.go` + 252-line `output/json.go` are split into per-domain files — `output/<domain>.go` (iam, storage, orphans, cost, network, certs, tags, drift, compliance, lambda, k8s, secrets, audit, inventory, quota, compare, platform) each owns that domain's table renderer + JSON report struct + writer; shared infra lives in `style.go` (lipgloss styles, `colorSeverity`, `formatTags`, `truncate`) and `jsoncore.go` (`writeJSON`). Adding a domain now adds one file instead of editing two shared monoliths. (`sarif.go` left cohesive as the SARIF concern.) Pure move — verified behavior-preserving by line-conservation (869 code lines in == 869 out, sorted-identical) plus the unchanged `output` test suite (table/json/sarif) passing. The original "runtime `FindingRenderer` registry" was reframed after empirical review: commands dispatch type-specifically (compile-time-safe), renderers have heterogeneous signatures (IAM principal counts, audit `*Report`, compare `CompareResult`), and the one generic consumer (`report`) already routes through `compare.NormalizeReport`, so a uniform `any`-typed registry would trade type safety for indirection with no caller that needs it.
-- [x] **Integration tests + CI floors**: `internal/integration` runs provider→scanner→output end-to-end — a fixture provider registered through the real `providers.NewRegistry`/`Capable`, resolved by capability, run through each domain scanner, rendered to JSON+table, asserting multiple fields per domain + a severity-filter-discriminates case (the cmd `RunE` shell resolves via `Default()` and is intentionally un-injectable, so the cobra layer is covered by `cmd` unit tests). Writing the `cmd` helper tests (`cmd/remediate_test.go`) surfaced + fixed a latent bug: remediate's bare-array fallback was unreachable (a bare array errored the envelope unmarshal before the fallback ran). `.coverage-floors` (per-package floors, ratcheting) enforced by `scripts/coverage.sh` in `ci.yml` — fails on below-floor, on a floored package with no coverage line (stale name), and on a tested package with no floor (ungated new code); `golangci-lint` + coverage profiling were already in CI. Verified by an adversarial review workflow (12 findings; bugfix + floor logic verified correct, the rest — honest scope labeling, multi-field assertions, filter discrimination, the two new floor guards, bugfix edge-case tests — addressed).
-
-## how to run a single improvement pass (headless)
+## Verification
 
 ```bash
-claude --print "Read CLAUDE.md. Find the first unchecked [ ] backlog item. Implement it fully. Mark it [x] when done. Run task build to verify it compiles. Run go test ./... to verify tests pass."
+task build            # compile
+task test             # go test ./...
+task test:cover       # coverage profile
+task lint             # golangci-lint
 ```
 
-## release checklist
+`.claude/skills/verify` runs the full set. CI (`.github/workflows/ci.yml`) adds
+`go vet`, `scripts/check-context.sh`, and `scripts/coverage.sh` — per-package
+ratcheting floors from `.coverage-floors` that fail on below-floor coverage, a
+floored package with no coverage line (stale name), or a tested package with no
+floor (ungated new code). Releases go out via goreleaser on a `v*` tag.
 
-Before tagging v1.0.0:
-- All section 1-4 backlog items marked [x]
-- `task build` passes
-- `go test ./...` passes with >80% coverage on analyzer package
-- README has real screenshots
-- goreleaser dry-run succeeds (`goreleaser release --snapshot --clean`)
+## Guardrails
+
+- Don't add an external dependency when stdlib or an existing dep works.
+- Don't change a capability interface without updating every implementation and
+  every call site.
+- Don't put cloud SDK wiring in `cmd/` — it goes in a provider factory.
+- Don't emit real AWS account IDs in docs, tests, or fixtures.

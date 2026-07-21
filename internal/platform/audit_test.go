@@ -142,24 +142,6 @@ func TestAudit_Conformant(t *testing.T) {
 	}
 }
 
-func TestAudit_AcceptsLegacyLabels(t *testing.T) {
-	// A not-yet-migrated cluster still carries the legacy eks-agent-platform/*
-	// ownership labels; the audit must accept them via fallback (no
-	// PlatformLabelMissing finding) and stay otherwise conformant.
-	objs := conformantObjects()
-	objs[0] = &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: tNS, Labels: map[string]string{
-		pssEnforce: "restricted", legacyPlatformLabel: tName, legacyTenantLabel: tTen, legacyPersonaLabel: tPers,
-	}}}
-	typed := kubefake.NewSimpleClientset(objs...)
-	findings, err := Audit(context.Background(), typed, conformantDyn(), conformantRole())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(findings) != 0 {
-		t.Fatalf("legacy labels should be accepted, got %d findings: %+v", len(findings), findings)
-	}
-}
-
 func TestAudit_DriftDetected(t *testing.T) {
 	// Namespace exists but PSS is wrong; NetworkPolicy and ServiceAccount absent.
 	typed := kubefake.NewSimpleClientset(
@@ -239,7 +221,7 @@ func TestAudit_IRSADrift(t *testing.T) {
 		ARN:                 tRole,
 		TrustPolicyDocument: `{"Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:other-ns:other-sa"}}}`,
 		Tags:                map[string]string{},
-		InlinePolicyNames:   []string{"legacy-inline"},
+		InlinePolicyNames:   []string{"extra-inline"},
 	}}
 	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {

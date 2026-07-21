@@ -52,8 +52,9 @@ cloudgov <command> --fail-on HIGH            # exit 2 if any finding >= HIGH
 **Exit codes:** `0` = clean, `1` = command error, `2` = a finding met or exceeded
 `--fail-on`. (`--fail-on` is unset by default, so exit stays 0/1.)
 
-JSON report schemas are Go structs in `internal/output/json.go` — one typed
-envelope per domain (`iamReport`, `storageReport`, …). SARIF is emitted by iam,
+JSON report schemas are Go structs in `internal/output/<domain>.go` — one typed
+envelope per domain (`iamReport`, `storageReport`, …), sharing the writer in
+`internal/output/jsoncore.go`. SARIF is emitted by iam,
 storage, network, certs, secrets, audit, k8s, lambda, compliance, and drift.
 
 ## Use in the fab merge-gate
