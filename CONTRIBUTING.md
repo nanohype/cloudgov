@@ -14,7 +14,7 @@ go test ./...     # run all tests (no credentials needed)
 go vet ./...      # static analysis
 ```
 
-Both must pass before marking any backlog item complete.
+All three must pass before opening a PR.
 
 ---
 
@@ -96,48 +96,63 @@ func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, err
 }
 ```
 
-### 4. Wire the provider into the command resolvers
+### 4. Register a factory in the provider registry
 
-Each command file in `cmd/` has a `resolveXxxProviders()` function that constructs the
-provider(s) for that domain. Today these are single-provider AWS-only constructors — they
-build the AWS provider, check `Detect()`, and return it:
+`internal/providers` is the single seam through which commands obtain providers. A
+command never constructs one — it asks the registry for every provider whose
+credentials are present that implements the capability it needs. Registering your
+provider is the only wiring step; no `cmd/` file changes.
+
+Add a `Factory` — `Name()`, a cheap `Detect()`, and a `New()` that builds the SDK
+clients — and register it in `Default()` (`internal/providers/registry.go`):
 
 ```go
-// cmd/orphans.go
-func resolveOrphansProviders(ctx context.Context) ([]cloud.OrphansProvider, error) {
-    p, err := cloudaws.New(ctx)
-    if err != nil {
-        return nil, fmt.Errorf("initialize aws: %w", err)
+// internal/providers/registry.go
+type mycloudFactory struct{}
+
+func (f mycloudFactory) Name() string { return "mycloud" }
+
+func (f mycloudFactory) Detect(ctx context.Context) bool {
+    p, err := cloudmycloud.New(ctx)
+    return err == nil && p.Detect(ctx)
+}
+
+func (f mycloudFactory) New(ctx context.Context) (cloud.Provider, error) {
+    return cloudmycloud.New(ctx)
+}
+
+func Default(opts ...Option) *Registry {
+    var o options
+    for _, opt := range opts {
+        opt(&o)
     }
-    if !p.Detect(ctx) {
-        return nil, fmt.Errorf("no AWS credentials detected")
-    }
-    return []cloud.OrphansProvider{p}, nil
+    return NewRegistry(
+        newAWSFactory(o.profile, o.quiet),
+        mycloudFactory{},
+    )
 }
 ```
 
-To add another implementation for a domain, construct it alongside the AWS provider and
-append it to the returned slice (skip any provider whose credentials aren't detected):
+`Detect` must stay cheap — credential resolution only, no API calls beyond it. A factory
+that detects but fails to construct is skipped with a warning rather than failing the
+whole run, so one misconfigured cloud doesn't sink the others.
+
+That's all. Every `resolveXxxProviders` in `cmd/` is already a one-liner over the
+generic `Resolve[T]`, which returns each available provider implementing the capability:
 
 ```go
+// cmd/orphans.go — unchanged when a provider is added
 func resolveOrphansProviders(ctx context.Context) ([]cloud.OrphansProvider, error) {
-    var providers []cloud.OrphansProvider
-    if p, err := cloudaws.New(ctx); err == nil && p.Detect(ctx) {
-        providers = append(providers, p)
-    }
-    if p, err := cloudmycloud.New(ctx); err == nil && p.Detect(ctx) {
-        providers = append(providers, p)
-    }
-    if len(providers) == 0 {
-        return nil, fmt.Errorf("no credentials detected")
-    }
-    return providers, nil
+    return providers.Resolve[cloud.OrphansProvider](ctx, providers.WithQuiet(quiet))
 }
 ```
 
-Do the same in `resolveIAMProviders`, `resolveStorageProviders`, `resolveCostProviders`,
-`resolveInventoryProviders`, and `resolveQuotaProviders` for whichever domains your
-provider supports.
+Your provider is picked up by every domain whose interface it implements, and ignored by
+the rest. `Resolve` errors with "no cloud provider detected" only when no available
+provider offers the capability.
+
+Registry behavior is covered by `internal/providers/registry_test.go` — add cases there
+for the capabilities your factory contributes.
 
 ### 5. Write tests
 
@@ -225,21 +240,17 @@ func init() {
 ### 3. Implement provider resolution
 
 If your command needs a cloud provider, follow the resolver pattern used by every existing
-command. The resolver constructs the AWS provider, verifies credentials with `Detect()`, and
-returns it as a slice so the scanner code can stay uniform:
+command: delegate to the registry's generic `Resolve[T]`, which returns every available
+provider implementing your capability as a slice, so the scanner code stays uniform.
 
 ```go
 func resolveMyGroupProviders(ctx context.Context) ([]cloud.MyGroupProvider, error) {
-    p, err := cloudaws.New(ctx)
-    if err != nil {
-        return nil, fmt.Errorf("initialize aws: %w", err)
-    }
-    if !p.Detect(ctx) {
-        return nil, fmt.Errorf("no AWS credentials detected")
-    }
-    return []cloud.MyGroupProvider{p}, nil
+    return providers.Resolve[cloud.MyGroupProvider](ctx, providers.WithQuiet(quiet))
 }
 ```
+
+Pass `providers.WithProfile(profile)` as well if your command exposes `--profile`. Don't
+construct a provider directly in `cmd/` — SDK wiring belongs in a registry factory.
 
 ### 4. Add core scanner logic
 
@@ -277,8 +288,12 @@ func Scan(ctx context.Context, providers []cloud.MyGroupProvider) ([]MyResult, e
 
 ### 5. Add output formatting
 
-Table output goes in `internal/output/table.go` (use lipgloss + tabwriter, matching the existing style).
-JSON output goes in `internal/output/json.go`.
+Each domain owns one file, `internal/output/<domain>.go`, holding its table renderer, its
+JSON report struct, and the writers for both. Shared infrastructure lives alongside it:
+lipgloss styles and helpers in `style.go`, the JSON writer in `jsoncore.go`, and SARIF in
+`sarif.go`. Adding a domain adds a file — it never edits a shared renderer.
+
+Table output uses lipgloss + tabwriter, matching the existing style.
 
 ### 6. Write tests
 
@@ -351,7 +366,9 @@ func TestScan(t *testing.T) {
 - Use hand-written mock structs that implement only the interface methods needed by the test. No `gomock`, `testify/mock`, or code-generation tools.
 - Do not use `t.Skip()` to skip tests that require credentials — mock instead.
 - New packages must have at least one test file.
-- The analyzer package must maintain >80% coverage (checked before v1.0.0 release).
+- Coverage is gated per package by `.coverage-floors`, enforced in CI by `scripts/coverage.sh`.
+  A new package needs a floor entry — CI fails a tested package that has none, and fails any
+  package that drops below its floor.
 
 ## Code conventions
 

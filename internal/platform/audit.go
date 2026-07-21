@@ -31,15 +31,10 @@ var (
 
 const (
 	// Canonical ownership labels (resource-tagging standard). The operator
-	// stamps these on each tenant namespace; the audit accepts the legacy
-	// eks-agent-platform/* keys below as a fallback for a not-yet-migrated cluster.
+	// stamps these on each tenant namespace.
 	platformLabel = "agents.nanohype.dev/platform"
 	tenantLabel   = "agents.nanohype.dev/tenant"
 	personaLabel  = "agents.nanohype.dev/persona"
-
-	legacyPlatformLabel = "eks-agent-platform/platform"
-	legacyTenantLabel   = "eks-agent-platform/tenant"
-	legacyPersonaLabel  = "eks-agent-platform/persona"
 
 	pssEnforce     = "pod-security.kubernetes.io/enforce"
 	irsaAnnotation = "eks.amazonaws.com/role-arn"
@@ -120,19 +115,13 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 			fmt.Sprintf("namespace %s is %q, want restricted", pssEnforce, orUnset(nsObj.Labels[pssEnforce])),
 			"Restore the restricted Pod Security Standards label on the tenant namespace."))
 	}
-	// Read the canonical label, falling back to the legacy eks-agent-platform/*
-	// key so the audit is correct against both a migrated and a not-yet-migrated
-	// cluster. Ordered (not a map) for deterministic finding output.
-	for _, c := range []struct{ key, legacy, want string }{
-		{platformLabel, legacyPlatformLabel, name},
-		{tenantLabel, legacyTenantLabel, tenant},
-		{personaLabel, legacyPersonaLabel, persona},
+	// Ordered (not a map) for deterministic finding output.
+	for _, c := range []struct{ key, want string }{
+		{platformLabel, name},
+		{tenantLabel, tenant},
+		{personaLabel, persona},
 	} {
-		got := nsObj.Labels[c.key]
-		if got == "" {
-			got = nsObj.Labels[c.legacy]
-		}
-		if got != c.want {
+		if got := nsObj.Labels[c.key]; got != c.want {
 			out = append(out, f(cloud.SeverityLow, cloud.PlatformLabelMissing, ns,
 				fmt.Sprintf("namespace label %s is %q, want %q", c.key, orUnset(got), c.want),
 				"Restore the agents.nanohype.dev ownership labels (drive cost attribution and network selection)."))

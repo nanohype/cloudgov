@@ -4,9 +4,6 @@ AWS security and cost swiss army knife — single binary, zero dependencies.
 
 Audit IAM permissions, spot cost anomalies, find orphaned resources, flag insecure storage, detect overly permissive security groups, monitor TLS certificate expiry, enforce resource tagging, check service quota utilization, save and compare scan baselines, generate HTML reports, and more — across your AWS account, plus a Kubernetes RBAC scanner.
 
-<!-- screenshot placeholder -->
-<!-- ![cloudgov iam scan output](docs/screenshots/iam-scan.png) -->
-
 ---
 
 ## Scope
@@ -186,9 +183,6 @@ cloudgov iam scan --output sarif --output-file results.sarif
 cloudgov iam scan --concurrency 20
 ```
 
-<!-- screenshot placeholder -->
-<!-- ![iam scan table output](docs/screenshots/iam-scan.png) -->
-
 **Flags**
 
 | Flag | Default | Description |
@@ -255,9 +249,6 @@ cloudgov cost diff --days 7
 cloudgov cost diff --output json
 ```
 
-<!-- screenshot placeholder -->
-<!-- ![cost diff table output](docs/screenshots/cost-diff.png) -->
-
 **Flags**
 
 | Flag | Default | Description |
@@ -291,9 +282,6 @@ cloudgov orphans --min-cost 5
 cloudgov orphans --output json
 ```
 
-<!-- screenshot placeholder -->
-<!-- ![orphans table output](docs/screenshots/orphans.png) -->
-
 **Flags**
 
 | Flag | Default | Description |
@@ -324,9 +312,6 @@ cloudgov storage audit --severity HIGH
 # JSON for SIEM ingestion
 cloudgov storage audit --output json --output-file storage-findings.json
 ```
-
-<!-- screenshot placeholder -->
-<!-- ![storage audit table output](docs/screenshots/storage-audit.png) -->
 
 **Flags**
 
