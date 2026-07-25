@@ -120,12 +120,38 @@ func TestBuildRules_NonEmpty(t *testing.T) {
 		"k8s":     buildK8sRules,
 		"lambda":  buildLambdaRules,
 		"drift":   buildDriftRules,
-		"certs":   buildCertRules,
+		"certs":    buildCertRules,
+		"platform": buildPlatformRules,
 	} {
 		rules := builder()
 		if len(rules) == 0 {
 			t.Errorf("%s rules should not be empty", name)
 		}
+	}
+}
+
+// TestPlatformRulesCoverEveryFindingType closes the gap that makes a missing
+// rule invisible: WritePlatformSARIF takes the ruleId straight from the finding
+// type with no lookup, so an unmapped type emits a result referencing a rule the
+// run never declared. That is invalid SARIF, and consumers drop it silently
+// rather than failing — the finding just disappears.
+func TestPlatformRulesCoverEveryFindingType(t *testing.T) {
+	declared := make(map[string]bool)
+	for _, r := range buildPlatformRules() {
+		if declared[r.ID] {
+			t.Errorf("duplicate SARIF rule for %s", r.ID)
+		}
+		declared[r.ID] = true
+	}
+
+	for _, ft := range cloud.AllPlatformFindingTypes {
+		if !declared[string(ft)] {
+			t.Errorf("finding type %s has no SARIF rule; its results would reference an undeclared rule", ft)
+		}
+		delete(declared, string(ft))
+	}
+	for id := range declared {
+		t.Errorf("SARIF rule %s declares a finding type that no longer exists", id)
 	}
 }
 

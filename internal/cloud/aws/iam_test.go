@@ -34,10 +34,19 @@ type mockIAM struct {
 	managed      map[string]string                      // policyArn -> document
 	missingArns  map[string]bool                        // policyArn -> simulate NoSuchEntity on GetPolicy
 	missingVers  map[string]bool                        // policyArn -> NoSuchEntity on GetPolicyVersion
+	roleDetail   map[string]iamtypes.Role               // roleName -> GetRole response
 
 	// call counters for pagination
 	rolesCalls int
 	usersCalls int
+}
+
+func (m *mockIAM) GetRole(_ context.Context, in *iam.GetRoleInput, _ ...func(*iam.Options)) (*iam.GetRoleOutput, error) {
+	role, ok := m.roleDetail[awssdk.ToString(in.RoleName)]
+	if !ok {
+		return nil, &iamtypes.NoSuchEntityException{}
+	}
+	return &iam.GetRoleOutput{Role: &role}, nil
 }
 
 func (m *mockIAM) ListRoles(_ context.Context, in *iam.ListRolesInput, _ ...func(*iam.Options)) (*iam.ListRolesOutput, error) {

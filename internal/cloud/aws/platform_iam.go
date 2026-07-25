@@ -7,6 +7,8 @@ import (
 	"net/url"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/eks"
+	ekstypes "github.com/aws/aws-sdk-go-v2/service/eks/types"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	iamtypes "github.com/aws/aws-sdk-go-v2/service/iam/types"
 
@@ -15,10 +17,10 @@ import (
 
 // GetRoleInfo fetches an IAM role's ARN, decoded trust policy, tags, attached
 // managed-policy ARNs, and inline-policy names — the inputs the platform auditor
-// needs to verify IRSA conformance. Returns (nil, nil) when the role does not
-// exist. Satisfies platform.RoleReader.
+// needs to verify tenant-role conformance. Returns (nil, nil) when the role does
+// not exist. Half of platform.IdentityReader.
 func (p *Provider) GetRoleInfo(ctx context.Context, roleName string) (*cloud.IAMRoleInfo, error) {
-	client := iam.NewFromConfig(p.cfg)
+	client := p.iam
 
 	out, err := client.GetRole(ctx, &iam.GetRoleInput{RoleName: awssdk.String(roleName)})
 	if err != nil {
@@ -69,4 +71,48 @@ func (p *Provider) GetRoleInfo(ctx context.Context, roleName string) (*cloud.IAM
 		marker = li.Marker
 	}
 	return info, nil
+}
+
+// GetPodIdentityAssociation returns the EKS Pod Identity association binding
+// (namespace, serviceAccount) on a cluster, or (nil, nil) when none exists.
+// The other half of platform.IdentityReader.
+//
+// ListPodIdentityAssociations filters server-side on (namespace, serviceAccount)
+// but its summaries omit the role ARN, so the one match is resolved through
+// DescribePodIdentityAssociation. A (cluster, namespace, serviceAccount) triple
+// can hold at most one association, so there is nothing to paginate.
+func (p *Provider) GetPodIdentityAssociation(ctx context.Context, clusterName, namespace, serviceAccount string) (*cloud.PodIdentityAssociation, error) {
+	list, err := p.eks.ListPodIdentityAssociations(ctx, &eks.ListPodIdentityAssociationsInput{
+		ClusterName:    awssdk.String(clusterName),
+		Namespace:      awssdk.String(namespace),
+		ServiceAccount: awssdk.String(serviceAccount),
+	})
+	if err != nil {
+		var notFound *ekstypes.ResourceNotFoundException
+		if errors.As(err, &notFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("list pod identity associations for %s/%s on %s: %w", namespace, serviceAccount, clusterName, err)
+	}
+	if len(list.Associations) == 0 {
+		return nil, nil
+	}
+
+	summary := list.Associations[0]
+	desc, err := p.eks.DescribePodIdentityAssociation(ctx, &eks.DescribePodIdentityAssociationInput{
+		ClusterName:   awssdk.String(clusterName),
+		AssociationId: summary.AssociationId,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describe pod identity association %s on %s: %w", awssdk.ToString(summary.AssociationId), clusterName, err)
+	}
+	if desc == nil || desc.Association == nil {
+		return nil, nil
+	}
+	return &cloud.PodIdentityAssociation{
+		ARN:            awssdk.ToString(desc.Association.AssociationArn),
+		RoleARN:        awssdk.ToString(desc.Association.RoleArn),
+		Namespace:      awssdk.ToString(desc.Association.Namespace),
+		ServiceAccount: awssdk.ToString(desc.Association.ServiceAccount),
+	}, nil
 }

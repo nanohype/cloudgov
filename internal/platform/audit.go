@@ -7,6 +7,7 @@ package platform
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	networkingv1 "k8s.io/api/networking/v1"
@@ -36,27 +37,71 @@ const (
 	tenantLabel   = "agents.nanohype.dev/tenant"
 	personaLabel  = "agents.nanohype.dev/persona"
 
-	pssEnforce     = "pod-security.kubernetes.io/enforce"
-	irsaAnnotation = "eks.amazonaws.com/role-arn"
+	pssEnforce = "pod-security.kubernetes.io/enforce"
+
+	// roleArnAnnotation is the IRSA ServiceAccount annotation. The tenant
+	// contract forbids it — the auditor flags its presence, not its absence.
+	roleArnAnnotation = "eks.amazonaws.com/role-arn"
 
 	defaultName = "tenant-default" // ResourceQuota + LimitRange
 	netpolName  = "tenant-egress"
-	saName      = "tenant-runtime"
+
+	// defaultSAName is the ServiceAccount the operator binds under namespace
+	// isolation. Under vcluster isolation the bound name is vcluster-translated
+	// and unguessable from here, so status.podIdentity is the authority; this is
+	// only the fallback when a Platform has not published its binding yet.
+	defaultSAName = "tenant-runtime"
+
+	// vclusterIsolation is the spec.isolation value whose bound ServiceAccount
+	// is not derivable without the published binding.
+	vclusterIsolation = "vcluster"
 )
+
+// operatorInlinePolicies is the set of inline policies the eks-agent-platform
+// operator reconciles onto a tenant role. Anything else on the role was attached
+// by hand: unreviewed privilege on an identity whose whole point is that its
+// grants are generated from a declaration.
+//
+// Kept as an allowlist rather than a ban on inline policies, because inline is
+// the contract. The operator generates scoped IAM from spec.datastores,
+// spec.identity.capabilities and spec.identity.directSecretReads precisely so
+// those grants are not hand-written managed policies.
+var operatorInlinePolicies = map[string]bool{
+	"bedrock-model-scoping": true,
+	"datastore-access":      true,
+	"capability-access":     true,
+	"tenant-secrets":        true,
+	"tenant-key-access":     true,
+}
+
+// modelScopingPolicy is written on every non-suspended reconcile regardless of
+// spec, so its absence on an active tenant means the tenant's Bedrock access is
+// clamped only by the baseline — the per-Platform model scope is not in force.
+const modelScopingPolicy = "bedrock-model-scoping"
+
+// podIdentityPrincipal is the service principal in a Pod Identity role's trust
+// policy. It is the whole trust document: the (namespace, service-account)
+// constraint lives in the association, so every conformant tenant role trusts
+// exactly this and nothing narrower.
+const podIdentityPrincipal = "pods.eks.amazonaws.com"
 
 // findingFunc builds a PlatformFinding pre-populated with the platform/tenant/
 // namespace context for the platform under audit.
 type findingFunc func(sev cloud.Severity, t cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding
 
-// RoleReader fetches IAM role detail for IRSA conformance checks. The AWS
-// provider implements it; pass nil to skip AWS-side checks (e.g. no credentials).
-type RoleReader interface {
+// IdentityReader fetches the AWS-side tenant identity: the IAM role, and the
+// Pod Identity association that binds it to a ServiceAccount. The AWS provider
+// implements it; pass nil to skip AWS-side checks (e.g. no credentials).
+type IdentityReader interface {
 	GetRoleInfo(ctx context.Context, roleName string) (*cloud.IAMRoleInfo, error)
+	// GetPodIdentityAssociation returns the association binding
+	// (namespace, serviceAccount) on a cluster, or (nil, nil) when none exists.
+	GetPodIdentityAssociation(ctx context.Context, clusterName, namespace, serviceAccount string) (*cloud.PodIdentityAssociation, error)
 }
 
 // Audit lists every Platform CR in the cluster and reports conformance gaps in
-// each tenant's namespace and IRSA wiring. Read-only.
-func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles RoleReader) ([]cloud.PlatformFinding, error) {
+// each tenant's namespace and identity wiring. Read-only.
+func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles IdentityReader) ([]cloud.PlatformFinding, error) {
 	list, err := dyn.Resource(platformGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list Platform CRs (platform.nanohype.dev/v1alpha1): %w", err)
@@ -68,7 +113,7 @@ func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interfac
 	return findings, nil
 }
 
-func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles RoleReader, p *unstructured.Unstructured) []cloud.PlatformFinding {
+func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles IdentityReader, p *unstructured.Unstructured) []cloud.PlatformFinding {
 	name := p.GetName()
 	tenant, _, _ := unstructured.NestedString(p.Object, "spec", "tenant")
 	persona, _, _ := unstructured.NestedString(p.Object, "spec", "persona")
@@ -81,6 +126,7 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 	suspendedAt, _, _ := unstructured.NestedString(p.Object, "status", "suspendedAt")
 	suspended := suspendedAt != ""
 	extras, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "identity", "extraPolicyArns")
+	binding := readBinding(p, ns)
 
 	f := func(sev cloud.Severity, t cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding {
 		return cloud.PlatformFinding{
@@ -140,11 +186,56 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 	}
 
 	out = append(out, auditNetworkPolicy(ctx, typed, ns, f)...)
-	out = append(out, auditServiceAccount(ctx, typed, ns, roleArn, f)...)
+	out = append(out, auditServiceAccount(ctx, typed, binding, f)...)
 	if roles != nil && roleArn != "" {
-		out = append(out, auditRole(ctx, roles, roleArn, ns, suspended, extras, f)...)
+		out = append(out, auditRole(ctx, roles, roleArn, suspended, extras, f)...)
+		out = append(out, auditPodIdentity(ctx, roles, binding, roleArn, f)...)
 	}
 	return out
+}
+
+// tenantBinding is the Pod Identity binding a Platform reports on
+// status.podIdentity, resolved against what this auditor can verify.
+type tenantBinding struct {
+	clusterName    string
+	namespace      string
+	serviceAccount string
+	roleARN        string
+
+	// published is false when the Platform reports no binding. The auditor
+	// still checks the ServiceAccount under namespace isolation, where the
+	// bound name is known; under vcluster isolation it can check nothing,
+	// because the bound name is vcluster-translated.
+	published bool
+	// derivable is false when nothing can be checked without the published
+	// binding — vcluster isolation with no status.podIdentity.
+	derivable bool
+}
+
+// readBinding resolves what the auditor knows about a Platform's Pod Identity
+// binding. status.podIdentity is authoritative; without it the ServiceAccount is
+// tenant-runtime under namespace isolation and unguessable under vcluster
+// isolation, where the syncer rewrites it to a translated host name.
+func readBinding(p *unstructured.Unstructured, ns string) tenantBinding {
+	cluster, _, _ := unstructured.NestedString(p.Object, "status", "podIdentity", "clusterName")
+	bns, _, _ := unstructured.NestedString(p.Object, "status", "podIdentity", "namespace")
+	sa, _, _ := unstructured.NestedString(p.Object, "status", "podIdentity", "serviceAccount")
+	role, _, _ := unstructured.NestedString(p.Object, "status", "podIdentity", "roleArn")
+	if sa != "" {
+		if bns == "" {
+			bns = ns
+		}
+		return tenantBinding{
+			clusterName: cluster, namespace: bns, serviceAccount: sa, roleARN: role,
+			published: true, derivable: true,
+		}
+	}
+
+	isolation, _, _ := unstructured.NestedString(p.Object, "spec", "isolation")
+	if isolation == vclusterIsolation {
+		return tenantBinding{namespace: ns}
+	}
+	return tenantBinding{namespace: ns, serviceAccount: defaultSAName, derivable: true}
 }
 
 func auditIdentity(p *unstructured.Unstructured, f findingFunc) []cloud.PlatformFinding {
@@ -202,26 +293,36 @@ func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, ns stri
 	return out
 }
 
-func auditServiceAccount(ctx context.Context, typed kubernetes.Interface, ns, roleArn string, f findingFunc) []cloud.PlatformFinding {
-	sa, err := typed.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{})
+// auditServiceAccount checks the ServiceAccount the Pod Identity association
+// actually binds — not a fixed name. Under vcluster isolation the bound
+// ServiceAccount is a syncer-translated host name, so a fixed tenant-runtime
+// lookup would report every conformant vcluster tenant as missing its SA.
+func auditServiceAccount(ctx context.Context, typed kubernetes.Interface, b tenantBinding, f findingFunc) []cloud.PlatformFinding {
+	if !b.derivable {
+		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformPodIdentityUnknown, b.namespace,
+			"Platform reports no status.podIdentity and uses vcluster isolation; the bound ServiceAccount is syncer-translated and cannot be derived",
+			"Re-run once the operator has published status.podIdentity.")}
+	}
+
+	ref := b.namespace + "/" + b.serviceAccount
+	sa, err := typed.CoreV1().ServiceAccounts(b.namespace).Get(ctx, b.serviceAccount, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformServiceAccountMissing, ns+"/"+saName,
-			"tenant-runtime ServiceAccount is missing; tenant workloads cannot assume the IRSA role",
-			"Restore the tenant-runtime ServiceAccount.")}
+		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformServiceAccountMissing, ref,
+			fmt.Sprintf("ServiceAccount %s is missing; the Pod Identity association binds it, so tenant pods receive no credentials", b.serviceAccount),
+			"Restore the tenant ServiceAccount; the operator reconciles it from the Platform.")}
 	}
 	if err != nil {
 		return nil
 	}
-	ann := sa.Annotations[irsaAnnotation]
-	if ann == "" {
-		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformIRSAAnnotationMissing, ns+"/"+saName,
-			"tenant-runtime ServiceAccount lacks the eks.amazonaws.com/role-arn annotation",
-			"Annotate the ServiceAccount with the tenant IRSA role ARN.")}
-	}
-	if roleArn != "" && ann != roleArn {
-		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformIRSARoleMismatch, ns+"/"+saName,
-			fmt.Sprintf("ServiceAccount role-arn %q does not match Platform.status.iamRoleArn %q", ann, roleArn),
-			"Reconcile the ServiceAccount IRSA annotation to the operator-provisioned role.")}
+
+	// The contract forbids the role-arn annotation: the association is the
+	// binding, and a pasted ARN is an unreconciled second source of truth that
+	// drifts silently from the role the operator actually bound.
+	if ann := sa.Annotations[roleArnAnnotation]; ann != "" {
+		return []cloud.PlatformFinding{f(cloud.SeverityMedium, cloud.PlatformServiceAccountAnnotated, ref,
+			fmt.Sprintf("ServiceAccount carries %s=%q; the tenant contract forbids it — the Pod Identity association is the binding",
+				roleArnAnnotation, ann),
+			"Remove the eks.amazonaws.com/role-arn annotation from the tenant ServiceAccount.")}
 	}
 	return nil
 }
@@ -233,11 +334,12 @@ func orUnset(s string) string {
 	return s
 }
 
-// auditRole verifies the tenant IRSA role against the contract: it exists, has
-// no inline policies, trusts only the tenant-runtime ServiceAccount, has a
-// suspension tag consistent with Platform.status, and carries the declared
-// extraPolicyArns (plus a baseline when active).
-func auditRole(ctx context.Context, roles RoleReader, roleArn, ns string, suspended bool, extras []string, f findingFunc) []cloud.PlatformFinding {
+// auditRole verifies the tenant role against the contract: it exists, trusts the
+// EKS Pod Identity service principal, carries the operator's generated inline
+// policies and nothing hand-attached, has a suspension tag consistent with
+// Platform.status, and carries the declared extraPolicyArns plus a baseline when
+// active.
+func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspended bool, extras []string, f findingFunc) []cloud.PlatformFinding {
 	name := roleNameFromARN(roleArn)
 	if name == "" {
 		return nil
@@ -247,29 +349,18 @@ func auditRole(ctx context.Context, roles RoleReader, roleArn, ns string, suspen
 		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformNotReady, roleArn, "could not read IAM role: "+err.Error(), "")}
 	}
 	if info == nil {
-		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformIRSARoleMissing, roleArn,
+		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformRoleMissing, roleArn,
 			"Platform.status.iamRoleArn points to an IAM role that does not exist",
-			"The operator provisions the tenant IRSA role; check the reconcile status.")}
+			"The operator provisions the tenant role; check the reconcile status.")}
 	}
 
 	var out []cloud.PlatformFinding
-
-	if len(info.InlinePolicyNames) > 0 {
-		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSAInlinePolicy, roleArn,
-			fmt.Sprintf("tenant IRSA role has %d inline policy(ies); the contract uses managed policies only", len(info.InlinePolicyNames)),
-			"Remove inline policies and attach managed policies instead."))
-	}
-
-	wantSub := "system:serviceaccount:" + ns + ":" + saName
-	if !strings.Contains(info.TrustPolicyDocument, wantSub) {
-		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSATrustMismatch, roleArn,
-			"trust policy does not constrain AssumeRoleWithWebIdentity to "+wantSub,
-			"Reconcile the role's OIDC trust policy to the tenant-runtime ServiceAccount subject."))
-	}
+	out = append(out, auditTrustPolicy(info.TrustPolicyDocument, roleArn, f)...)
+	out = append(out, auditInlinePolicies(info.InlinePolicyNames, roleArn, suspended, f)...)
 
 	roleSuspended := info.Tags["platform.nanohype.dev/suspended"] == "true"
 	if suspended != roleSuspended {
-		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSASuspensionDrift, roleArn,
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformRoleSuspensionDrift, roleArn,
 			fmt.Sprintf("suspension mismatch: Platform.status.suspendedAt set=%t but role suspended tag=%t", suspended, roleSuspended),
 			"Reconcile the kill-switch state; the role tag and Platform status must agree."))
 	}
@@ -280,18 +371,106 @@ func auditRole(ctx context.Context, roles RoleReader, roleArn, ns string, suspen
 	}
 	for _, arn := range extras {
 		if arn != "" && !attached[arn] {
-			out = append(out, f(cloud.SeverityMedium, cloud.PlatformIRSAExtraPolicyMissing, roleArn,
+			out = append(out, f(cloud.SeverityMedium, cloud.PlatformRoleExtraPolicyMissing, roleArn,
 				"declared spec.identity.extraPolicyArns entry is not attached: "+arn,
 				"Attach the declared managed policy, or remove it from the Platform spec."))
 		}
 	}
 
 	if !suspended && len(info.AttachedPolicyARNs) == 0 {
-		out = append(out, f(cloud.SeverityHigh, cloud.PlatformIRSANoBaseline, roleArn,
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformRoleNoBaseline, roleArn,
 			"role has no managed policies attached; the baseline Bedrock policy is expected on an active tenant",
 			"Verify the operator attached the baseline policy (or that the tenant is intentionally suspended)."))
 	}
 	return out
+}
+
+// auditTrustPolicy asserts the Pod Identity trust shape. It deliberately does
+// not look for a ServiceAccount subject: under Pod Identity there is none, and
+// the presence of a web-identity trust means the role is still wired for the
+// retired IRSA path.
+func auditTrustPolicy(doc, roleArn string, f findingFunc) []cloud.PlatformFinding {
+	if strings.Contains(doc, "AssumeRoleWithWebIdentity") {
+		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformRoleTrustMismatch, roleArn,
+			"trust policy grants sts:AssumeRoleWithWebIdentity; the tenant role is assumed through EKS Pod Identity, not an OIDC provider",
+			"Reconcile the role's trust policy to the "+podIdentityPrincipal+" service principal.")}
+	}
+	if !strings.Contains(doc, podIdentityPrincipal) {
+		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformRoleTrustMismatch, roleArn,
+			"trust policy does not allow the "+podIdentityPrincipal+" service principal; no Pod Identity association can vend this role",
+			"Reconcile the role's trust policy to the "+podIdentityPrincipal+" service principal.")}
+	}
+	return nil
+}
+
+// auditInlinePolicies checks inline policies against the operator's allowlist in
+// both directions: nothing unexpected, and the always-written model scope
+// present. Inline policies are the contract, not a violation of it — the
+// operator generates scoped IAM from the Platform spec.
+//
+// Both checks are skipped on a suspended tenant: the operator is observe-only
+// under the kill-switch and writes no policy, so a suspended role's inline set
+// is whatever the kill-switch left behind.
+func auditInlinePolicies(names []string, roleArn string, suspended bool, f findingFunc) []cloud.PlatformFinding {
+	if suspended {
+		return nil
+	}
+
+	var out []cloud.PlatformFinding
+	var unexpected []string
+	var hasModelScope bool
+	for _, n := range names {
+		if n == modelScopingPolicy {
+			hasModelScope = true
+		}
+		if !operatorInlinePolicies[n] {
+			unexpected = append(unexpected, n)
+		}
+	}
+
+	if len(unexpected) > 0 {
+		sort.Strings(unexpected)
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformRoleInlineUnexpected, roleArn,
+			"tenant role carries inline policies the operator does not generate: "+strings.Join(unexpected, ", "),
+			"Remove hand-attached inline policies; express the grant as spec.datastores, spec.identity.capabilities, or spec.identity.directSecretReads so the operator generates and reconciles it."))
+	}
+	if !hasModelScope {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformRoleModelScopeMissing, roleArn,
+			"tenant role has no "+modelScopingPolicy+" inline policy; the operator writes it on every reconcile, so the per-Platform model scope is not in force",
+			"Check the Platform reconcile status; the model-scoping policy is generated from spec.identity."))
+	}
+	return out
+}
+
+// auditPodIdentity verifies the binding itself — the association that vends the
+// tenant role to tenant pods. This is the only place tenancy is observable: the
+// role's trust policy carries no subject, so a conformant trust document is
+// identical for every tenant in the account.
+func auditPodIdentity(ctx context.Context, roles IdentityReader, b tenantBinding, roleArn string, f findingFunc) []cloud.PlatformFinding {
+	if !b.published || b.clusterName == "" {
+		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformPodIdentityUnknown, b.namespace,
+			"Platform reports no status.podIdentity binding; the Pod Identity association was not verified",
+			"Re-run once the operator has published status.podIdentity.")}
+	}
+
+	ref := b.namespace + "/" + b.serviceAccount
+	assoc, err := roles.GetPodIdentityAssociation(ctx, b.clusterName, b.namespace, b.serviceAccount)
+	if err != nil {
+		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformNotReady, ref,
+			"could not read the Pod Identity association: "+err.Error(), "")}
+	}
+	if assoc == nil {
+		return []cloud.PlatformFinding{f(cloud.SeverityHigh, cloud.PlatformPodIdentityMissing, ref,
+			fmt.Sprintf("no Pod Identity association binds %s on cluster %s; tenant pods receive no AWS credentials", ref, b.clusterName),
+			"Check the Platform reconcile status; the operator creates the association alongside the tenant role.")}
+	}
+	if assoc.RoleARN != roleArn {
+		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformPodIdentityMismatch, ref,
+			fmt.Sprintf("Pod Identity association binds %s to %q, not the Platform's own role %q; tenant pods run with a foreign identity",
+				ref, assoc.RoleARN, roleArn),
+			"Delete the association and let the operator recreate it against the Platform's tenant role.")}
+	}
+	return nil
 }
 
 // roleNameFromARN extracts the IAM role name (the final path segment) from a
