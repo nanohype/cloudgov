@@ -2,6 +2,8 @@ package platform
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,8 +24,15 @@ const (
 	tMgmtNS = "eks-agent-platform"
 	tTen    = "acme"
 	tPers   = "eng"
-	tBudget = "tenant-budget"
-	tRole   = "arn:aws:iam::123456789012:role/dev-app1-tenant"
+	tBudget  = "tenant-budget"
+	tRole    = "arn:aws:iam::123456789012:role/dev-app1-tenant"
+	tCluster = "development-cluster"
+
+	// podIdentityTrust is what the operator writes on every tenant role: the EKS
+	// service principal and nothing else. There is no ServiceAccount subject —
+	// the binding lives in the association — so this document is byte-identical
+	// for every tenant in the account.
+	podIdentityTrust = `{"Statement":[{"Action":["sts:AssumeRole","sts:TagSession"],"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"}}],"Version":"2012-10-17"}`
 )
 
 func platformCR(phase string, families []string) *unstructured.Unstructured {
@@ -41,8 +50,23 @@ func platformCR(phase string, families []string) *unstructured.Unstructured {
 			"budget":   map[string]interface{}{"name": tBudget},
 			"identity": map[string]interface{}{"allowedModelFamilies": fam},
 		},
-		"status": map[string]interface{}{"phase": phase, "namespace": tNS, "iamRoleArn": tRole},
+		"status": map[string]interface{}{
+			"phase": phase, "namespace": tNS, "iamRoleArn": tRole,
+			"podIdentity": map[string]interface{}{
+				"clusterName": tCluster, "namespace": tNS, "serviceAccount": defaultSAName, "roleArn": tRole,
+			},
+		},
 	}}
+}
+
+// vclusterPlatformCR is a vcluster-isolated Platform whose binding the operator
+// has not published yet. The bound ServiceAccount is syncer-translated, so
+// nothing about it is derivable from here.
+func vclusterPlatformCR() *unstructured.Unstructured {
+	cr := platformCR("Ready", []string{"anthropic"})
+	_ = unstructured.SetNestedField(cr.Object, vclusterIsolation, "spec", "isolation")
+	unstructured.RemoveNestedField(cr.Object, "status", "podIdentity")
+	return cr
 }
 
 func platformCRCompliance(soc2, hipaa bool) *unstructured.Unstructured {
@@ -107,28 +131,50 @@ func conformantObjects() []runtime.Object {
 			ObjectMeta: metav1.ObjectMeta{Name: netpolName, Namespace: tNS},
 			Spec:       networkingv1.NetworkPolicySpec{PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}},
 		},
-		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-			Name: saName, Namespace: tNS, Annotations: map[string]string{irsaAnnotation: tRole},
-		}},
+		// No role-arn annotation: the contract forbids it, so its absence is
+		// what conformance looks like.
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: defaultSAName, Namespace: tNS}},
 	}
 }
 
 type fakeRoles struct {
 	info *cloud.IAMRoleInfo
 	err  error
+
+	// assoc is the Pod Identity association keyed "<namespace>/<serviceAccount>";
+	// a miss means no association binds that pair.
+	assoc    map[string]*cloud.PodIdentityAssociation
+	assocErr error
 }
 
 func (f fakeRoles) GetRoleInfo(context.Context, string) (*cloud.IAMRoleInfo, error) {
 	return f.info, f.err
 }
 
+func (f fakeRoles) GetPodIdentityAssociation(_ context.Context, _, ns, sa string) (*cloud.PodIdentityAssociation, error) {
+	if f.assocErr != nil {
+		return nil, f.assocErr
+	}
+	return f.assoc[ns+"/"+sa], nil
+}
+
+// conformantRole is a tenant role as the operator actually reconciles it: Pod
+// Identity trust, the always-written model-scoping policy plus generated scoped
+// policies inline, the baseline attached, and an association binding it to the
+// tenant ServiceAccount.
 func conformantRole() fakeRoles {
-	return fakeRoles{info: &cloud.IAMRoleInfo{
-		ARN:                 tRole,
-		TrustPolicyDocument: `{"Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:tenants-app1:tenant-runtime"}}}`,
-		Tags:                map[string]string{},
-		AttachedPolicyARNs:  []string{"arn:aws:iam::123456789012:policy/tenant-baseline"},
-	}}
+	return fakeRoles{
+		info: &cloud.IAMRoleInfo{
+			ARN:                 tRole,
+			TrustPolicyDocument: podIdentityTrust,
+			Tags:                map[string]string{},
+			AttachedPolicyARNs:  []string{"arn:aws:iam::123456789012:policy/tenant-baseline"},
+			InlinePolicyNames:   []string{"bedrock-model-scoping", "datastore-access", "tenant-key-access"},
+		},
+		assoc: map[string]*cloud.PodIdentityAssociation{
+			tNS + "/" + defaultSAName: {RoleARN: tRole, Namespace: tNS, ServiceAccount: defaultSAName},
+		},
+	}
 }
 
 func TestAudit_Conformant(t *testing.T) {
@@ -204,38 +250,205 @@ func TestAudit_IdentityInvalid(t *testing.T) {
 	}
 }
 
-func TestAudit_IRSARoleMissing(t *testing.T) {
+func TestAudit_TenantRoleMissing(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	findings, err := Audit(context.Background(), typed, conformantDyn(), fakeRoles{info: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !types(findings)[cloud.PlatformIRSARoleMissing] {
-		t.Fatalf("expected IRSA_ROLE_MISSING when the role is absent, got %+v", findings)
+	if !types(findings)[cloud.PlatformRoleMissing] {
+		t.Fatalf("expected TENANT_ROLE_MISSING when the role is absent, got %+v", findings)
 	}
 }
 
-func TestAudit_IRSADrift(t *testing.T) {
-	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	role := fakeRoles{info: &cloud.IAMRoleInfo{
-		ARN:                 tRole,
-		TrustPolicyDocument: `{"Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:other-ns:other-sa"}}}`,
-		Tags:                map[string]string{},
-		InlinePolicyNames:   []string{"extra-inline"},
+// TestAudit_RetiredIRSAWiringIsTheDrift is the regression pin. Every element of
+// this fixture is what the auditor used to call conformant: a role-arn
+// annotation on the ServiceAccount, an OIDC web-identity trust policy, and no
+// inline policies. Under the Pod Identity contract each one is drift, so the
+// auditor's verdict on this shape has to be the exact inverse of what it was.
+func TestAudit_RetiredIRSAWiringIsTheDrift(t *testing.T) {
+	objs := conformantObjects()
+	objs[len(objs)-1] = &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+		Name: defaultSAName, Namespace: tNS,
+		Annotations: map[string]string{roleArnAnnotation: tRole},
 	}}
+	typed := kubefake.NewSimpleClientset(objs...)
+
+	role := conformantRole()
+	role.info.TrustPolicyDocument = `{"Statement":[{"Action":"sts:AssumeRoleWithWebIdentity","Effect":"Allow","Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:tenants-app1:tenant-runtime"}}}]}`
+	role.info.InlinePolicyNames = nil
+
 	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := types(findings)
 	for _, want := range []cloud.PlatformFindingType{
-		cloud.PlatformIRSAInlinePolicy,
-		cloud.PlatformIRSATrustMismatch,
-		cloud.PlatformIRSANoBaseline,
+		cloud.PlatformServiceAccountAnnotated,
+		cloud.PlatformRoleTrustMismatch,
+		cloud.PlatformRoleModelScopeMissing,
 	} {
 		if !got[want] {
-			t.Errorf("expected %s, got %+v", want, got)
+			t.Errorf("expected %s on retired IRSA wiring, got %+v", want, got)
 		}
+	}
+	// Inline policies are the contract, so their absence must not read as clean
+	// and their presence must never be flagged wholesale.
+	if got[cloud.PlatformRoleInlineUnexpected] {
+		t.Error("a role with no inline policies must not be flagged for unexpected ones")
+	}
+}
+
+// TestAudit_ConformantInlinePoliciesAreNotFlagged guards the direction of the
+// inline check. The operator generates these five from the Platform spec; the
+// old check flagged any inline policy at all, which fired on every tenant.
+func TestAudit_ConformantInlinePoliciesAreNotFlagged(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	role := conformantRole()
+	role.info.InlinePolicyNames = []string{
+		"bedrock-model-scoping", "datastore-access", "capability-access",
+		"tenant-secrets", "tenant-key-access",
+	}
+
+	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("the operator's own inline policies must not be findings, got %+v", findings)
+	}
+}
+
+func TestAudit_HandAttachedInlinePolicy(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	role := conformantRole()
+	role.info.InlinePolicyNames = append(role.info.InlinePolicyNames, "ops-hotfix-s3")
+
+	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !types(findings)[cloud.PlatformRoleInlineUnexpected] {
+		t.Fatalf("expected TENANT_ROLE_INLINE_POLICY_UNEXPECTED for a hand-attached policy, got %+v", findings)
+	}
+	for _, f := range findings {
+		if f.Type == cloud.PlatformRoleInlineUnexpected && !strings.Contains(f.Detail, "ops-hotfix-s3") {
+			t.Errorf("finding must name the offending policy: %q", f.Detail)
+		}
+	}
+}
+
+// TestAudit_SuspendedRoleSkipsInlineChecks: the operator is observe-only under
+// the kill-switch and writes no policy, so a suspended role's inline set is
+// whatever the kill-switch left. Auditing it would report drift for the
+// kill-switch doing its job.
+func TestAudit_SuspendedRoleSkipsInlineChecks(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	cr := platformCR("Suspended", []string{"anthropic"})
+	_ = unstructured.SetNestedField(cr.Object, "2026-07-25T00:00:00Z", "status", "suspendedAt")
+
+	role := conformantRole()
+	role.info.Tags = map[string]string{"platform.nanohype.dev/suspended": "true"}
+	role.info.InlinePolicyNames = nil
+	role.info.AttachedPolicyARNs = nil
+
+	findings, err := Audit(context.Background(), typed, dynClient(cr, budgetCR(true), tenantCR(false, false)), role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := types(findings)
+	if got[cloud.PlatformRoleModelScopeMissing] {
+		t.Error("must not demand the model-scoping policy on a suspended tenant")
+	}
+	if got[cloud.PlatformRoleNoBaseline] {
+		t.Error("must not demand the baseline on a suspended tenant")
+	}
+}
+
+func TestAudit_PodIdentityAssociationMissing(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	role := conformantRole()
+	role.assoc = nil // nothing binds the ServiceAccount
+
+	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !types(findings)[cloud.PlatformPodIdentityMissing] {
+		t.Fatalf("expected POD_IDENTITY_ASSOCIATION_MISSING, got %+v", findings)
+	}
+}
+
+// TestAudit_PodIdentityAssociationMismatch is the finding the trust-policy check
+// cannot make. Both roles have an identical, conformant trust document — under
+// Pod Identity it carries no subject — so binding a tenant to a foreign role is
+// only visible in the association.
+func TestAudit_PodIdentityAssociationMismatch(t *testing.T) {
+	const foreign = "arn:aws:iam::123456789012:role/dev-other-tenant"
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	role := conformantRole()
+	role.assoc[tNS+"/"+defaultSAName] = &cloud.PodIdentityAssociation{
+		RoleARN: foreign, Namespace: tNS, ServiceAccount: defaultSAName,
+	}
+
+	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mismatch *cloud.PlatformFinding
+	for i, f := range findings {
+		if f.Type == cloud.PlatformPodIdentityMismatch {
+			mismatch = &findings[i]
+		}
+	}
+	if mismatch == nil {
+		t.Fatalf("expected POD_IDENTITY_ASSOCIATION_MISMATCH, got %+v", findings)
+	}
+	if mismatch.Severity != cloud.SeverityCritical {
+		t.Errorf("a tenant bound to a foreign role is Critical, got %s", mismatch.Severity)
+	}
+	if !strings.Contains(mismatch.Detail, foreign) {
+		t.Errorf("finding must name the foreign role: %q", mismatch.Detail)
+	}
+}
+
+// TestAudit_VClusterWithoutPublishedBinding: under vcluster isolation the bound
+// ServiceAccount is syncer-translated. Without the published binding the auditor
+// must say so rather than look up tenant-runtime, which does not exist on the
+// host and would read as a missing ServiceAccount on a conformant tenant.
+func TestAudit_VClusterWithoutPublishedBinding(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	dyn := dynClient(vclusterPlatformCR(), budgetCR(true), tenantCR(false, false))
+
+	findings, err := Audit(context.Background(), typed, dyn, conformantRole())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := types(findings)
+	if !got[cloud.PlatformPodIdentityUnknown] {
+		t.Errorf("expected POD_IDENTITY_BINDING_UNKNOWN, got %+v", got)
+	}
+	if got[cloud.PlatformServiceAccountMissing] {
+		t.Error("must not report a missing ServiceAccount when the bound name is unknowable")
+	}
+}
+
+// TestAudit_AssociationProbeFailureIsNotClean: a probe that could not run must
+// not read as a verified binding.
+func TestAudit_AssociationProbeFailureIsNotClean(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	role := conformantRole()
+	role.assocErr = errors.New("AccessDenied")
+
+	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) == 0 {
+		t.Fatal("a failed association probe must not produce a clean report")
+	}
+	if !types(findings)[cloud.PlatformNotReady] {
+		t.Errorf("expected the probe failure to surface, got %+v", findings)
 	}
 }
 

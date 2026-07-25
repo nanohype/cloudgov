@@ -28,11 +28,16 @@ that its deployed state still matches the eks-agent-platform contract:
   - tenant namespace exists with PSS=restricted and ownership labels
   - tenant-default ResourceQuota and LimitRange are present
   - tenant-egress NetworkPolicy is present, egress-typed, and namespace-wide
-  - tenant-runtime ServiceAccount carries the IRSA role-arn annotation that
-    matches Platform.status.iamRoleArn
-  - the IAM role behind status.iamRoleArn exists, trusts only the tenant
-    ServiceAccount, has no inline policies, carries the declared
-    extraPolicyArns, and its suspension tag agrees with status (needs AWS creds)
+  - the ServiceAccount the Pod Identity association binds exists and carries no
+    eks.amazonaws.com/role-arn annotation (the contract forbids it — the
+    association is the binding, not a pasted ARN)
+  - the IAM role behind status.iamRoleArn exists, trusts the EKS Pod Identity
+    service principal, carries the operator's generated inline policies and
+    nothing hand-attached, carries the declared extraPolicyArns, and its
+    suspension tag agrees with status (needs AWS creds)
+  - an EKS Pod Identity association binds the tenant ServiceAccount to that same
+    role — the association is where tenancy lives, since a Pod Identity trust
+    policy carries no subject and is identical for every tenant (needs AWS creds)
   - spec.identity declares exactly one of allowedModels / allowedModelFamilies
   - spec.budget.name resolves to a BudgetPolicy; SOC2 platforms have the
     budget kill-switch enabled
@@ -68,13 +73,13 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("connect to kubernetes: %w", err)
 	}
 
-	// AWS IRSA conformance needs AWS credentials; skip it (with a note) when
-	// they're absent so the k8s-side audit still runs.
-	var roles platform.RoleReader
+	// The tenant-role and Pod Identity checks need AWS credentials; skip them
+	// (with a note) when they're absent so the k8s-side audit still runs.
+	var roles platform.IdentityReader
 	if awsP, aerr := cloudaws.New(ctx, cloudaws.WithQuiet(quiet)); aerr == nil && awsP.Detect(ctx) {
 		roles = awsP
 	} else if !quiet {
-		fmt.Fprintln(os.Stderr, "note: AWS credentials not detected; skipping IRSA role conformance")
+		fmt.Fprintln(os.Stderr, "note: AWS credentials not detected; skipping tenant-role and Pod Identity conformance")
 	}
 
 	findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)

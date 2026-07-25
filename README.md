@@ -33,7 +33,7 @@ a provider registry, so commands stay decoupled from SDK wiring.
 
 ✅ implemented · — not applicable
 
-<sup>†</sup> Platform audit reads AWS IAM roles (IRSA conformance) and Platform-tenant
+<sup>†</sup> Platform audit reads AWS IAM roles and EKS Pod Identity associations, plus Platform-tenant
 cluster objects (namespace, ResourceQuota, NetworkPolicy, ServiceAccount) — not RBAC,
 which is the separate `k8s rbac` command.
 

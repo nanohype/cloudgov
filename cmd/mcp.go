@@ -349,13 +349,13 @@ func registerMCPTools(s *mcp.Server) {
 			return jsonResult(func(w io.Writer) error { return output.WriteCompliance(w, report) })
 		})
 
-	mcp.AddTool(s, &mcp.Tool{Name: "platform_audit", Description: "Audit nanohype Platform tenants for conformance to the eks-agent-platform contract: namespace + PSS, ResourceQuota, tenant-egress NetworkPolicy, and tenant-runtime IRSA wiring."},
+	mcp.AddTool(s, &mcp.Tool{Name: "platform_audit", Description: "Audit nanohype Platform tenants for conformance to the eks-agent-platform contract: namespace + PSS, ResourceQuota, tenant-egress NetworkPolicy, and the tenant role + EKS Pod Identity binding."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
 			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig)
 			if err != nil {
 				return nil, nil, err
 			}
-			var roles platform.RoleReader
+			var roles platform.IdentityReader
 			if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
 				roles = awsP
 			}

@@ -19,6 +19,11 @@ import (
 type mockEKS struct {
 	clusters    []string
 	clusterTags map[string]map[string]string // cluster name -> tags (for tag audits)
+
+	// Pod Identity associations, keyed "<namespace>/<serviceAccount>" -> role ARN.
+	associations map[string]string
+	listErr      error
+	describeErr  error
 }
 
 func (m mockEKS) ListClusters(_ context.Context, _ *eks.ListClustersInput, _ ...func(*eks.Options)) (*eks.ListClustersOutput, error) {
@@ -30,6 +35,45 @@ func (m mockEKS) DescribeCluster(_ context.Context, in *eks.DescribeClusterInput
 	return &eks.DescribeClusterOutput{Cluster: &ekstypes.Cluster{
 		Name: in.Name,
 		Tags: m.clusterTags[name],
+	}}, nil
+}
+
+// ListPodIdentityAssociations mirrors the real API's server-side filter on
+// (namespace, serviceAccount) and, like it, returns summaries without a role ARN
+// — so a test that asserts on the role proves the Describe call really happens.
+func (m mockEKS) ListPodIdentityAssociations(_ context.Context, in *eks.ListPodIdentityAssociationsInput, _ ...func(*eks.Options)) (*eks.ListPodIdentityAssociationsOutput, error) {
+	if m.listErr != nil {
+		return nil, m.listErr
+	}
+	key := awssdk.ToString(in.Namespace) + "/" + awssdk.ToString(in.ServiceAccount)
+	if _, ok := m.associations[key]; !ok {
+		return &eks.ListPodIdentityAssociationsOutput{}, nil
+	}
+	return &eks.ListPodIdentityAssociationsOutput{
+		Associations: []ekstypes.PodIdentityAssociationSummary{{
+			AssociationId:  awssdk.String("a-" + key),
+			Namespace:      in.Namespace,
+			ServiceAccount: in.ServiceAccount,
+		}},
+	}, nil
+}
+
+func (m mockEKS) DescribePodIdentityAssociation(_ context.Context, in *eks.DescribePodIdentityAssociationInput, _ ...func(*eks.Options)) (*eks.DescribePodIdentityAssociationOutput, error) {
+	if m.describeErr != nil {
+		return nil, m.describeErr
+	}
+	key := strings.TrimPrefix(awssdk.ToString(in.AssociationId), "a-")
+	role, ok := m.associations[key]
+	if !ok {
+		return &eks.DescribePodIdentityAssociationOutput{}, nil
+	}
+	ns, sa, _ := strings.Cut(key, "/")
+	return &eks.DescribePodIdentityAssociationOutput{Association: &ekstypes.PodIdentityAssociation{
+		AssociationArn: awssdk.String("arn:aws:eks:us-west-2:111111111111:podidentityassociation/a-" + key),
+		AssociationId:  in.AssociationId,
+		RoleArn:        awssdk.String(role),
+		Namespace:      awssdk.String(ns),
+		ServiceAccount: awssdk.String(sa),
 	}}, nil
 }
 
