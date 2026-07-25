@@ -143,8 +143,9 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
+			incomplete := append(res.Incomplete, cloud.Incomplete(providers)...)
 			return jsonResult(func(w io.Writer) error {
-				return output.WriteIAM(w, res.Findings, res.Principals, res.UsedPermissions)
+				return output.WriteIAM(w, res.Findings, res.Principals, res.UsedPermissions, incomplete)
 			})
 		})
 
@@ -158,7 +159,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteStorage(w, findings) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteStorage(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "network_audit", Description: "Audit security groups for overly permissive ingress/egress rules."},

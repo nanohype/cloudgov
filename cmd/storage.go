@@ -66,11 +66,13 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	incomplete := cloud.Incomplete(providers)
 	gate(findings, func(f cloud.BucketFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	switch strings.ToLower(storageOutputFmt) {
 	case "json":
-		return output.WriteStorage(w, findings)
+		return output.WriteStorage(w, findings, incomplete)
 	case "sarif":
 		return output.WriteStorageSARIF(w, findings, Version)
 	default:

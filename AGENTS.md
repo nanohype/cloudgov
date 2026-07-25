@@ -50,7 +50,15 @@ cloudgov <command> --fail-on HIGH            # exit 2 if any finding >= HIGH
 ```
 
 **Exit codes:** `0` = clean, `1` = command error, `2` = a finding met or exceeded
-`--fail-on`. (`--fail-on` is unset by default, so exit stays 0/1.)
+`--fail-on`, `3` = the scan could not observe everything it was asked to, so the
+result is not evidence either way. (`--fail-on` is unset by default, so exit
+stays 0/1 without it.)
+
+Exit `3` matters because `0` is read as evidence *for* approval. A denied
+`GetBucketVersioning` looks exactly like a versioned bucket if the error is
+dropped, so a scan run with partial permissions must be distinguishable from a
+scan that found nothing. What could not be read is listed on stderr and in the
+JSON report's `incomplete` array.
 
 JSON report schemas are Go structs in `internal/output/<domain>.go` — one typed
 envelope per domain (`iamReport`, `storageReport`, …), sharing the writer in
@@ -66,8 +74,10 @@ straight from cloudgov:
   record the command, its exit code, and stdout.
 - **CITATIONS** — cite each finding's `provider` / `type` / `resource` / `detail`
   from the JSON.
-- A non-zero exit (`2`) is a hard signal toward REJECT / REQUEST_CHANGES; exit `0`
-  supports APPROVE.
+- Exit `2` is a hard signal toward REJECT / REQUEST_CHANGES; exit `0` supports
+  APPROVE. Exit `3` supports neither — the run did not see enough of the account
+  to be evidence. Treat it as a blocked gate and fix the credentials, or cite the
+  `incomplete` array to scope what the verdict does not cover.
 
 ## Boundaries
 

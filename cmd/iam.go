@@ -82,6 +82,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	}
 
 	var allFindings []cloud.Finding
+	var incomplete []string
 	allUsedPerms := make(map[string][]cloud.Permission)
 	totalPrincipals := 0
 	for _, p := range providers {
@@ -96,12 +97,13 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 		}
 		result, err := iam.Scan(ctx, p, opts)
 		if err != nil {
-			if !quiet {
-				fmt.Fprintf(os.Stderr, "warn: %s scan failed: %v\n", p.Name(), err)
-			}
+			// A provider that failed outright contributes nothing, so the run
+			// saw less than it was asked to — record it rather than moving on.
+			incomplete = append(incomplete, fmt.Sprintf("provider %s: scan failed: %v", p.Name(), err))
 			continue
 		}
 		allFindings = append(allFindings, result.Findings...)
+		incomplete = append(incomplete, result.Incomplete...)
 		totalPrincipals += result.Principals
 		for pid, used := range result.UsedPermissions {
 			allUsedPerms[pid] = used
@@ -118,11 +120,14 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	incomplete = append(incomplete, cloud.Incomplete(providers)...)
+
 	gate(allFindings, func(f cloud.Finding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	switch strings.ToLower(iamOutputFmt) {
 	case "json":
-		return output.WriteIAM(w, allFindings, totalPrincipals, allUsedPerms)
+		return output.WriteIAM(w, allFindings, totalPrincipals, allUsedPerms, incomplete)
 	case "sarif":
 		return output.WriteSARIF(w, allFindings, Version)
 	default:

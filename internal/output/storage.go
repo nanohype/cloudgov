@@ -34,12 +34,16 @@ func BucketFindings(w io.Writer, findings []cloud.BucketFinding) {
 type storageReport struct {
 	Findings []cloud.BucketFinding `json:"findings"`
 	Total    int                   `json:"total"`
+	// Incomplete lists buckets whose posture could not be read. Without it an
+	// unreadable bucket is indistinguishable from a compliant one.
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteStorage marshals storage findings as JSON to w.
-func WriteStorage(w io.Writer, findings []cloud.BucketFinding) error {
+func WriteStorage(w io.Writer, findings []cloud.BucketFinding, incomplete []string) error {
 	return writeJSON(w, storageReport{
-		Findings: findings,
-		Total:    len(findings),
+		Findings:   findings,
+		Total:      len(findings),
+		Incomplete: incomplete,
 	})
 }

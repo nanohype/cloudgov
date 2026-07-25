@@ -60,7 +60,7 @@ func TestWriteIAM(t *testing.T) {
 	}
 
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, findings, 5, nil)
+		return WriteIAM(buf, findings, 5, nil, nil)
 	})
 
 	if out.Total != len(findings) {
@@ -107,7 +107,7 @@ func TestWriteIAMEmpty(t *testing.T) {
 		Principals int               `json:"principals_scanned"`
 	}
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, nil, 0, nil)
+		return WriteIAM(buf, nil, 0, nil, nil)
 	})
 	if out.Total != 0 {
 		t.Errorf("total: got %d, want 0", out.Total)
@@ -126,7 +126,7 @@ func TestWriteIAMPrincipalNil(t *testing.T) {
 		Total    int               `json:"total"`
 	}
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, findings, 1, nil)
+		return WriteIAM(buf, findings, 1, nil, nil)
 	})
 	if out.Total != 1 {
 		t.Errorf("total: got %d, want 1", out.Total)
@@ -174,7 +174,7 @@ func TestWriteStorage(t *testing.T) {
 	}
 
 	out := roundTrip[storageOut](t, func(buf *bytes.Buffer) error {
-		return WriteStorage(buf, findings)
+		return WriteStorage(buf, findings, nil)
 	})
 
 	if out.Total != len(findings) {
@@ -213,7 +213,7 @@ func TestWriteStorageEmpty(t *testing.T) {
 		Total    int               `json:"total"`
 	}
 	out := roundTrip[storageOut](t, func(buf *bytes.Buffer) error {
-		return WriteStorage(buf, nil)
+		return WriteStorage(buf, nil, nil)
 	})
 	if out.Total != 0 {
 		t.Errorf("total: got %d, want 0", out.Total)

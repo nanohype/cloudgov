@@ -54,18 +54,23 @@ func IAMFindings(w io.Writer, findings []cloud.Finding, totalPrincipals int) {
 }
 
 type iamReport struct {
-	Findings        []cloud.Finding               `json:"findings"`
-	Total           int                           `json:"total"`
-	Principals      int                           `json:"principals_scanned"`
+	Findings   []cloud.Finding `json:"findings"`
+	Total      int             `json:"total"`
+	Principals int             `json:"principals_scanned"`
+	// Incomplete is what the scan could not read. principals_scanned counts
+	// only principals actually analyzed, so a consumer comparing the two can
+	// tell a clean account from an account this run could not see.
+	Incomplete      []string                      `json:"incomplete,omitempty"`
 	UsedPermissions map[string][]cloud.Permission `json:"used_permissions,omitempty"`
 }
 
 // WriteIAM marshals IAM findings as JSON to w.
-func WriteIAM(w io.Writer, findings []cloud.Finding, principalsScanned int, usedPerms map[string][]cloud.Permission) error {
+func WriteIAM(w io.Writer, findings []cloud.Finding, principalsScanned int, usedPerms map[string][]cloud.Permission, incomplete []string) error {
 	return writeJSON(w, iamReport{
 		Findings:        findings,
 		Total:           len(findings),
 		Principals:      principalsScanned,
+		Incomplete:      incomplete,
 		UsedPermissions: usedPerms,
 	})
 }
