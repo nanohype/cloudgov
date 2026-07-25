@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -9,8 +11,9 @@ import (
 
 // exitCode is the process exit status returned by Execute. 0 means clean (or
 // --fail-on was not set); 2 means at least one finding met or exceeded the
-// --fail-on severity threshold. Exit code 1 is reserved for command errors and
-// is set directly in Execute.
+// --fail-on severity threshold; 3 means the scan could not observe everything it
+// was asked to, so its result is not evidence either way. Exit code 1 is
+// reserved for command errors and is set directly in Execute.
 var exitCode int
 
 // failOn holds the --fail-on severity threshold (CRITICAL/HIGH/MEDIUM/LOW).
@@ -39,6 +42,33 @@ func gate[T any](items []T, sev func(T) cloud.Severity) {
 func gateBool(cond bool) {
 	if failOn != "" && cond {
 		exitCode = 2
+	}
+}
+
+// gateIncomplete reports the observations a scan could not complete, and raises
+// the exit code to 3 when --fail-on is set.
+//
+// Passing --fail-on declares that this run is a gate, and a gate that could not
+// read part of the account must not answer "clean" — cloudgov's exit 0 is
+// consumed as evidence supporting approval, so an unread bucket or an unreadable
+// principal has to be distinguishable from an audited one. It does not override
+// an existing failure: findings that already tripped the threshold are the
+// stronger signal, so exit 2 stands.
+//
+// Without --fail-on the run is informational and the exit code stays 0; the
+// messages still go to stderr and to the JSON report.
+func gateIncomplete(incomplete []string) {
+	if len(incomplete) == 0 {
+		return
+	}
+	if !quiet {
+		fmt.Fprintf(os.Stderr, "\nincomplete: %d observation(s) could not be completed; findings are a partial view\n", len(incomplete))
+		for _, w := range incomplete {
+			fmt.Fprintf(os.Stderr, "  - %s\n", w)
+		}
+	}
+	if failOn != "" && exitCode == 0 {
+		exitCode = 3
 	}
 }
 

@@ -19,15 +19,27 @@ type ScanOptions struct {
 	PrincipalFilter string // empty = all
 	MinSeverity     cloud.Severity
 	Concurrency     int                   // max parallel goroutines; 0 or negative defaults to 10
-	Progress        func(done, total int) // called after each principal is scanned; nil = no-op
+	// Progress is called after each principal is attempted; nil = no-op. It is
+	// invoked from the scan's worker goroutines, so an implementation that
+	// touches shared state must synchronize. total is the number of principals
+	// attempted, which is not Result.Scanned — that counts the ones actually
+	// analyzed, and is lower whenever a principal could not be read.
+	Progress func(done, total int)
 }
 
 // Result is the output of an IAM scan.
 type Result struct {
-	Findings        []cloud.Finding
-	Principals      int
+	Findings   []cloud.Finding
+	Principals int
+	// Scanned counts principals actually analyzed — one whose permissions
+	// could not be read is not one of them. Counting attempts instead would
+	// report full coverage for a scan that read nothing.
 	Scanned         int
 	UsedPermissions map[string][]cloud.Permission
+	// Incomplete lists the principals that could not be analyzed and why. A
+	// non-empty value means Findings is a partial view: the permissions of
+	// those principals were never compared against anything.
+	Incomplete []string
 }
 
 // Scan runs the full IAM scan against a provider: fetch principals, compare
@@ -58,8 +70,12 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 
 	var result Result
 	result.Principals = len(principals)
-	result.Scanned = len(toScan)
 	result.UsedPermissions = make(map[string][]cloud.Permission)
+
+	// total drives progress reporting (how many were attempted); result.Scanned
+	// counts how many were actually analyzed, and is set once the group is done.
+	total := len(toScan)
+	var scanned atomic.Int64
 
 	var mu sync.Mutex
 	var doneCount atomic.Int64
@@ -74,19 +90,36 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 				<-sem
 				n := int(doneCount.Add(1))
 				if opts.Progress != nil {
-					opts.Progress(n, result.Scanned)
+					opts.Progress(n, total)
 				}
 			}()
 
+			// A principal whose permissions cannot be read is not analyzed:
+			// it contributes no findings, and every finding this scanner
+			// produces is a comparison of granted against used. Silently
+			// returning nil here made a denied or throttled principal
+			// indistinguishable from a clean one.
 			granted, err := provider.GrantedPermissions(gctx, p)
 			if err != nil {
+				mu.Lock()
+				result.Incomplete = append(result.Incomplete,
+					fmt.Sprintf("principal %s: granted permissions: %v", p.Name, err))
+				mu.Unlock()
 				return nil
 			}
 
 			used, err := provider.UsedPermissions(gctx, p, since)
 			if err != nil {
+				// Worse than a missing finding: analyze() reads an empty used-set
+				// as "never used", so proceeding would invent a stale-principal
+				// finding and mark every granted permission unused.
+				mu.Lock()
+				result.Incomplete = append(result.Incomplete,
+					fmt.Sprintf("principal %s: used permissions: %v", p.Name, err))
+				mu.Unlock()
 				return nil
 			}
+			scanned.Add(1)
 
 			if len(used) > 0 {
 				mu.Lock()
@@ -114,6 +147,8 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 	if err := g.Wait(); err != nil {
 		return Result{}, err
 	}
+	result.Scanned = int(scanned.Load())
+	sort.Strings(result.Incomplete)
 
 	// Sort by severity desc, then principal name
 	sort.Slice(result.Findings, func(i, j int) bool {

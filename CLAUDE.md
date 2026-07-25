@@ -71,12 +71,17 @@ Each file in `internal/cloud/aws/` declares the minimal AWS API surface it needs
 (`iamAPI`, `ec2API`, `sqsAPI`, …) and holds it on `Provider`, so tests inject
 hand-written mocks. Non-fatal warnings go through `p.warnf`, backed by a
 `warnw io.Writer` that `WithQuiet` routes to `io.Discard` — never a bare
-`fmt.Fprintf(os.Stderr, …)`.
+`fmt.Fprintf(os.Stderr, …)`. `warnf` also records each message, and `Incomplete()`
+returns them: `--quiet` silences the output, not the record.
 
 ## Conventions
 
 - Idiomatic Go, small focused packages, no magic.
-- Wrap errors with `fmt.Errorf("context: %w", err)`. Never swallow.
+- Wrap errors with `fmt.Errorf("context: %w", err)`. Never swallow. A per-resource
+  probe that fails is the one case where returning no finding is right — but it
+  must go through `p.warnf`, which records it so the resource reports as unread
+  rather than clean. Dropping the error makes a denied probe indistinguishable
+  from a compliant resource.
 - Every cloud API call takes a `context.Context`, derived from `cmd.Context()` in
   handlers — never `context.Background()`. The root context is cancelled on the
   first SIGINT/SIGTERM so an interrupt unwinds in-flight requests. CI enforces
@@ -86,6 +91,8 @@ hand-written mocks. Non-fatal warnings go through `p.warnf`, backed by a
   providers, calls a scanner, and renders.
 - Table output via lipgloss + tabwriter. No bubbletea — there is no interactive TUI.
 - A paginator error logs a warning and continues rather than aborting the scan.
+  Every `warnf` is recorded as an incomplete observation and surfaces in the run's
+  `incomplete` output and exit code 3 — a partial scan must not report as clean.
 - Cost figures are on-demand list-price estimates; say so in the finding `Detail`.
 
 ### Import aliases

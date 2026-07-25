@@ -3,6 +3,8 @@ package aws
 import (
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -94,6 +96,7 @@ func newStorageProvider(s *mockS3) *Provider {
 	return &Provider{
 		s3:          s,
 		s3ForRegion: func(_ string) s3API { return s },
+		warnw:       io.Discard, // warnings are asserted via Incomplete, not stderr
 	}
 }
 
@@ -249,4 +252,114 @@ func TestIsS3ErrorCode(t *testing.T) {
 	if isS3ErrorCode(errors.New("plain"), "NoSuchBucket") {
 		t.Error("plain error should not match")
 	}
+}
+
+// TestAuditStorage_DeniedProbesAreNotClean is the anti-false-negative pin. Each
+// of these four probes used to drop its error and return no finding, so a
+// principal without the s3:Get* permissions produced an empty, confident report:
+// no public buckets, everything encrypted, versioned, and logged. The scan must
+// report that it could not see them instead.
+func TestAuditStorage_DeniedProbesAreNotClean(t *testing.T) {
+	denied := &apiErr{code: "AccessDenied"}
+	p := newStorageProvider(&mockS3{
+		buckets:       []s3types.Bucket{{Name: awssdk.String("prod-data")}},
+		pubAccessErr:  denied,
+		encErr:        denied,
+		versioningErr: denied,
+		loggingErr:    denied,
+	})
+
+	got, err := p.AuditStorage(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("a denied probe is not a finding, it is an absence of evidence: %+v", got)
+	}
+
+	incomplete := p.Incomplete()
+	if len(incomplete) != 4 {
+		t.Fatalf("expected one incompletion per denied probe, got %d: %v", len(incomplete), incomplete)
+	}
+	for _, want := range []string{"public access block", "encryption", "versioning", "logging"} {
+		if !containsSubstring(incomplete, want) {
+			t.Errorf("no incompletion mentions the %s probe: %v", want, incomplete)
+		}
+	}
+}
+
+// TestAuditStorage_RegionLookupFailureSkipsBucket: without the region there is
+// no reliable endpoint for the bucket, so the four posture probes would be
+// answered by a wrong-region redirect rather than by the bucket. The bucket is
+// recorded as unaudited rather than probed blind.
+func TestAuditStorage_RegionLookupFailureSkipsBucket(t *testing.T) {
+	p := newStorageProvider(&mockS3{
+		buckets:        []s3types.Bucket{{Name: awssdk.String("prod-data")}},
+		getLocationErr: &apiErr{code: "AccessDenied"},
+		// Everything else would report clean if it were reached.
+		pubAccessBlock: &s3types.PublicAccessBlockConfiguration{},
+	})
+
+	got, err := p.AuditStorage(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("a bucket that could not be located must produce no findings: %+v", got)
+	}
+	incomplete := p.Incomplete()
+	if len(incomplete) != 1 {
+		t.Fatalf("expected exactly one incompletion for the skipped bucket, got %v", incomplete)
+	}
+	if !containsSubstring(incomplete, "prod-data") {
+		t.Errorf("the incompletion must name the bucket: %v", incomplete)
+	}
+}
+
+// TestIncomplete_QuietStillRecords: --quiet routes warnings to io.Discard. That
+// silences the human output; it does not make the run complete, so the record
+// (and therefore the exit code and the JSON report) must be unaffected.
+func TestIncomplete_QuietStillRecords(t *testing.T) {
+	p := newStorageProvider(&mockS3{
+		buckets:       []s3types.Bucket{{Name: awssdk.String("prod-data")}},
+		versioningErr: &apiErr{code: "AccessDenied"},
+	})
+	WithQuiet(true)(p)
+
+	if _, err := p.AuditStorage(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(p.Incomplete()) == 0 {
+		t.Error("--quiet silenced the record, not just the output")
+	}
+}
+
+// TestIncomplete_CleanRunReportsNothing: the signal is only meaningful if a
+// complete scan reports no incompletions, so exit 3 cannot fire on a clean run.
+func TestIncomplete_CleanRunReportsNothing(t *testing.T) {
+	p := newStorageProvider(&mockS3{
+		buckets: []s3types.Bucket{{Name: awssdk.String("prod-data")}},
+		pubAccessBlock: &s3types.PublicAccessBlockConfiguration{
+			BlockPublicAcls: awssdk.Bool(true), IgnorePublicAcls: awssdk.Bool(true),
+			BlockPublicPolicy: awssdk.Bool(true), RestrictPublicBuckets: awssdk.Bool(true),
+		},
+		versioning:     s3types.BucketVersioningStatusEnabled,
+		loggingEnabled: true,
+	})
+
+	if _, err := p.AuditStorage(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := p.Incomplete(); got != nil {
+		t.Errorf("a complete scan must report no incompletions, got %v", got)
+	}
+}
+
+func containsSubstring(haystack []string, needle string) bool {
+	for _, h := range haystack {
+		if strings.Contains(h, needle) {
+			return true
+		}
+	}
+	return false
 }

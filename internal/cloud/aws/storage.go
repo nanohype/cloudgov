@@ -36,7 +36,13 @@ func (p *Provider) AuditStorage(ctx context.Context) ([]cloud.BucketFinding, err
 		name := awssdk.ToString(bucket.Name)
 		region, err := p.bucketRegion(ctx, p.s3, name)
 		if err != nil {
-			region = p.cfg.Region
+			// Without the region there is no reliable way to address the bucket:
+			// probing a guessed regional endpoint returns a 301 that carries no
+			// posture information. Probing anyway would produce four more
+			// unreadable answers per bucket, so the bucket is recorded as
+			// unaudited instead of quietly reported as clean.
+			p.warnf("warn: bucket %s: region lookup failed, skipping posture checks: %v\n", name, err)
+			continue
 		}
 
 		regionalClient := p.s3ForRegion(region)
@@ -63,18 +69,23 @@ func (p *Provider) bucketRegion(ctx context.Context, client s3API, bucket string
 func (p *Provider) checkPublicAccessBlock(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	out, err := client.GetPublicAccessBlock(ctx, &s3.GetPublicAccessBlockInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
-		if isS3ErrorCode(err, "NoSuchPublicAccessBlockConfiguration") {
-			return []cloud.BucketFinding{{
-				Severity:    cloud.SeverityCritical,
-				Type:        cloud.BucketPublicAccess,
-				Provider:    "aws",
-				Bucket:      bucket,
-				Region:      region,
-				Detail:      "no public access block configuration — bucket may be publicly accessible",
-				Remediation: fmt.Sprintf("aws s3api put-public-access-block --bucket %s --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true", bucket),
-			}}
+		// Only the "no configuration" code is an answer. Anything else —
+		// denied, throttled, wrong region — means the bucket's public-access
+		// posture was not observed, and on the most severe check in this
+		// domain that must not resolve to "public access is blocked".
+		if !isS3ErrorCode(err, "NoSuchPublicAccessBlockConfiguration") {
+			p.warnf("warn: bucket %s: public access block check failed: %v\n", bucket, err)
+			return nil
 		}
-		return nil
+		return []cloud.BucketFinding{{
+			Severity:    cloud.SeverityCritical,
+			Type:        cloud.BucketPublicAccess,
+			Provider:    "aws",
+			Bucket:      bucket,
+			Region:      region,
+			Detail:      "no public access block configuration — bucket may be publicly accessible",
+			Remediation: fmt.Sprintf("aws s3api put-public-access-block --bucket %s --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true", bucket),
+		}}
 	}
 	cfg := out.PublicAccessBlockConfiguration
 	if cfg == nil {
@@ -98,17 +109,21 @@ func (p *Provider) checkPublicAccessBlock(ctx context.Context, client s3API, buc
 func (p *Provider) checkEncryption(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	_, err := client.GetBucketEncryption(ctx, &s3.GetBucketEncryptionInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
-		if isS3ErrorCode(err, "ServerSideEncryptionConfigurationNotFoundError") {
-			return []cloud.BucketFinding{{
-				Severity:    cloud.SeverityHigh,
-				Type:        cloud.BucketUnencrypted,
-				Provider:    "aws",
-				Bucket:      bucket,
-				Region:      region,
-				Detail:      "default server-side encryption is not configured",
-				Remediation: fmt.Sprintf(`aws s3api put-bucket-encryption --bucket %s --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms"}}]}'`, bucket),
-			}}
+		// Same rule as checkPublicAccessBlock: only the "not configured" code
+		// is an answer. A denied or throttled probe must not read as encrypted.
+		if !isS3ErrorCode(err, "ServerSideEncryptionConfigurationNotFoundError") {
+			p.warnf("warn: bucket %s: encryption check failed: %v\n", bucket, err)
+			return nil
 		}
+		return []cloud.BucketFinding{{
+			Severity:    cloud.SeverityHigh,
+			Type:        cloud.BucketUnencrypted,
+			Provider:    "aws",
+			Bucket:      bucket,
+			Region:      region,
+			Detail:      "default server-side encryption is not configured",
+			Remediation: fmt.Sprintf(`aws s3api put-bucket-encryption --bucket %s --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"aws:kms"}}]}'`, bucket),
+		}}
 	}
 	return nil
 }
@@ -116,6 +131,7 @@ func (p *Provider) checkEncryption(ctx context.Context, client s3API, bucket, re
 func (p *Provider) checkVersioning(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	out, err := client.GetBucketVersioning(ctx, &s3.GetBucketVersioningInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
+		p.warnf("warn: bucket %s: versioning check failed: %v\n", bucket, err)
 		return nil
 	}
 	if out.Status != s3types.BucketVersioningStatusEnabled {
@@ -135,6 +151,7 @@ func (p *Provider) checkVersioning(ctx context.Context, client s3API, bucket, re
 func (p *Provider) checkLogging(ctx context.Context, client s3API, bucket, region string) []cloud.BucketFinding {
 	out, err := client.GetBucketLogging(ctx, &s3.GetBucketLoggingInput{Bucket: awssdk.String(bucket)})
 	if err != nil {
+		p.warnf("warn: bucket %s: logging check failed: %v\n", bucket, err)
 		return nil
 	}
 	if out.LoggingEnabled == nil {

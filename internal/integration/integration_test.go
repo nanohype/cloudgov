@@ -124,7 +124,7 @@ func TestIntegration_Storage(t *testing.T) {
 		t.Fatalf("scan result: %+v", got)
 	}
 	assertRendered(t,
-		func(b *bytes.Buffer) error { return output.WriteStorage(b, got) },
+		func(b *bytes.Buffer) error { return output.WriteStorage(b, got, nil) },
 		func(b *bytes.Buffer) { output.BucketFindings(b, got) },
 		"leaky-int", "public")
 }

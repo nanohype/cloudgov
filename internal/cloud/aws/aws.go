@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
+	"sync"
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -72,6 +74,13 @@ type Provider struct {
 	// warnw receives non-fatal pagination/skip warnings. nil means os.Stderr;
 	// WithQuiet sets it to io.Discard so --quiet silences provider-level noise.
 	warnw io.Writer
+
+	// mu guards warnings and serializes the warnw write. warnf is called from
+	// the per-principal goroutines in the IAM scan, so both need it — and the
+	// serialized write keeps concurrent warnings from interleaving mid-line.
+	mu sync.Mutex
+	// warnings is every observation this provider could not complete. See warnf.
+	warnings []string
 }
 
 // Option configures a Provider at construction.
@@ -87,13 +96,43 @@ func WithQuiet(quiet bool) Option {
 }
 
 // warnf emits a non-fatal warning to warnw (os.Stderr unless --quiet set it to
-// io.Discard). Use this for paginator/skip warnings instead of os.Stderr directly.
+// io.Discard) and records it as an observation the scan could not complete.
+//
+// Every warnf call site is somewhere the provider could not see all of what it
+// was asked to look at: a paginator that failed partway, a policy that raced
+// away, a service whose quotas would not list. That is not cosmetic noise. A
+// scan that could not read part of an account must not let the unread part
+// report as clean, so the message is retained — Incomplete surfaces it, and the
+// exit code reflects it. --quiet silences the stderr copy; it does not make the
+// run complete, so the record is kept either way.
+//
+// Use this for any skip. Never drop an AWS error and return no finding.
 func (p *Provider) warnf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.warnings = append(p.warnings, strings.TrimSpace(strings.TrimPrefix(msg, "warn: ")))
+
 	w := p.warnw
 	if w == nil {
 		w = os.Stderr
 	}
-	fmt.Fprintf(w, format, args...)
+	fmt.Fprint(w, msg)
+}
+
+// Incomplete returns every observation this provider could not complete during
+// the run. A non-empty result means the scan did not see the whole account, so a
+// report with no findings is not evidence that there is nothing to find.
+//
+// Satisfies cloud.IncompleteReporter.
+func (p *Provider) Incomplete() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.warnings) == 0 {
+		return nil
+	}
+	return append([]string(nil), p.warnings...)
 }
 
 // New loads credentials from the default chain and returns a Provider.
