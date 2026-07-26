@@ -153,10 +153,22 @@ task lint             # golangci-lint
 ```
 
 `.claude/skills/verify` runs the full set. CI (`.github/workflows/ci.yml`) adds
-`go vet`, `scripts/check-context.sh`, and `scripts/coverage.sh` — per-package
-ratcheting floors from `.coverage-floors` that fail on below-floor coverage, a
-floored package with no coverage line (stale name), or a tested package with no
-floor (ungated new code). Releases go out via goreleaser on a `v*` tag.
+`go vet`, `scripts/check-context.sh`, and `scripts/coverage.sh` — the floors in
+`.coverage-floors`, which fail on below-floor coverage, a floored package or file
+with no coverage data (stale name), or a tested package with no floor (ungated
+new code).
+
+Two kinds of floor. Package floors ratchet: set a few points below current, and
+raised when coverage is raised — a ratchet nobody ratchets stops being a floor.
+File floors do not ratchet; they are pinned at 100 on the paths a package average
+cannot see, because a package sits comfortably above its floor while one branch
+inside it goes untested. Today that is the secret scanner (whether an exposed
+credential is reported at all) and `cmd/gate.go` (the exit code a merge gate
+reads as approve / reject / could-not-tell). A defensive branch that cannot be
+reached carries `//coverage:ignore` with the reason, and the gate reports how
+many it honoured so they cannot accumulate.
+
+Releases go out via goreleaser on a `v*` tag.
 
 ## Guardrails
 
