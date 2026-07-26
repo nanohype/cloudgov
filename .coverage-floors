@@ -1,30 +1,60 @@
-# Per-package statement-coverage floors (percent). A package below its floor fails
-# CI. Floors are set a few points below current coverage to lock it in without
-# flapping on small refactors; RAISE a floor when you raise its coverage (ratchet).
-# Packages absent here have no floor yet (e.g. internal/integration is fixture/
-# test-only with no coverable statements of its own).
-cmd 15
-internal/audit 60
-internal/baseline 70
-internal/certs 90
-internal/cloud 55
-internal/cloud/aws 80
-internal/cloud/k8s 45
-internal/compare 60
-internal/compliance 65
-internal/cost 95
-internal/drift 85
-internal/fix 18
-internal/iam 50
-internal/inventory 85
-internal/network 90
-internal/orphans 90
-internal/output 65
-internal/output/sinks 80
-internal/platform 80
-internal/providers 50
-internal/quota 95
-internal/report 40
-internal/secrets 90
-internal/storage 28
-internal/tags 90
+# Coverage floors, enforced by scripts/coverage.sh in CI.
+#
+#   package <import path>  <pct>   floor for a whole package
+#   file    <repo path>    <pct>   floor for one file
+#
+# Package floors are a ratchet set a few points below current coverage, so an
+# ordinary refactor does not trip them. RAISE a floor when you raise its
+# coverage — a ratchet nobody ratchets stops being a floor and becomes a
+# historical note. Every package that reports coverage needs an entry; one
+# without a floor fails the gate, so new code cannot land ungated.
+#
+# File floors are not a ratchet. They are pinned at 100 where a package floor
+# cannot see the risk: a package averages its files, so internal/secrets can sit
+# comfortably above 90 while a branch in the scanner that decides whether a
+# credential is reported at all goes untested.
+#
+# The org floor is 75 (nanohype/standards/testing-rubric.json). Packages below it
+# carry the measured number and the reason.
+
+# ── security-critical: per-file 100%, no ratchet ──────────────────────────────
+# The secret scanner decides whether an exposed credential is reported at all. A
+# branch it never took in a test is a detection nobody has proven fires.
+file    internal/secrets/patterns.go   100
+file    internal/secrets/scanner.go    100
+# The exit code is this tool's contract with a merge gate: 0 supports approval,
+# 2 rejects, 3 says the scan could not see enough to answer either way. A wrong
+# branch here reports a red run as green, which is worse than any single missed
+# finding.
+file    cmd/gate.go                    100
+
+# ── packages at or above the org floor ────────────────────────────────────────
+package internal/certs              90
+package internal/cloud/aws          82
+package internal/cost               95
+package internal/drift              85
+package internal/iam                88    # was 50 against 90.3 measured — a stale ratchet permits a 40-point regression
+package internal/inventory          85
+package internal/network            94
+package internal/orphans            95
+package internal/output/sinks       84
+package internal/platform           83
+package internal/quota              95
+package internal/secrets            93
+package internal/storage            90    # was 28 against 93.8 measured — same stale-ratchet problem
+package internal/tags               94
+
+# ── packages below the org floor ──────────────────────────────────────────────
+# Each carries what it measures today. These are the repo's real coverage debt,
+# not permission to stay there.
+package internal/baseline           72    # baseline store + comparison
+package internal/output             70    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
+package internal/compliance         66    # benchmark mapping over saved reports
+package internal/cloud              65    # capability interfaces + shared types; mostly declarations
+package internal/compare            64    # report normalization
+package internal/audit              62    # the orchestrator; each domain it calls is floored on its own
+package internal/providers          54    # registry + Detect wiring, exercised through the resolvers
+package internal/cloud/k8s          45    # most paths need a live apiserver; the RBAC analyzer is the covered part
+package internal/report             42    # aggregation over saved reports
+package internal/fix                20    # Terraform/shell emitters — output asserted by golden comparison, not line coverage
+package cmd                         16    # handlers resolve providers and render; the logic they call is floored above

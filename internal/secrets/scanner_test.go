@@ -144,3 +144,33 @@ func TestScanProvidersErrorWrapsProviderName(t *testing.T) {
 		t.Errorf("error message: got %q, want %q", err.Error(), want)
 	}
 }
+
+// TestScanProvidersSortsEqualSeverityByResource pins the tie-break. Findings are
+// sorted by severity so the worst read first, but two secrets of the same
+// severity have to come back in a stable order — otherwise the same account
+// scanned twice produces two different reports, and a diff between runs shows
+// churn that is really just map iteration order.
+func TestScanProvidersSortsEqualSeverityByResource(t *testing.T) {
+	sameSeverity := []cloud.SecretFinding{
+		{Severity: cloud.SeverityHigh, Type: cloud.SecretPassword, Provider: "aws", Resource: "lambda:zebra"},
+		{Severity: cloud.SeverityHigh, Type: cloud.SecretPassword, Provider: "aws", Resource: "lambda:alpha"},
+		{Severity: cloud.SeverityHigh, Type: cloud.SecretPassword, Provider: "aws", Resource: "lambda:middle"},
+	}
+
+	got, err := ScanProviders(context.Background(),
+		[]cloud.SecretsProvider{&mockSecretsProvider{name: "aws", findings: sameSeverity}},
+		ScanOptions{MinSeverity: cloud.SeverityLow})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected all three findings, got %d", len(got))
+	}
+
+	want := []string{"lambda:alpha", "lambda:middle", "lambda:zebra"}
+	for i, w := range want {
+		if got[i].Resource != w {
+			t.Errorf("position %d: got %q want %q — equal severities must order by resource", i, got[i].Resource, w)
+		}
+	}
+}

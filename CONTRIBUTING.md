@@ -366,9 +366,14 @@ func TestScan(t *testing.T) {
 - Use hand-written mock structs that implement only the interface methods needed by the test. No `gomock`, `testify/mock`, or code-generation tools.
 - Do not use `t.Skip()` to skip tests that require credentials — mock instead.
 - New packages must have at least one test file.
-- Coverage is gated per package by `.coverage-floors`, enforced in CI by `scripts/coverage.sh`.
+- Coverage is gated by `.coverage-floors`, enforced in CI by `scripts/coverage.sh`.
   A new package needs a floor entry — CI fails a tested package that has none, and fails any
   package that drops below its floor.
+- Package floors are a ratchet: raise one when you raise its coverage. Leaving a floor at the
+  number it was set at years ago is how a gate quietly starts permitting a large regression.
+- Files on the security-critical path carry a per-file `file <path> 100` floor instead, because a
+  package floor averages them with everything around them. Adding a branch to one of those files
+  means covering both sides of it in the same change.
 
 ## Code conventions
 
