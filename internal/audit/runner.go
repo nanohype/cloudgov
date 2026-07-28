@@ -50,6 +50,17 @@ type Report struct {
 	Secrets   []cloud.SecretFinding  `json:"secrets,omitempty"`
 	Summary   ReportSummary          `json:"summary"`
 	Duration  string                 `json:"duration"`
+
+	// Incomplete lists observations this run was asked to make and could not.
+	// It carries both what the providers reported through their warn channel
+	// and any domain whose scan returned an error.
+	//
+	// A domain that failed contributes zero findings, and zero findings is
+	// otherwise indistinguishable from a clean domain. The exit code is
+	// consumed as merge-gate evidence where 0 affirmatively supports approval,
+	// so a partial view has to say so rather than argue that the part it never
+	// read was fine.
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // ReportSummary holds aggregated finding counts.
@@ -255,6 +266,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 
 	report.Duration = time.Since(start).Truncate(time.Millisecond).String()
 	report.Summary = buildSummary(report, opts)
+	report.Incomplete = collectIncomplete(providers, opts, errs)
 
 	if len(errs) > 0 && !opts.Quiet {
 		for _, err := range errs {
@@ -263,6 +275,45 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 	}
 
 	return report, nil
+}
+
+// collectIncomplete gathers everything this run was asked to observe and could
+// not: each provider's own warn channel, plus any domain whose scan failed
+// outright.
+//
+// Skipped domains are deliberately absent. The operator asked not to look
+// there, which the summary already reports as DomainsSkipped; treating it as an
+// unobserved domain would make `--skip` raise the incomplete exit code.
+func collectIncomplete(providers Providers, opts Options, errs []error) []string {
+	var out []string
+	ran := func(domain string, n int) bool { return !opts.Skip[domain] && n > 0 }
+
+	if ran("iam", len(providers.IAM)) {
+		out = append(out, cloud.Incomplete(providers.IAM)...)
+	}
+	if ran("storage", len(providers.Storage)) {
+		out = append(out, cloud.Incomplete(providers.Storage)...)
+	}
+	if ran("network", len(providers.Network)) {
+		out = append(out, cloud.Incomplete(providers.Network)...)
+	}
+	if ran("orphans", len(providers.Orphans)) {
+		out = append(out, cloud.Incomplete(providers.Orphans)...)
+	}
+	if ran("certs", len(providers.Certs)) {
+		out = append(out, cloud.Incomplete(providers.Certs)...)
+	}
+	if ran("tags", len(providers.Tags)) {
+		out = append(out, cloud.Incomplete(providers.Tags)...)
+	}
+	if ran("secrets", len(providers.Secrets)) {
+		out = append(out, cloud.Incomplete(providers.Secrets)...)
+	}
+
+	for _, err := range errs {
+		out = append(out, err.Error())
+	}
+	return out
 }
 
 func buildSummary(r *Report, opts Options) ReportSummary {

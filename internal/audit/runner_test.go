@@ -2,10 +2,14 @@ package audit
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
+
+var errScanFailed = errors.New("access denied")
 
 type mockStorageProvider struct {
 	findings []cloud.BucketFinding
@@ -169,5 +173,99 @@ func TestRun_Empty(t *testing.T) {
 	}
 	if report.Summary.TotalFindings != 0 {
 		t.Errorf("expected 0 findings, got %d", report.Summary.TotalFindings)
+	}
+}
+
+// ── incompleteness ────────────────────────────────────────────────────────────
+//
+// A domain that could not be fully read contributes zero findings, and zero
+// findings is otherwise indistinguishable from a clean domain. The exit code is
+// consumed as merge-gate evidence where 0 affirmatively supports approval, so a
+// partial view has to surface as one — for the aggregate audit exactly as it
+// already does for each per-domain command.
+
+// incompleteStorageProvider reports through the warn channel the way a real
+// provider does when a paginator or a per-bucket call fails partway.
+type incompleteStorageProvider struct {
+	mockStorageProvider
+	warnings []string
+}
+
+func (p *incompleteStorageProvider) Incomplete() []string { return p.warnings }
+
+func TestRun_SurfacesProviderWarningsAsIncomplete(t *testing.T) {
+	p := &incompleteStorageProvider{warnings: []string{"s3: GetBucketVersioning denied for acme-logs"}}
+	report, err := Run(context.Background(), Providers{
+		Storage: []cloud.StorageProvider{p},
+	}, Options{Quiet: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(report.Incomplete) != 1 || report.Incomplete[0] != p.warnings[0] {
+		t.Fatalf("expected the provider warning to reach report.Incomplete, got %v", report.Incomplete)
+	}
+}
+
+func TestRun_SurfacesAFailedDomainAsIncomplete(t *testing.T) {
+	// A denied ListBuckets returns an error, the domain yields nothing, and
+	// before this the only trace was a stderr line the exit code never saw.
+	report, err := Run(context.Background(), Providers{
+		Storage: []cloud.StorageProvider{&mockStorageProvider{err: errScanFailed}},
+	}, Options{Quiet: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(report.Incomplete) == 0 {
+		t.Fatal("a domain whose scan failed must not report as a complete, clean domain")
+	}
+	if !strings.Contains(report.Incomplete[0], "storage") {
+		t.Fatalf("expected the failing domain to be named, got %q", report.Incomplete[0])
+	}
+}
+
+func TestRun_CleanScanReportsNothingIncomplete(t *testing.T) {
+	report, err := Run(context.Background(), Providers{
+		Storage: []cloud.StorageProvider{&mockStorageProvider{}},
+	}, Options{Quiet: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(report.Incomplete) != 0 {
+		t.Fatalf("a fully-observed scan is not incomplete, got %v", report.Incomplete)
+	}
+}
+
+func TestRun_SkippedDomainIsNotIncomplete(t *testing.T) {
+	// `--skip storage` is the operator choosing not to look. The summary
+	// already reports it as skipped; counting it as unobserved would make the
+	// flag raise the incomplete exit code.
+	p := &incompleteStorageProvider{warnings: []string{"s3: denied"}}
+	report, err := Run(context.Background(), Providers{
+		Storage: []cloud.StorageProvider{p},
+	}, Options{Quiet: true, Skip: map[string]bool{"storage": true}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(report.Incomplete) != 0 {
+		t.Fatalf("a skipped domain is not an incomplete one, got %v", report.Incomplete)
+	}
+}
+
+func TestRun_GathersIncompleteAcrossDomains(t *testing.T) {
+	storage := &incompleteStorageProvider{warnings: []string{"s3: denied"}}
+	report, err := Run(context.Background(), Providers{
+		Storage: []cloud.StorageProvider{storage},
+		Certs:   []cloud.CertProvider{&mockCertProvider{err: errScanFailed}},
+	}, Options{Quiet: true})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(report.Incomplete) != 2 {
+		t.Fatalf("expected both the warning and the failed domain, got %v", report.Incomplete)
 	}
 }

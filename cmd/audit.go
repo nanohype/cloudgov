@@ -87,6 +87,10 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	gate(sevs, func(s cloud.Severity) cloud.Severity { return s })
+	// Every per-domain command raises exit 3 on a partial view; the command
+	// that runs all seven has to do the same, or the widest scan is the one
+	// that reports a permission-limited run as clean.
+	gateIncomplete(report.Incomplete)
 
 	w := os.Stdout
 	if auditOutputFile != "" {
