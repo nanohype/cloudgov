@@ -52,9 +52,9 @@ package internal/output             70    # renderers; the table/JSON writers ar
 package internal/compliance         66    # benchmark mapping over saved reports
 package internal/cloud              65    # capability interfaces + shared types; mostly declarations
 package internal/compare            64    # report normalization
-package internal/audit              62    # the orchestrator; each domain it calls is floored on its own
+package internal/audit              69    # the orchestrator; each domain it calls is floored on its own
 package internal/providers          54    # registry + Detect wiring, exercised through the resolvers
 package internal/cloud/k8s          45    # most paths need a live apiserver; the RBAC analyzer is the covered part
 package internal/report             42    # aggregation over saved reports
-package internal/fix                20    # Terraform/shell emitters — output asserted by golden comparison, not line coverage
+package internal/fix                39    # Terraform/shell emitters — golden-compared; the policy writer is covered directly
 package cmd                         16    # handlers resolve providers and render; the logic they call is floored above
