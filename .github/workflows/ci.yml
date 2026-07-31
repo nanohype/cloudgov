@@ -39,6 +39,14 @@ jobs:
         # cloud calls. Fails on any context.Background() in cmd/ outside Execute().
         run: bash scripts/check-context.sh
 
+      - name: release-URL check
+        # .goreleaser.yaml decides the asset filenames; the README repeats them
+        # from memory. Nothing compared the two, so every documented install
+        # command 404'd — in the README and in the three CI recipes it hands
+        # people to paste. This is that comparison, offline against the
+        # committed config.
+        run: bash scripts/check-release-urls.sh
+
       - name: upload coverage artifact
         if: always() # keep the profile even when a floor fails, for debugging
         uses: actions/upload-artifact@v4
