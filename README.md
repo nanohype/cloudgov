@@ -61,9 +61,14 @@ go install github.com/nanohype/cloudgov@latest
 
 Pre-built binaries for Linux, macOS, and Windows are attached to every [GitHub release](https://github.com/nanohype/cloudgov/releases).
 
+Archive names carry the version, so resolve it first — `releases/latest/download/`
+needs the exact asset filename and has nothing to substitute into it.
+
 ```sh
 # macOS arm64 example
-curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Darwin_arm64.tar.gz \
+VERSION=$(curl -sSL https://api.github.com/repos/nanohype/cloudgov/releases/latest \
+  | sed -n 's/.*"tag_name": *"v\{0,1\}\([^"]*\)".*/\1/p')
+curl -sSL "https://github.com/nanohype/cloudgov/releases/download/v${VERSION}/cloudgov_${VERSION}_darwin_arm64.tar.gz" \
   | tar -xz cloudgov
 sudo mv cloudgov /usr/local/bin/
 ```
@@ -71,7 +76,8 @@ sudo mv cloudgov /usr/local/bin/
 Verify the download against the published SHA256 checksums:
 
 ```sh
-curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/checksums.txt | sha256sum --check --ignore-missing
+curl -sSL "https://github.com/nanohype/cloudgov/releases/download/v${VERSION}/cloudgov_${VERSION}_checksums.txt" \
+  | sha256sum --check --ignore-missing
 ```
 
 ### Build from source
@@ -861,8 +867,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install cloudgov
+        env:
+          # Pinned rather than floating to latest: a scan that changes verdict
+          # because a release landed mid-week is a scan you cannot act on.
+          CLOUDGOV_VERSION: 2.0.0
         run: |
-          curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Linux_amd64.tar.gz \
+          curl -sSL "https://github.com/nanohype/cloudgov/releases/download/v${CLOUDGOV_VERSION}/cloudgov_${CLOUDGOV_VERSION}_linux_amd64.tar.gz" \
             | tar -xz cloudgov
           sudo mv cloudgov /usr/local/bin/
 
@@ -905,8 +915,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install cloudgov
+        env:
+          # Pinned rather than floating to latest: a scan that changes verdict
+          # because a release landed mid-week is a scan you cannot act on.
+          CLOUDGOV_VERSION: 2.0.0
         run: |
-          curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Linux_amd64.tar.gz \
+          curl -sSL "https://github.com/nanohype/cloudgov/releases/download/v${CLOUDGOV_VERSION}/cloudgov_${CLOUDGOV_VERSION}_linux_amd64.tar.gz" \
             | tar -xz cloudgov
           sudo mv cloudgov /usr/local/bin/
 
@@ -932,8 +946,12 @@ jobs:
 ```yaml
 cloudgov:
   image: ubuntu:24.04
+  variables:
+    # Pinned rather than floating to latest: a scan that changes verdict
+    # because a release landed mid-week is a scan you cannot act on.
+    CLOUDGOV_VERSION: "2.0.0"
   before_script:
-    - curl -sSL https://github.com/nanohype/cloudgov/releases/latest/download/cloudgov_Linux_amd64.tar.gz
+    - curl -sSL "https://github.com/nanohype/cloudgov/releases/download/v${CLOUDGOV_VERSION}/cloudgov_${CLOUDGOV_VERSION}_linux_amd64.tar.gz"
         | tar -xz cloudgov
     - mv cloudgov /usr/local/bin/
   script:
