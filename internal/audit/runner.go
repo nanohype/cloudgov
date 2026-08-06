@@ -30,26 +30,26 @@ type Providers struct {
 
 // Options controls which scans to run and how.
 type Options struct {
-	Skip        map[string]bool // domain names to skip (e.g. "iam", "certs")
-	MinSeverity cloud.Severity
-	IAMDays     int
-	CertDays    int
+	Skip         map[string]bool // domain names to skip (e.g. "iam", "certs")
+	MinSeverity  cloud.Severity
+	IAMDays      int
+	CertDays     int
 	RequiredTags []string
-	Concurrency int
-	Quiet       bool
+	Concurrency  int
+	Quiet        bool
 }
 
 // Report contains all findings from a full audit.
 type Report struct {
-	IAM       []cloud.Finding       `json:"iam,omitempty"`
-	Storage   []cloud.BucketFinding  `json:"storage,omitempty"`
-	Network   []cloud.NetworkFinding `json:"network,omitempty"`
-	Orphans   []cloud.OrphanResource `json:"orphans,omitempty"`
-	Certs     []cloud.CertFinding    `json:"certs,omitempty"`
-	Tags      []cloud.TagFinding     `json:"tags,omitempty"`
-	Secrets   []cloud.SecretFinding  `json:"secrets,omitempty"`
-	Summary   ReportSummary          `json:"summary"`
-	Duration  string                 `json:"duration"`
+	IAM      []cloud.Finding        `json:"iam,omitempty"`
+	Storage  []cloud.BucketFinding  `json:"storage,omitempty"`
+	Network  []cloud.NetworkFinding `json:"network,omitempty"`
+	Orphans  []cloud.OrphanResource `json:"orphans,omitempty"`
+	Certs    []cloud.CertFinding    `json:"certs,omitempty"`
+	Tags     []cloud.TagFinding     `json:"tags,omitempty"`
+	Secrets  []cloud.SecretFinding  `json:"secrets,omitempty"`
+	Summary  ReportSummary          `json:"summary"`
+	Duration string                 `json:"duration"`
 
 	// Incomplete lists observations this run was asked to make and could not.
 	// It carries both what the providers reported through their warn channel
@@ -65,12 +65,12 @@ type Report struct {
 
 // ReportSummary holds aggregated finding counts.
 type ReportSummary struct {
-	TotalFindings int            `json:"total_findings"`
-	BySeverity    map[string]int `json:"by_severity"`
-	ByDomain      map[string]int `json:"by_domain"`
-	DomainsRun    int            `json:"domains_run"`
-	DomainsSkipped int           `json:"domains_skipped"`
-	OrphanCost    float64        `json:"orphan_monthly_cost,omitempty"`
+	TotalFindings  int            `json:"total_findings"`
+	BySeverity     map[string]int `json:"by_severity"`
+	ByDomain       map[string]int `json:"by_domain"`
+	DomainsRun     int            `json:"domains_run"`
+	DomainsSkipped int            `json:"domains_skipped"`
+	OrphanCost     float64        `json:"orphan_monthly_cost,omitempty"`
 }
 
 // Run executes all enabled scan domains in parallel.

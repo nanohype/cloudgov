@@ -18,7 +18,7 @@ type ScanOptions struct {
 	Days            int
 	PrincipalFilter string // empty = all
 	MinSeverity     cloud.Severity
-	Concurrency     int                   // max parallel goroutines; 0 or negative defaults to 10
+	Concurrency     int // max parallel goroutines; 0 or negative defaults to 10
 	// Progress is called after each principal is attempted; nil = no-op. It is
 	// invoked from the scan's worker goroutines, so an implementation that
 	// touches shared state must synchronize. total is the number of principals

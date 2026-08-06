@@ -113,13 +113,13 @@ func TestSarifLevel(t *testing.T) {
 
 func TestBuildRules_NonEmpty(t *testing.T) {
 	for name, builder := range map[string]func() []sarifRule{
-		"iam":     buildRules,
-		"storage": buildStorageRules,
-		"secrets": buildSecretsRules,
-		"network": buildNetworkRules,
-		"k8s":     buildK8sRules,
-		"lambda":  buildLambdaRules,
-		"drift":   buildDriftRules,
+		"iam":      buildRules,
+		"storage":  buildStorageRules,
+		"secrets":  buildSecretsRules,
+		"network":  buildNetworkRules,
+		"k8s":      buildK8sRules,
+		"lambda":   buildLambdaRules,
+		"drift":    buildDriftRules,
 		"certs":    buildCertRules,
 		"platform": buildPlatformRules,
 	} {

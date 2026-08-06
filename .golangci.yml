@@ -3,6 +3,14 @@ version: "2"
 run:
   timeout: 5m
 
+# gofmt is the authority on Go formatting in this repo, and until it ran here
+# nothing was: `run` reports an unformatted file as an issue, so `task lint` and
+# CI both fail on one. Struct-tag and trailing-comment alignment is exactly the
+# drift a reviewer stops noticing and a diff keeps carrying.
+formatters:
+  enable:
+    - gofmt
+
 linters:
   settings:
     errcheck:

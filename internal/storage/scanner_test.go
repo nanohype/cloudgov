@@ -14,7 +14,7 @@ type mockStorageProvider struct {
 	err      error
 }
 
-func (m *mockStorageProvider) Name() string                   { return m.name }
+func (m *mockStorageProvider) Name() string                  { return m.name }
 func (m *mockStorageProvider) Detect(_ context.Context) bool { return true }
 func (m *mockStorageProvider) AuditStorage(_ context.Context) ([]cloud.BucketFinding, error) {
 	return m.findings, m.err

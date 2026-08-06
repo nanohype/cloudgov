@@ -38,10 +38,10 @@ func Scan(ctx context.Context, providers []cloud.InventoryProvider, opts ScanOpt
 
 // Summary holds aggregated inventory counts.
 type Summary struct {
-	Total     int
-	ByKind    map[cloud.ResourceKind]int
-	ByType    map[string]int
-	ByRegion  map[string]int
+	Total    int
+	ByKind   map[cloud.ResourceKind]int
+	ByType   map[string]int
+	ByRegion map[string]int
 }
 
 // Summarize computes aggregate counts from an inventory.
