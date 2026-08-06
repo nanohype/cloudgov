@@ -28,6 +28,7 @@ var (
 	platformGVR = schema.GroupVersionResource{Group: "platform.nanohype.dev", Version: "v1alpha1", Resource: "platforms"}
 	tenantGVR   = schema.GroupVersionResource{Group: "platform.nanohype.dev", Version: "v1alpha1", Resource: "tenants"}
 	budgetGVR   = schema.GroupVersionResource{Group: "governance.nanohype.dev", Version: "v1alpha1", Resource: "budgetpolicies"}
+	gatewayGVR  = schema.GroupVersionResource{Group: "agents.nanohype.dev", Version: "v1alpha1", Resource: "modelgateways"}
 )
 
 const (
@@ -535,6 +536,63 @@ func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstru
 				out = append(out, f(cloud.SeverityHigh, cloud.PlatformComplianceWeaker, tenantName,
 					"Tenant requires hipaa but this Platform does not set compliance.hipaa", "Set compliance.hipaa=true to match the Tenant baseline."))
 			}
+		}
+	}
+
+	if hipaa {
+		out = append(out, auditHipaaGuardrails(ctx, dyn, p, f)...)
+	}
+	return out
+}
+
+// auditHipaaGuardrails requires a hipaa Platform's model routes to name a
+// guardrail rather than fall back to the cluster baseline.
+//
+// Every route resolves to a guardrail: the route's own guardrailRef, else the
+// gateway's defaultGuardrailRef, else the baseline the operator reads from SSM.
+// That fallback is the point of the baseline and the right default for a general
+// workload — but it is a general-purpose guardrail, and a route reaching it does
+// so by omission rather than by anyone choosing it.
+//
+// The check is that a decision was made, not what the decision was. Whether a
+// named guardrail carries the right PII entities and blocks rather than
+// anonymizes is a question about Bedrock state, which this audit does not read;
+// declaring HIPAA and silently inheriting a default is answerable from the CRs
+// alone.
+func auditHipaaGuardrails(ctx context.Context, dyn dynamic.Interface, p *unstructured.Unstructured, f findingFunc) []cloud.PlatformFinding {
+	ns := p.GetNamespace()
+	gws, err := dyn.Resource(gatewayGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		// A gateway the audit cannot read is not a gateway the audit can clear.
+		// Reporting nothing here would read as "no finding" on a Platform whose
+		// routes were never examined.
+		return []cloud.PlatformFinding{f(cloud.SeverityLow, cloud.PlatformHipaaGuardrailInherited, "",
+			"hipaa platform's ModelGateways could not be listed, so their guardrails were not checked",
+			"Re-run with permission to list modelgateways in this namespace.")}
+	}
+
+	var out []cloud.PlatformFinding
+	for _, gw := range gws.Items {
+		if owner, _, _ := unstructured.NestedString(gw.Object, "spec", "platformRef", "name"); owner != p.GetName() {
+			continue
+		}
+		gwDefault, _, _ := unstructured.NestedString(gw.Object, "spec", "defaultGuardrailRef", "name")
+		if gwDefault != "" {
+			continue // covers every route on this gateway
+		}
+		routes, _, _ := unstructured.NestedSlice(gw.Object, "spec", "routes")
+		for _, r := range routes {
+			route, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			if ref, _, _ := unstructured.NestedString(route, "guardrailRef", "name"); ref != "" {
+				continue
+			}
+			name, _, _ := unstructured.NestedString(route, "name")
+			out = append(out, f(cloud.SeverityHigh, cloud.PlatformHipaaGuardrailInherited, ns+"/"+gw.GetName()+"/"+name,
+				"hipaa platform's route "+name+" names no guardrail, so it falls back to the cluster baseline",
+				"Set spec.routes[].guardrailRef, or the gateway's spec.defaultGuardrailRef, to a guardrail chosen for this workload."))
 		}
 	}
 	return out

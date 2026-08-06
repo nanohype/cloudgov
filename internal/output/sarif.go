@@ -374,6 +374,7 @@ func buildPlatformRules() []sarifRule {
 		{cloud.PlatformKillSwitchDisabled, "KillSwitchDisabled", "error"},
 		{cloud.PlatformComplianceWeaker, "ComplianceWeakerThanTenant", "error"},
 		{cloud.PlatformTenantMissing, "TenantMissing", "note"},
+		{cloud.PlatformHipaaGuardrailInherited, "HipaaGuardrailInherited", "error"},
 	}
 	rules := make([]sarifRule, 0, len(types))
 	for _, t := range types {

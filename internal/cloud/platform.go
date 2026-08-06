@@ -41,6 +41,10 @@ const (
 	PlatformKillSwitchDisabled PlatformFindingType = "KILL_SWITCH_DISABLED"
 	PlatformComplianceWeaker   PlatformFindingType = "COMPLIANCE_WEAKER_THAN_TENANT"
 	PlatformTenantMissing      PlatformFindingType = "TENANT_MISSING"
+
+	// A hipaa Platform whose model routes fall back to the cluster baseline
+	// guardrail instead of naming one of their own.
+	PlatformHipaaGuardrailInherited PlatformFindingType = "HIPAA_GUARDRAIL_INHERITED"
 )
 
 // AllPlatformFindingTypes is every type the platform auditor can emit. SARIF
@@ -74,6 +78,7 @@ var AllPlatformFindingTypes = []PlatformFindingType{
 	PlatformKillSwitchDisabled,
 	PlatformComplianceWeaker,
 	PlatformTenantMissing,
+	PlatformHipaaGuardrailInherited,
 }
 
 // IAMRoleInfo is the read-only view of an IAM role the platform auditor needs to
