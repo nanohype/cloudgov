@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"testing"
 
@@ -19,11 +20,11 @@ import (
 )
 
 const (
-	tName   = "app1"
-	tNS     = "tenants-app1"
-	tMgmtNS = "eks-agent-platform"
-	tTen    = "acme"
-	tPers   = "eng"
+	tName    = "app1"
+	tNS      = "tenants-app1"
+	tMgmtNS  = "eks-agent-platform"
+	tTen     = "acme"
+	tPers    = "eng"
 	tBudget  = "tenant-budget"
 	tRole    = "arn:aws:iam::123456789012:role/dev-app1-tenant"
 	tCluster = "development-cluster"
@@ -94,6 +95,62 @@ func tenantCR(soc2, hipaa bool) *unstructured.Unstructured {
 	}}
 }
 
+// gatewayCR is a ModelGateway owned by ownerPlatform. defaultRef is the
+// gateway-wide guardrail ("" for none); routes maps a route name to its own
+// guardrailRef ("" for none, i.e. the route falls back).
+func gatewayCR(name, ownerPlatform, defaultRef string, routes map[string]string) *unstructured.Unstructured {
+	rs := make([]interface{}, 0, len(routes))
+	for _, rn := range sortedKeys(routes) {
+		route := map[string]interface{}{"name": rn}
+		if routes[rn] != "" {
+			route["guardrailRef"] = map[string]interface{}{"name": routes[rn]}
+		}
+		rs = append(rs, route)
+	}
+	spec := map[string]interface{}{
+		"platformRef": map[string]interface{}{"name": ownerPlatform},
+		"routes":      rs,
+	}
+	if defaultRef != "" {
+		spec["defaultGuardrailRef"] = map[string]interface{}{"name": defaultRef}
+	}
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "agents.nanohype.dev/v1alpha1",
+		"kind":       "ModelGateway",
+		"metadata":   map[string]interface{}{"name": name, "namespace": tMgmtNS},
+		"spec":       spec,
+	}}
+}
+
+// sortedKeys keeps the rendered route order deterministic so a finding's
+// resource string is stable across runs.
+func sortedKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// addGateways seeds ModelGateways under the resource the audit actually queries.
+//
+// They cannot be passed to dynClient as constructor objects: the fake files an
+// object under meta.UnsafeGuessKindToResource(kind), which lowercases the kind
+// and turns a trailing "y" into "ies" — so "ModelGateway" lands under
+// "modelgatewaies" while the CRD's real plural, and gatewayGVR, is
+// "modelgateways". Nothing errors; List simply returns an empty set, and a test
+// asserting a finding fails while a test asserting its absence passes for the
+// wrong reason. Tracker().Create takes the GVR explicitly and sidesteps the guess.
+func addGateways(t *testing.T, dyn *dynamicfake.FakeDynamicClient, gws ...*unstructured.Unstructured) {
+	t.Helper()
+	for _, gw := range gws {
+		if err := dyn.Tracker().Create(gatewayGVR, gw, gw.GetNamespace()); err != nil {
+			t.Fatalf("seed ModelGateway %s: %v", gw.GetName(), err)
+		}
+	}
+}
+
 func dynClient(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
@@ -101,6 +158,7 @@ func dynClient(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 			platformGVR: "PlatformList",
 			budgetGVR:   "BudgetPolicyList",
 			tenantGVR:   "TenantList",
+			gatewayGVR:  "ModelGatewayList",
 		},
 		objs...,
 	)
@@ -478,6 +536,79 @@ func TestAudit_KillSwitchDisabled(t *testing.T) {
 	}
 	if !types(findings)[cloud.PlatformKillSwitchDisabled] {
 		t.Fatalf("expected KILL_SWITCH_DISABLED, got %+v", findings)
+	}
+}
+
+// Every route resolves to a guardrail — its own, the gateway default, or the
+// cluster baseline the operator reads from SSM. The baseline is the right
+// default for a general workload, but a route reaches it by omission. These
+// cases pin that a hipaa Platform has to have chosen.
+func TestAudit_HipaaRouteInheritingBaselineIsAFinding(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	dyn := dynClient(platformCRCompliance(true, true), budgetCR(true), tenantCR(true, true))
+	addGateways(t, dyn, gatewayCR("gw", tName, "", map[string]string{"review": ""}))
+	findings, err := Audit(context.Background(), typed, dyn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !types(findings)[cloud.PlatformHipaaGuardrailInherited] {
+		t.Fatalf("expected HIPAA_GUARDRAIL_INHERITED, got %+v", findings)
+	}
+}
+
+func TestAudit_HipaaGuardrailSatisfiedByEitherRef(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		defaultRef string
+		routes     map[string]string
+	}{
+		{"gateway default covers every route", "phi-guardrail", map[string]string{"review": "", "summarize": ""}},
+		{"each route names its own", "", map[string]string{"review": "phi-guardrail", "summarize": "phi-guardrail"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typed := kubefake.NewSimpleClientset(conformantObjects()...)
+			dyn := dynClient(platformCRCompliance(true, true), budgetCR(true), tenantCR(true, true))
+			addGateways(t, dyn, gatewayCR("gw", tName, tc.defaultRef, tc.routes))
+			findings, err := Audit(context.Background(), typed, dyn, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if types(findings)[cloud.PlatformHipaaGuardrailInherited] {
+				t.Fatalf("a named guardrail must satisfy the check, got %+v", findings)
+			}
+		})
+	}
+}
+
+// The rule is scoped to hipaa. Inheriting the baseline is the intended default
+// everywhere else, so flagging it generally would make the finding noise.
+func TestAudit_NonHipaaRouteMayInheritBaseline(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	dyn := dynClient(platformCRCompliance(true, false), budgetCR(true), tenantCR(true, false))
+	addGateways(t, dyn, gatewayCR("gw", tName, "", map[string]string{"review": ""}))
+	findings, err := Audit(context.Background(), typed, dyn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if types(findings)[cloud.PlatformHipaaGuardrailInherited] {
+		t.Fatalf("a non-hipaa platform may inherit the baseline, got %+v", findings)
+	}
+}
+
+// A gateway in the same namespace owned by a different Platform. Without the
+// platformRef filter this would report one Platform's route against another.
+func TestAudit_HipaaIgnoresAnotherPlatformsGateway(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	dyn := dynClient(platformCRCompliance(true, true), budgetCR(true), tenantCR(true, true))
+	addGateways(t, dyn,
+		gatewayCR("gw-self", tName, "phi-guardrail", map[string]string{"review": ""}),
+		gatewayCR("gw-other", "some-other-platform", "", map[string]string{"unguarded": ""}))
+	findings, err := Audit(context.Background(), typed, dyn, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if types(findings)[cloud.PlatformHipaaGuardrailInherited] {
+		t.Fatalf("another Platform's gateway must not be attributed here, got %+v", findings)
 	}
 }
 
