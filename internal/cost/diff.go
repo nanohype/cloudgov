@@ -12,7 +12,7 @@ import (
 
 // ScanOptions controls cost diff behavior.
 type ScanOptions struct {
-	Days        int    // "after" period = last N days; "before" = the N days prior
+	Days        int // "after" period = last N days; "before" = the N days prior
 	MinSeverity cloud.Severity
 	Threshold   float64 // only include entries with abs(PctChange) > Threshold; 0 means no filter
 }

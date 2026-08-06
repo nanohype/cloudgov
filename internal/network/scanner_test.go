@@ -14,7 +14,7 @@ type mockNetworkProvider struct {
 	err      error
 }
 
-func (m *mockNetworkProvider) Name() string                   { return m.name }
+func (m *mockNetworkProvider) Name() string                  { return m.name }
 func (m *mockNetworkProvider) Detect(_ context.Context) bool { return true }
 func (m *mockNetworkProvider) AuditNetwork(_ context.Context) ([]cloud.NetworkFinding, error) {
 	return m.findings, m.err

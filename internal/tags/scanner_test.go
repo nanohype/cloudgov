@@ -14,7 +14,7 @@ type mockTagProvider struct {
 	err      error
 }
 
-func (m *mockTagProvider) Name() string                   { return m.name }
+func (m *mockTagProvider) Name() string                  { return m.name }
 func (m *mockTagProvider) Detect(_ context.Context) bool { return true }
 func (m *mockTagProvider) AuditTags(_ context.Context, _ []string) ([]cloud.TagFinding, error) {
 	return m.findings, m.err
@@ -26,11 +26,11 @@ func TestScan(t *testing.T) {
 	f3 := cloud.TagFinding{Severity: cloud.SeverityMedium, Provider: "gamma", ResourceType: "compute:instance", ResourceID: "vm-001", MissingTags: []string{"env"}}
 
 	tests := []struct {
-		name        string
-		providers   []cloud.TagProvider
-		opts        ScanOptions
-		wantCount   int
-		wantErr     bool
+		name      string
+		providers []cloud.TagProvider
+		opts      ScanOptions
+		wantCount int
+		wantErr   bool
 	}{
 		{
 			name: "single provider returns all findings",
@@ -66,7 +66,7 @@ func TestScan(t *testing.T) {
 			wantCount: 2,
 		},
 		{
-			name: "no providers returns empty result",
+			name:      "no providers returns empty result",
 			providers: []cloud.TagProvider{},
 			opts:      ScanOptions{},
 			wantCount: 0,

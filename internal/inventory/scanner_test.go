@@ -14,7 +14,7 @@ type mockInventoryProvider struct {
 	err       error
 }
 
-func (m *mockInventoryProvider) Name() string                 { return m.name }
+func (m *mockInventoryProvider) Name() string                  { return m.name }
 func (m *mockInventoryProvider) Detect(_ context.Context) bool { return true }
 func (m *mockInventoryProvider) ListResources(_ context.Context, _ []string) ([]cloud.InventoryResource, error) {
 	return m.resources, m.err

@@ -15,7 +15,7 @@ type mockCertProvider struct {
 	err      error
 }
 
-func (m *mockCertProvider) Name() string                   { return m.name }
+func (m *mockCertProvider) Name() string                  { return m.name }
 func (m *mockCertProvider) Detect(_ context.Context) bool { return true }
 func (m *mockCertProvider) ListCertificates(_ context.Context) ([]cloud.CertFinding, error) {
 	return m.findings, m.err
@@ -86,8 +86,8 @@ func TestScan(t *testing.T) {
 			wantDomains: []string{"expired.example.com", "week.example.com", "month.example.com"},
 		},
 		{
-			name: "no providers returns empty result",
-			providers: []cloud.CertProvider{},
+			name:        "no providers returns empty result",
+			providers:   []cloud.CertProvider{},
 			opts:        ScanOptions{},
 			wantDomains: []string{},
 		},

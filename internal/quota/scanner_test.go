@@ -176,12 +176,12 @@ func TestSummarize(t *testing.T) {
 		{
 			name: "boundary values",
 			quotas: []cloud.QuotaUsage{
-				{Utilization: 90.0},  // critical (>= 90)
-				{Utilization: 89.9},  // high
-				{Utilization: 80.0},  // high (>= 80)
-				{Utilization: 79.9},  // medium
-				{Utilization: 50.0},  // medium (>= 50)
-				{Utilization: 49.9},  // low
+				{Utilization: 90.0}, // critical (>= 90)
+				{Utilization: 89.9}, // high
+				{Utilization: 80.0}, // high (>= 80)
+				{Utilization: 79.9}, // medium
+				{Utilization: 50.0}, // medium (>= 50)
+				{Utilization: 49.9}, // low
 			},
 			want: Summary{Total: 6, Critical: 1, High: 2, Medium: 2, Low: 1},
 		},

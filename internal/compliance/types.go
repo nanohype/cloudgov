@@ -38,9 +38,9 @@ type ComplianceSummary struct {
 
 // ComplianceReport is the full output of a compliance evaluation.
 type ComplianceReport struct {
-	Benchmark string             `json:"benchmark"`
-	Summary   ComplianceSummary  `json:"summary"`
-	Results   []ControlResult    `json:"results"`
+	Benchmark string            `json:"benchmark"`
+	Summary   ComplianceSummary `json:"summary"`
+	Results   []ControlResult   `json:"results"`
 }
 
 // InputFindings holds all finding types loaded from cloudgov scan JSON reports.

@@ -14,6 +14,6 @@ type Metadata struct {
 
 // Baseline wraps report data with metadata for comparison.
 type Baseline struct {
-	Metadata Metadata          `json:"metadata"`
-	Report   json.RawMessage   `json:"report"`
+	Metadata Metadata        `json:"metadata"`
+	Report   json.RawMessage `json:"report"`
 }
