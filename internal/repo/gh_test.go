@@ -170,3 +170,39 @@ func TestGHReader_MalformedMetadataIsAnError(t *testing.T) {
 		t.Fatal("unparseable metadata must be an error rather than a zero-valued repo")
 	}
 }
+
+// A name that gh would read as a flag rather than a path segment is the real
+// risk in building an argv from caller input — there is no shell, so there is no
+// command injection, but `--method` in an org position turns a read into
+// something else. Validation removes the premise rather than annotating around
+// it.
+func TestGHReader_RejectsNamesGhWouldReadAsFlags(t *testing.T) {
+	r, s := newStub(map[string]string{"repo list": "x"}, nil)
+
+	bad := []string{"-org", "--method", "a/b", "a b", "", strings.Repeat("x", 101)}
+	for _, name := range bad {
+		if _, err := r.ListRepos(context.Background(), name); err == nil {
+			t.Errorf("ListRepos accepted %q as an org", name)
+		}
+		if _, err := r.Settings(context.Background(), "nanohype", name); err == nil {
+			t.Errorf("Settings accepted %q as a repo", name)
+		}
+		if _, err := r.Settings(context.Background(), name, "eks-gitops"); err == nil {
+			t.Errorf("Settings accepted %q as an org", name)
+		}
+	}
+	if len(s.calls) != 0 {
+		t.Errorf("a rejected name must never reach gh, got calls: %v", s.calls)
+	}
+}
+
+func TestGHReader_AcceptsRealNames(t *testing.T) {
+	// Without this the rejection test above passes on a validator that refuses
+	// everything.
+	r, _ := newStub(map[string]string{"repo list": "eks-gitops"}, nil)
+	for _, name := range []string{"nanohype", "eks-agent-platform", "nanohype.dev", "a_b", "x1"} {
+		if _, err := r.ListRepos(context.Background(), name); err != nil {
+			t.Errorf("ListRepos rejected the legitimate org %q: %v", name, err)
+		}
+	}
+}

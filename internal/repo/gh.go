@@ -5,10 +5,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
+
+// GitHub's own character set for an org or repository name. Every value this
+// package interpolates into a gh argument is checked against it first.
+//
+// exec.Command passes argv directly with no shell, so there is no command
+// injection to have — but a name carrying a leading dash would be read by gh as
+// a FLAG rather than a path segment, which is a real way to turn a read into
+// something else. Validating removes the premise instead of annotating around
+// it, and gives gosec's G204 nothing left to be right about.
+var ghName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+
+func checkName(kind, v string) error {
+	if !ghName.MatchString(v) {
+		return fmt.Errorf("%s %q is not a valid GitHub name", kind, v)
+	}
+	return nil
+}
 
 // GHReader reads repository settings through the `gh` CLI.
 //
@@ -25,7 +43,9 @@ type GHReader struct {
 // NewGHReader returns a reader backed by the gh CLI on PATH.
 func NewGHReader() *GHReader {
 	return &GHReader{Run: func(ctx context.Context, args ...string) ([]byte, error) {
-		out, err := exec.CommandContext(ctx, "gh", args...).Output()
+		// The command is the constant "gh"; every argument is either a literal
+		// here or a name checkName has already accepted. No shell is involved.
+		out, err := exec.CommandContext(ctx, "gh", args...).Output() // #nosec G204 -- constant command; args are literals plus ghName-validated tokens
 		if err != nil {
 			var ee *exec.ExitError
 			if ok := asExitError(err, &ee); ok && len(ee.Stderr) > 0 {
@@ -47,6 +67,9 @@ func asExitError(err error, target **exec.ExitError) bool {
 
 // ListRepos returns every non-archived repository in the org.
 func (g *GHReader) ListRepos(ctx context.Context, org string) ([]string, error) {
+	if err := checkName("org", org); err != nil {
+		return nil, err
+	}
 	out, err := g.Run(ctx, "repo", "list", org, "--limit", "200",
 		"--json", "name,isArchived", "--jq", `.[]|select(.isArchived|not)|.name`)
 	if err != nil {
@@ -80,6 +103,12 @@ type ghProtection struct {
 // them is how "upgrade your plan" gets filed as "add a required check".
 func (g *GHReader) Settings(ctx context.Context, org, name string) (cloud.RepoSettings, error) {
 	s := cloud.RepoSettings{Name: name, DefaultRef: "main"}
+	if err := checkName("org", org); err != nil {
+		return s, err
+	}
+	if err := checkName("repo", name); err != nil {
+		return s, err
+	}
 
 	meta, err := g.Run(ctx, "api", fmt.Sprintf("repos/%s/%s", org, name),
 		"--jq", `{private:.private,archived:.archived,def:.default_branch}`)
@@ -96,6 +125,9 @@ func (g *GHReader) Settings(ctx context.Context, org, name string) (cloud.RepoSe
 	}
 	s.Private, s.Archived = m.Private, m.Archived
 	if m.Def != "" {
+		if err := checkName("default branch", m.Def); err != nil {
+			return s, err
+		}
 		s.DefaultRef = m.Def
 	}
 
