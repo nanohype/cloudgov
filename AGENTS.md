@@ -25,6 +25,7 @@ params are optional unless marked **required**.
 | `network_audit` | overly permissive security groups | `severity` |
 | `secrets_scan` | embedded secrets, incl. leaked third-party cloud creds | `severity` |
 | `certs` | TLS certs (ACM) expiring soon | `severity`, `days` |
+| `repo_audit` | GitHub branch protection, required checks and Dependabot state vs the committed expected shape | `org`, `expected`, `severity` |
 | `tags` | resources missing required tags | **`required[]`**, `severity` |
 | `orphans` | unused disks / IPs / LBs + monthly cost | `min_monthly_cost` |
 | `quota` | service quota utilization vs limits | `min_utilization` |
