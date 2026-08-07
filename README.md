@@ -30,8 +30,16 @@ a provider registry, so commands stay decoupled from SDK wiring.
 | Lambda policy (`lambda audit`) | ✅ | — |
 | RBAC (`k8s rbac`) | — | ✅ |
 | Platform tenant (`platform audit`) | ✅<sup>†</sup> | ✅ |
+| Repository settings (`repo audit`) | — | — |<sup>‡</sup>
 
 ✅ implemented · — not applicable
+
+<sup>‡</sup> Repository settings live only in GitHub — branch protection, required checks and
+Dependabot state. No gate inside a repository can observe them, so a repo can carry a full CI
+matrix, a protection rule that requires none of it, and nothing anywhere will say so. Read
+through the `gh` CLI's existing credential, the same way the AWS commands use the ambient
+credential chain. Compared against a committed `expected-repo-settings.yaml`; reported, never
+enforced.
 
 <sup>†</sup> Platform audit reads AWS IAM roles and EKS Pod Identity associations, plus Platform-tenant
 cluster objects (namespace, ResourceQuota, NetworkPolicy, ServiceAccount) — not RBAC,

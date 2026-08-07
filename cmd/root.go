@@ -58,6 +58,7 @@ func init() {
 	rootCmd.AddCommand(costCmd)
 	rootCmd.AddCommand(orphansCmd)
 	rootCmd.AddCommand(storageCmd)
+	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(networkCmd)
 	rootCmd.AddCommand(certsCmd)
 	rootCmd.AddCommand(tagsCmd)

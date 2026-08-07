@@ -39,6 +39,7 @@ package internal/network            94
 package internal/orphans            95
 package internal/output/sinks       84
 package internal/platform           83
+package internal/repo               80
 package internal/quota              95
 package internal/secrets            93
 package internal/storage            90    # was 28 against 93.8 measured — same stale-ratchet problem
