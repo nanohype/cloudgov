@@ -1,9 +1,13 @@
 name: security
 
 on:
+  # Restricted to main, as every other repo in the org is. With '**' a feature
+  # branch push and its pull request both run this workflow, so two check runs
+  # of the same name report to one commit — and the merge gate is skipped on the
+  # push one, which GitHub scores as Success. A required check whose value
+  # depends on which run reported last is not a gate.
   push:
-    branches:
-      - '**'
+    branches: [main]
   pull_request:
   schedule:
     # Weekly Tuesday 06:00 UTC — catches newly published CVEs even when no PRs land.
