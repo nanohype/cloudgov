@@ -159,6 +159,8 @@ func dynClient(objs ...runtime.Object) *dynamicfake.FakeDynamicClient {
 			budgetGVR:   "BudgetPolicyList",
 			tenantGVR:   "TenantList",
 			gatewayGVR:  "ModelGatewayList",
+
+			ciliumNetworkPolicyGVR: "CiliumNetworkPolicyList",
 		},
 		objs...,
 	)
@@ -622,5 +624,132 @@ func TestAudit_ComplianceWeakerThanTenant(t *testing.T) {
 	}
 	if !types(findings)[cloud.PlatformComplianceWeaker] {
 		t.Fatalf("expected COMPLIANCE_WEAKER_THAN_TENANT, got %+v", findings)
+	}
+}
+
+// ciliumNetpolCR builds the tenant egress CiliumNetworkPolicy in the shape the
+// operator's ensureCiliumEgress writes it: an endpointSelector matching the
+// whole namespace, and the egress allow-list. spec.ingress is absent, which is
+// what the operator emits for a tenant policy (denyIngress=false).
+func ciliumNetpolCR(mutate func(spec map[string]interface{})) *unstructured.Unstructured {
+	spec := map[string]interface{}{
+		"endpointSelector": map[string]interface{}{"matchLabels": map[string]interface{}{}},
+		"egress": []interface{}{
+			map[string]interface{}{
+				"toEntities": []interface{}{"host"},
+				"toPorts": []interface{}{map[string]interface{}{"ports": []interface{}{
+					map[string]interface{}{"port": "80", "protocol": "TCP"},
+				}}},
+			},
+		},
+	}
+	if mutate != nil {
+		mutate(spec)
+	}
+	u := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "cilium.io/v2",
+		"kind":       "CiliumNetworkPolicy",
+		"metadata":   map[string]interface{}{"name": netpolName, "namespace": tNS},
+		"spec":       spec,
+	}}
+	return u
+}
+
+// TestAuditNetworkPolicyCiliumEngine covers the tenant egress policy on a cilium
+// cluster, where the operator emits a CiliumNetworkPolicy and NO vanilla
+// NetworkPolicy exists. Every other fixture in this file seeds the vanilla kind,
+// which models the `kubernetes` engine — a configuration the operator's chart
+// does not default to and no cluster in the fleet runs.
+func TestAuditNetworkPolicyCiliumEngine(t *testing.T) {
+	tests := []struct {
+		name    string
+		cnp     *unstructured.Unstructured
+		wantSev cloud.Severity
+		wantTyp cloud.PlatformFindingType
+		wantOK  bool // no findings at all
+	}{
+		{
+			name:   "conformant cilium policy is clean",
+			cnp:    ciliumNetpolCR(nil),
+			wantOK: true,
+		},
+		{
+			// An empty ingress list is cilium's default-deny form — strictly
+			// stronger than omitting the key, so it must not read as a weakening.
+			name:   "empty ingress list is default-deny, not a weakening",
+			cnp:    ciliumNetpolCR(func(s map[string]interface{}) { s["ingress"] = []interface{}{} }),
+			wantOK: true,
+		},
+		{
+			name:    "no policy of either kind is missing containment",
+			cnp:     nil,
+			wantSev: cloud.SeverityCritical,
+			wantTyp: cloud.PlatformNetworkPolicyMissing,
+		},
+		{
+			name:    "no egress rules imposes no allow-list",
+			cnp:     ciliumNetpolCR(func(s map[string]interface{}) { s["egress"] = []interface{}{} }),
+			wantSev: cloud.SeverityHigh,
+			wantTyp: cloud.PlatformNetworkPolicyWeak,
+		},
+		{
+			name: "ingress rules break the egress-only contract",
+			cnp: ciliumNetpolCR(func(s map[string]interface{}) {
+				s["ingress"] = []interface{}{map[string]interface{}{"fromEntities": []interface{}{"all"}}}
+			}),
+			wantSev: cloud.SeverityHigh,
+			wantTyp: cloud.PlatformNetworkPolicyWeak,
+		},
+		{
+			name: "matchLabels narrows the policy to a subset of pods",
+			cnp: ciliumNetpolCR(func(s map[string]interface{}) {
+				s["endpointSelector"] = map[string]interface{}{
+					"matchLabels": map[string]interface{}{"app": "only-me"},
+				}
+			}),
+			wantSev: cloud.SeverityHigh,
+			wantTyp: cloud.PlatformNetworkPolicyWeak,
+		},
+		{
+			name: "matchExpressions narrows the policy just as matchLabels does",
+			cnp: ciliumNetpolCR(func(s map[string]interface{}) {
+				s["endpointSelector"] = map[string]interface{}{
+					"matchExpressions": []interface{}{map[string]interface{}{
+						"key": "app", "operator": "Exists",
+					}},
+				}
+			}),
+			wantSev: cloud.SeverityHigh,
+			wantTyp: cloud.PlatformNetworkPolicyWeak,
+		},
+	}
+
+	f := func(sev cloud.Severity, typ cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding {
+		return cloud.PlatformFinding{Severity: sev, Type: typ, Resource: resource, Detail: detail}
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// No vanilla NetworkPolicy anywhere: this is the cilium engine.
+			typed := kubefake.NewSimpleClientset()
+			var objs []runtime.Object
+			if tc.cnp != nil {
+				objs = append(objs, tc.cnp)
+			}
+			got := auditNetworkPolicy(context.Background(), typed, dynClient(objs...), tNS, f)
+
+			if tc.wantOK {
+				if len(got) != 0 {
+					t.Fatalf("want no findings on a conformant cilium tenant, got %d: %+v", len(got), got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("want exactly 1 finding, got %d: %+v", len(got), got)
+			}
+			if got[0].Type != tc.wantTyp || got[0].Severity != tc.wantSev {
+				t.Errorf("got %s/%s, want %s/%s", got[0].Severity, got[0].Type, tc.wantSev, tc.wantTyp)
+			}
+		})
 	}
 }
