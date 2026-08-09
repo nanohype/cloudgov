@@ -29,6 +29,11 @@ var (
 	tenantGVR   = schema.GroupVersionResource{Group: "platform.nanohype.dev", Version: "v1alpha1", Resource: "tenants"}
 	budgetGVR   = schema.GroupVersionResource{Group: "governance.nanohype.dev", Version: "v1alpha1", Resource: "budgetpolicies"}
 	gatewayGVR  = schema.GroupVersionResource{Group: "agents.nanohype.dev", Version: "v1alpha1", Resource: "modelgateways"}
+
+	// The tenant egress policy takes one of two kinds depending on the cluster's
+	// network engine, and the operator emits exactly one of them — see
+	// auditNetworkPolicy.
+	ciliumNetworkPolicyGVR = schema.GroupVersionResource{Group: "cilium.io", Version: "v2", Resource: "ciliumnetworkpolicies"}
 )
 
 const (
@@ -186,7 +191,7 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 			"Restore the tenant-default LimitRange."))
 	}
 
-	out = append(out, auditNetworkPolicy(ctx, typed, ns, f)...)
+	out = append(out, auditNetworkPolicy(ctx, typed, dyn, ns, f)...)
 	out = append(out, auditServiceAccount(ctx, typed, binding, f)...)
 	if roles != nil && roleArn != "" {
 		out = append(out, auditRole(ctx, roles, roleArn, suspended, extras, f)...)
@@ -255,12 +260,25 @@ func auditIdentity(p *unstructured.Unstructured, f findingFunc) []cloud.Platform
 	return nil
 }
 
-func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, ns string, f findingFunc) []cloud.PlatformFinding {
+// auditNetworkPolicy checks the tenant's egress containment across both kinds
+// it can take. The operator emits ONE of them, chosen by its --network-engine:
+// a vanilla networking.k8s.io NetworkPolicy on the kubernetes engine, and a
+// cilium.io CiliumNetworkPolicy on the cilium engine — which is the chart
+// default and the CNI on every cluster the operator runs on. The two writers
+// are mutually exclusive (each returns early on the other's engine), so
+// checking only the vanilla kind reports every conformant cilium tenant as
+// having no egress containment at all, at CRITICAL.
+//
+// Falling through to the cilium kind on NotFound rather than branching on a
+// declared engine keeps the auditor read-only about topology: it verifies the
+// containment that exists rather than the containment some config says should.
+// It also still reports missing when the operator silently skipped the policy
+// because the CiliumNetworkPolicy CRD was absent — in that case neither kind
+// exists and the tenant genuinely has no containment.
+func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, ns string, f findingFunc) []cloud.PlatformFinding {
 	np, err := typed.NetworkingV1().NetworkPolicies(ns).Get(ctx, netpolName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformNetworkPolicyMissing, ns+"/"+netpolName,
-			"tenant-egress NetworkPolicy is missing; the tenant has no egress containment",
-			"Restore the tenant-egress default-deny + allow-list NetworkPolicy.")}
+		return auditCiliumNetworkPolicy(ctx, dyn, ns, f)
 	}
 	if err != nil {
 		return nil
@@ -290,6 +308,54 @@ func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, ns stri
 		out = append(out, f(cloud.SeverityHigh, cloud.PlatformNetworkPolicyWeak, ns+"/"+netpolName,
 			"tenant-egress NetworkPolicy is scoped to a subset of pods; it must apply to the whole namespace",
 			"Set an empty podSelector so the policy covers all tenant pods."))
+	}
+	return out
+}
+
+// auditCiliumNetworkPolicy applies the same three containment assertions to the
+// cilium kind: egress is restricted, the policy covers the whole namespace, and
+// it does not carry ingress rules.
+//
+// The ingress assertion differs from the vanilla one in a way the cilium
+// semantics force. Under cilium an EMPTY ingress list is default-deny — strictly
+// stronger than omitting the key — so only a non-empty rule set is a weakening.
+// Flagging the key's presence, as the vanilla branch flags the Ingress policy
+// type, would report the stronger configuration as the weaker one.
+func auditCiliumNetworkPolicy(ctx context.Context, dyn dynamic.Interface, ns string, f findingFunc) []cloud.PlatformFinding {
+	ref := ns + "/" + netpolName
+	cnp, err := dyn.Resource(ciliumNetworkPolicyGVR).Namespace(ns).Get(ctx, netpolName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformNetworkPolicyMissing, ref,
+			"tenant-egress exists as neither a NetworkPolicy nor a CiliumNetworkPolicy; the tenant has no egress containment",
+			"Restore the tenant-egress default-deny + allow-list policy for the cluster's network engine.")}
+	}
+	if err != nil {
+		return nil
+	}
+
+	var out []cloud.PlatformFinding
+	if egress, found, _ := unstructured.NestedSlice(cnp.Object, "spec", "egress"); !found || len(egress) == 0 {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformNetworkPolicyWeak, ref,
+			"tenant-egress CiliumNetworkPolicy declares no egress rules, so it imposes no egress allow-list",
+			"Restore the egress allow-list (kube-dns, the model gateway, the OTel collector, and the Pod Identity credential endpoint)."))
+	}
+	if ingress, found, _ := unstructured.NestedSlice(cnp.Object, "spec", "ingress"); found && len(ingress) > 0 {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformNetworkPolicyWeak, ref,
+			"tenant-egress CiliumNetworkPolicy declares ingress rules; the contract is egress-only with ingress default-deny",
+			"Remove the ingress rules; an empty ingress list is the default-deny form."))
+	}
+	if sel, _, _ := unstructured.NestedMap(cnp.Object, "spec", "endpointSelector", "matchLabels"); len(sel) > 0 {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformNetworkPolicyWeak, ref,
+			"tenant-egress CiliumNetworkPolicy is scoped to a subset of endpoints; it must apply to the whole namespace",
+			"Set an empty endpointSelector.matchLabels so the policy covers all tenant pods."))
+	}
+	// matchExpressions narrows the selector just as matchLabels does, and the
+	// vanilla branch rejects both — checking only matchLabels would leave the
+	// equivalent cilium narrowing unobserved.
+	if exprs, _, _ := unstructured.NestedSlice(cnp.Object, "spec", "endpointSelector", "matchExpressions"); len(exprs) > 0 {
+		out = append(out, f(cloud.SeverityHigh, cloud.PlatformNetworkPolicyWeak, ref,
+			"tenant-egress CiliumNetworkPolicy narrows its endpointSelector with matchExpressions; it must apply to the whole namespace",
+			"Remove the endpointSelector.matchExpressions so the policy covers all tenant pods."))
 	}
 	return out
 }
