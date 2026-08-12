@@ -72,5 +72,5 @@ func runCostDiff(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveCostProviders(ctx context.Context) ([]cloud.CostProvider, error) {
-	return providers.Resolve[cloud.CostProvider](ctx, providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.CostProvider](ctx, providerOptions()...)
 }

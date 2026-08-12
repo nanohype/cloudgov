@@ -26,6 +26,10 @@ type ecsAPI interface {
 }
 
 // ListResources lists AWS resources for inventory.
+//
+// Global services are listed once; regional services are listed once per region
+// in the account's region set. Listing a global service inside the fan-out would
+// report each of its resources once per region.
 func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cloud.InventoryResource, error) {
 	filter := make(map[string]bool)
 	for _, t := range typeFilter {
@@ -35,18 +39,40 @@ func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cl
 
 	var resources []cloud.InventoryResource
 
-	if all || filter["ec2"] || filter["ec2:instance"] {
-		r, err := p.listEC2Instances(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list ec2 instances: %w", err)
-		}
-		resources = append(resources, r...)
-	}
-
 	if all || filter["s3"] || filter["s3:bucket"] {
 		r, err := p.listS3Buckets(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list s3 buckets: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	if all || filter["iam"] || filter["iam:role"] {
+		r, err := p.listIAMRoles(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list iam roles: %w", err)
+		}
+		resources = append(resources, r...)
+	}
+
+	regional, err := eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.InventoryResource, error) {
+		return rp.listRegionalResources(ctx, filter, all)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(resources, regional...), nil
+}
+
+// listRegionalResources lists the services that answer per region. It runs once
+// per region against a provider whose clients are bound to that region.
+func (p *Provider) listRegionalResources(ctx context.Context, filter map[string]bool, all bool) ([]cloud.InventoryResource, error) {
+	var resources []cloud.InventoryResource
+
+	if all || filter["ec2"] || filter["ec2:instance"] {
+		r, err := p.listEC2Instances(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list ec2 instances: %w", err)
 		}
 		resources = append(resources, r...)
 	}
@@ -87,14 +113,6 @@ func (p *Provider) ListResources(ctx context.Context, typeFilter []string) ([]cl
 		r, err := p.listELBLoadBalancers(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("list elb load balancers: %w", err)
-		}
-		resources = append(resources, r...)
-	}
-
-	if all || filter["iam"] || filter["iam:role"] {
-		r, err := p.listIAMRoles(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list iam roles: %w", err)
 		}
 		resources = append(resources, r...)
 	}
@@ -147,13 +165,22 @@ func (p *Provider) listS3Buckets(ctx context.Context) ([]cloud.InventoryResource
 	var resources []cloud.InventoryResource
 	for _, b := range out.Buckets {
 		name := awssdk.ToString(b.Name)
+		// ListBuckets is global and returns no location, so a bucket's region
+		// has to be asked for. Stamping the caller's configured region here
+		// would file every bucket in the account under whichever region the
+		// operator happened to be pointed at.
+		region, err := p.bucketRegion(ctx, p.s3, name)
+		if err != nil {
+			p.warnf("warn: bucket %s: %v\n", name, err)
+			region = ""
+		}
 		r := cloud.InventoryResource{
 			Kind:     cloud.ResourceStorage,
 			Type:     "s3:bucket",
 			ID:       name,
 			Name:     name,
 			Provider: "aws",
-			Region:   p.cfg.Region,
+			Region:   region,
 		}
 		if b.CreationDate != nil {
 			t := *b.CreationDate

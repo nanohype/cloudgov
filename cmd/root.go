@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +20,21 @@ var (
 
 // quiet suppresses all stderr progress and summary output when true.
 var quiet bool
+
+// regions restricts regional scans to the named regions. Empty means every
+// region enabled for the account.
+var regions []string
+
+// providerOptions are the options every command passes when resolving
+// providers. Commands resolve through this rather than assembling the list
+// themselves, so a run-scoped flag reaches every command by construction — a
+// scan that silently missed one would report a narrower account than it read.
+func providerOptions(extra ...providers.Option) []providers.Option {
+	return append([]providers.Option{
+		providers.WithQuiet(quiet),
+		providers.WithRegions(regions),
+	}, extra...)
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "cloudgov",
@@ -53,6 +69,7 @@ func init() {
 	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", Version, Commit, BuildDate)
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "suppress progress and summary output to stderr")
 	rootCmd.PersistentFlags().StringVar(&failOn, "fail-on", "", "exit with code 2 if any finding is at or above this severity (CRITICAL, HIGH, MEDIUM, LOW)")
+	rootCmd.PersistentFlags().StringSliceVar(&regions, "regions", nil, "regions to scan for regional resources (default: every region enabled for the account)")
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(iamCmd)
 	rootCmd.AddCommand(costCmd)

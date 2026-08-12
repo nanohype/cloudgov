@@ -75,6 +75,23 @@ type Provider struct {
 	// WithQuiet sets it to io.Discard so --quiet silences provider-level noise.
 	warnw io.Writer
 
+	// parent links a region-bound provider from forRegion back to the provider
+	// that built it. Warnings and the resolved region set live on the root, so a
+	// finding missed in one region surfaces in the run's Incomplete output
+	// instead of being stranded on a sub-provider nobody asks. nil on the root.
+	parent *Provider
+
+	// regions is the explicit --regions list. Empty means every region enabled
+	// for the account, discovered once via DescribeRegions.
+	regions         []string
+	regionsOnce     sync.Once
+	resolvedRegions []string
+
+	// clientsForRegion builds a provider whose regional clients are bound to a
+	// given region. nil (the zero value tests get) makes forRegion a no-op, so a
+	// mock-backed provider scans once with the mocks it was given. See regions.go.
+	clientsForRegion func(region string) *Provider
+
 	// mu guards warnings and serializes the warnw write. warnf is called from
 	// the per-principal goroutines in the IAM scan, so both need it — and the
 	// serialized write keeps concurrent warnings from interleaving mid-line.
@@ -95,6 +112,14 @@ func WithQuiet(quiet bool) Option {
 	}
 }
 
+// WithRegions restricts regional scans to the named regions (used by --regions).
+// Empty means every region enabled for the account.
+func WithRegions(regions []string) Option {
+	return func(p *Provider) {
+		p.regions = append([]string(nil), regions...)
+	}
+}
+
 // warnf emits a non-fatal warning to warnw (os.Stderr unless --quiet set it to
 // io.Discard) and records it as an observation the scan could not complete.
 //
@@ -107,14 +132,18 @@ func WithQuiet(quiet bool) Option {
 // run complete, so the record is kept either way.
 //
 // Use this for any skip. Never drop an AWS error and return no finding.
+// Warnings raised on a region-bound provider are recorded on the root, so a
+// region the sweep could not read is reported by the run rather than lost with
+// the sub-provider that hit it.
 func (p *Provider) warnf(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
+	r := p.root()
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.warnings = append(p.warnings, strings.TrimSpace(strings.TrimPrefix(msg, "warn: ")))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.warnings = append(r.warnings, strings.TrimSpace(strings.TrimPrefix(msg, "warn: ")))
 
-	w := p.warnw
+	w := r.warnw
 	if w == nil {
 		w = os.Stderr
 	}
@@ -127,12 +156,13 @@ func (p *Provider) warnf(format string, args ...any) {
 //
 // Satisfies cloud.IncompleteReporter.
 func (p *Provider) Incomplete() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.warnings) == 0 {
+	r := p.root()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.warnings) == 0 {
 		return nil
 	}
-	return append([]string(nil), p.warnings...)
+	return append([]string(nil), r.warnings...)
 }
 
 // New loads credentials from the default chain and returns a Provider.
@@ -180,7 +210,27 @@ func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provi
 	if err != nil {
 		return nil, err
 	}
-	p := &Provider{
+	p := newFromConfig(cfg)
+	// Region-bound providers reuse the loaded credentials and only re-point the
+	// region, so a fan-out costs a set of clients rather than a credential
+	// resolution per region.
+	p.clientsForRegion = func(region string) *Provider {
+		rcfg := cfg.Copy()
+		rcfg.Region = region
+		rp := newFromConfig(rcfg)
+		rp.parent = p
+		return rp
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p, nil
+}
+
+// newFromConfig wires every SDK client from one config. Called once for the
+// provider itself and once per region by clientsForRegion.
+func newFromConfig(cfg awssdk.Config) *Provider {
+	return &Provider{
 		cfg:          cfg,
 		iam:          iam.NewFromConfig(cfg),
 		cloudtrail:   cloudtrail.NewFromConfig(cfg),
@@ -207,10 +257,6 @@ func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provi
 		dynamodb:       dynamodb.NewFromConfig(cfg),
 		sns:            sns.NewFromConfig(cfg),
 	}
-	for _, o := range opts {
-		o(p)
-	}
-	return p, nil
 }
 
 // Name returns the provider identifier.

@@ -23,6 +23,16 @@ type acmAPI interface {
 // on the --days threshold (cmd and audit both pass it), so capping here would
 // silently hide certificates a caller asked to see with --days beyond the cap.
 func (p *Provider) ListCertificates(ctx context.Context) ([]cloud.CertFinding, error) {
+	return eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.CertFinding, error) {
+		return rp.listCertificatesInRegion(ctx)
+	})
+}
+
+// listCertificatesInRegion lists one region's ACM certificates. ACM is regional
+// and a certificate must live in the region of the load balancer that serves it
+// — plus us-east-1 for CloudFront — so an expiry is only visible from the region
+// holding the certificate.
+func (p *Provider) listCertificatesInRegion(ctx context.Context) ([]cloud.CertFinding, error) {
 	pager := acm.NewListCertificatesPaginator(p.acm, &acm.ListCertificatesInput{
 		CertificateStatuses: []acmtypes.CertificateStatus{acmtypes.CertificateStatusIssued},
 	})

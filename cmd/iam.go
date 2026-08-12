@@ -229,5 +229,5 @@ func writePolicyFallbackWarnings(w io.Writer, principal string, fallbacks []clou
 }
 
 func resolveIAMProviders(ctx context.Context, profile string) ([]cloud.IAMProvider, error) {
-	return providers.Resolve[cloud.IAMProvider](ctx, providers.WithProfile(profile), providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.IAMProvider](ctx, providerOptions(providers.WithProfile(profile))...)
 }

@@ -16,6 +16,15 @@ var sensitivePortsAWS = []int{22, 3389, 3306, 5432, 1433, 27017, 6379, 9200}
 
 // AuditNetwork checks all EC2 security groups for overly permissive rules.
 func (p *Provider) AuditNetwork(ctx context.Context) ([]cloud.NetworkFinding, error) {
+	return eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.NetworkFinding, error) {
+		return rp.auditNetworkInRegion(ctx)
+	})
+}
+
+// auditNetworkInRegion audits one region's VPCs and security groups. Security
+// groups are per-VPC and VPCs are per-region, so an open ingress rule in an
+// unscanned region is as reachable from the internet as one in the scanned one.
+func (p *Provider) auditNetworkInRegion(ctx context.Context) ([]cloud.NetworkFinding, error) {
 	pager := ec2.NewDescribeSecurityGroupsPaginator(p.ec2, &ec2.DescribeSecurityGroupsInput{})
 
 	var findings []cloud.NetworkFinding
