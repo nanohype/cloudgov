@@ -69,5 +69,5 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveOrphansProviders(ctx context.Context) ([]cloud.OrphansProvider, error) {
-	return providers.Resolve[cloud.OrphansProvider](ctx, providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.OrphansProvider](ctx, providerOptions()...)
 }

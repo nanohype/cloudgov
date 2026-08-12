@@ -90,5 +90,5 @@ func runTags(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveTagProviders(ctx context.Context) ([]cloud.TagProvider, error) {
-	return providers.Resolve[cloud.TagProvider](ctx, providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.TagProvider](ctx, providerOptions()...)
 }

@@ -33,6 +33,15 @@ type cloudFormationAPI interface {
 // ScanSecrets checks Lambda env vars, ECS task definitions, EC2 user data,
 // SSM non-SecureString parameters, and CloudFormation outputs for leaked secrets.
 func (p *Provider) ScanSecrets(ctx context.Context) ([]cloud.SecretFinding, error) {
+	return eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.SecretFinding, error) {
+		return rp.scanSecretsInRegion(ctx)
+	})
+}
+
+// scanSecretsInRegion scans one region. Lambda environment variables, SSM
+// parameters and the other carriers checked here are all regional stores, so an
+// exposed credential is only visible from the region it was written in.
+func (p *Provider) scanSecretsInRegion(ctx context.Context) ([]cloud.SecretFinding, error) {
 	var findings []cloud.SecretFinding
 
 	if f, err := p.scanLambdaSecrets(ctx); err != nil {

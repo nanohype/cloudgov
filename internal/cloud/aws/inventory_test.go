@@ -3,6 +3,7 @@ package aws
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
@@ -230,5 +231,97 @@ func TestEC2TagsToMap(t *testing.T) {
 	}
 	if ec2TagsToMap(nil) != nil {
 		t.Error("nil input should return nil")
+	}
+}
+
+// A bucket's region comes from the bucket, not from the caller's config.
+// ListBuckets is a global call that returns no location, so stamping the
+// configured region files every bucket in the account under whichever region
+// the operator happened to be pointed at.
+func TestListResources_BucketRegionComesFromTheBucket(t *testing.T) {
+	p := fullInvProvider()
+	p.cfg = awssdk.Config{Region: "us-west-2"}
+	p.s3 = &invMockS3{
+		buckets: []s3types.Bucket{{Name: awssdk.String("b1")}},
+		mockS3:  mockS3{location: s3types.BucketLocationConstraintEuWest1},
+	}
+
+	got, err := p.ListResources(context.Background(), []string{"s3:bucket"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d resources, want 1", len(got))
+	}
+	if got[0].Region != "eu-west-1" {
+		t.Errorf("bucket region = %q, want eu-west-1 (the bucket's own region, not the configured us-west-2)", got[0].Region)
+	}
+}
+
+// An empty LocationConstraint means us-east-1 — the one region S3 reports as
+// absence rather than by name.
+func TestListResources_BucketRegionUsEast1(t *testing.T) {
+	p := fullInvProvider()
+	p.cfg = awssdk.Config{Region: "us-west-2"}
+	p.s3 = &invMockS3{buckets: []s3types.Bucket{{Name: awssdk.String("b1")}}}
+
+	got, _ := p.ListResources(context.Background(), []string{"s3:bucket"})
+	if len(got) != 1 || got[0].Region != "us-east-1" {
+		t.Errorf("got %v, want a bucket in us-east-1", got)
+	}
+}
+
+// A bucket whose location cannot be read is reported with no region and recorded
+// as incomplete, rather than being filed under the configured region.
+func TestListResources_UnreadableBucketRegionIsRecorded(t *testing.T) {
+	p := fullInvProvider()
+	p.warnw = io.Discard
+	p.s3 = &invMockS3{
+		buckets: []s3types.Bucket{{Name: awssdk.String("b1")}},
+		mockS3:  mockS3{getLocationErr: errors.New("access denied")},
+	}
+
+	got, _ := p.ListResources(context.Background(), []string{"s3:bucket"})
+	if len(got) != 1 || got[0].Region != "" {
+		t.Errorf("got %v, want the bucket with an empty region", got)
+	}
+	if inc := p.Incomplete(); len(inc) != 1 {
+		t.Errorf("Incomplete() = %v, want the unreadable bucket recorded", inc)
+	}
+}
+
+// Global services must be listed once for the account. Listing them inside the
+// region fan-out would report every bucket and role once per region — an
+// inventory that grows with the region count instead of the account.
+func TestListResources_GlobalServicesListedOncePerAccount(t *testing.T) {
+	root := fullInvProvider()
+	root.warnw = io.Discard
+	root.cfg = awssdk.Config{Region: "us-west-2"}
+	root.ec2 = &mockEC2{regionsOut: []string{"us-east-1", "eu-west-1", "ap-south-1"}}
+	root.clientsForRegion = func(region string) *Provider {
+		child := fullInvProvider()
+		child.cfg = awssdk.Config{Region: region}
+		child.parent = root
+		return child
+	}
+
+	got, err := root.ListResources(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	counts := map[string]int{}
+	for _, r := range got {
+		counts[r.Type]++
+	}
+	for _, typ := range []string{"s3:bucket", "iam:role"} {
+		if counts[typ] != 1 {
+			t.Errorf("%s appeared %d times, want 1 — a global service was listed inside the region fan-out", typ, counts[typ])
+		}
+	}
+	for _, typ := range []string{"ec2:instance", "ebs:volume", "rds:db"} {
+		if counts[typ] != 3 {
+			t.Errorf("%s appeared %d times, want 3 (one per region)", typ, counts[typ])
+		}
 	}
 }

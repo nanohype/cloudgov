@@ -27,6 +27,10 @@ type mockEC2 struct {
 	imagesOut     []ec2types.Image
 	imagesErr     error
 	instancesOut  []ec2types.Reservation
+
+	regionsOut   []string
+	regionsErr   error
+	regionsCalls int
 }
 
 func (m *mockEC2) DescribeVolumes(_ context.Context, _ *ec2.DescribeVolumesInput, _ ...func(*ec2.Options)) (*ec2.DescribeVolumesOutput, error) {
@@ -444,4 +448,16 @@ func TestListOrphans_AddressErrorBubblesUp(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+}
+
+func (m *mockEC2) DescribeRegions(_ context.Context, _ *ec2.DescribeRegionsInput, _ ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error) {
+	m.regionsCalls++
+	if m.regionsErr != nil {
+		return nil, m.regionsErr
+	}
+	out := &ec2.DescribeRegionsOutput{}
+	for _, r := range m.regionsOut {
+		out.Regions = append(out.Regions, ec2types.Region{RegionName: awssdk.String(r)})
+	}
+	return out, nil
 }

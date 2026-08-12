@@ -262,7 +262,7 @@ func sortFindingsBySeverity(fs []sinks.Finding) {
 func buildAuditProviders(ctx context.Context) (audit.Providers, error) {
 	// Each available registry provider contributes to the capabilities it
 	// implements, so the audit tracks the registry with no change here.
-	all := providers.Default(providers.WithQuiet(quiet)).Available(ctx)
+	all := providers.Default(providerOptions()...).Available(ctx)
 	if len(all) == 0 {
 		return audit.Providers{}, errors.New("no cloud provider detected")
 	}

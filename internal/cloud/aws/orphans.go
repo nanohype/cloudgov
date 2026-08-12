@@ -24,6 +24,7 @@ type ec2API interface {
 	DescribeInternetGateways(ctx context.Context, params *ec2.DescribeInternetGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error)
 	DescribeSnapshots(ctx context.Context, params *ec2.DescribeSnapshotsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSnapshotsOutput, error)
 	DescribeImages(ctx context.Context, params *ec2.DescribeImagesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeImagesOutput, error)
+	DescribeRegions(ctx context.Context, params *ec2.DescribeRegionsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRegionsOutput, error)
 }
 
 // elbv2API is the narrow ELBv2 surface used by this package.
@@ -33,8 +34,19 @@ type elbv2API interface {
 	DescribeTargetHealth(ctx context.Context, params *elasticloadbalancingv2.DescribeTargetHealthInput, optFns ...func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeTargetHealthOutput, error)
 }
 
-// ListOrphans returns unused AWS resources across the configured region.
+// ListOrphans returns unused AWS resources across every region in the account's
+// region set. Every kind it reports is regional, so the whole scan fans out.
+//
+// Cost is the point of this command and cost is account-wide: an idle NAT
+// gateway or unattached volume bills the same whether or not it sits in the
+// region the operator's profile happens to name.
 func (p *Provider) ListOrphans(ctx context.Context) ([]cloud.OrphanResource, error) {
+	return eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.OrphanResource, error) {
+		return rp.listOrphansInRegion(ctx)
+	})
+}
+
+func (p *Provider) listOrphansInRegion(ctx context.Context) ([]cloud.OrphanResource, error) {
 	var orphans []cloud.OrphanResource
 
 	disks, err := p.orphanDisks(ctx)

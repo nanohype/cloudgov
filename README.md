@@ -846,8 +846,36 @@ cloudgov report --from data.json --type orphans --out orphans.html
 
 | Flag | Description |
 |------|-------------|
+| `--regions` | Regions to scan for regional resources. Defaults to every region enabled for the account |
 | `--quiet`, `-q` | Suppress all progress and summary output on stderr (for scripts) |
+| `--fail-on` | Exit 2 if any finding is at or above this severity |
 | `--version` | Print version, commit hash, and build date |
+
+### Region scope
+
+Regional scans cover every region enabled for the account. AWS regional APIs
+answer only for the region their client is bound to, so a scan run against one
+region describes one region — and nothing in a report drawn that way says so.
+An empty result would read as "the account is clean" when it means "the
+configured region is clean".
+
+Narrow it when you know where to look:
+
+```bash
+cloudgov orphans --regions us-west-2,us-east-1
+```
+
+Global services — IAM, Cost Explorer, the S3 bucket list — are scanned once
+regardless, and their findings are stamped `global`. A bucket's own region comes
+from the bucket, since `ListBuckets` is account-global and returns no location.
+
+If the region set cannot be discovered, the scan narrows to the configured
+region and records that as an incomplete observation: the run reports exit code
+3 rather than presenting a one-region result as an account sweep.
+
+`drift` is not fanned out. It compares named resources against a Terraform state
+file you supply, so its scope is that file's, and querying every region for one
+resource ID would return not-found from all the others.
 
 ---
 

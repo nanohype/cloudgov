@@ -77,5 +77,5 @@ func runInventory(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveInventoryProviders(ctx context.Context) ([]cloud.InventoryProvider, error) {
-	return providers.Resolve[cloud.InventoryProvider](ctx, providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.InventoryProvider](ctx, providerOptions()...)
 }

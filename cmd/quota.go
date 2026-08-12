@@ -74,5 +74,5 @@ func runQuota(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveQuotaProviders(ctx context.Context) ([]cloud.QuotaProvider, error) {
-	return providers.Resolve[cloud.QuotaProvider](ctx, providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.QuotaProvider](ctx, providerOptions()...)
 }

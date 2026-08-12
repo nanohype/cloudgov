@@ -48,18 +48,34 @@ type lambdaAPI interface {
 // AuditTags checks EC2 instances, S3 buckets, RDS instances, Lambda functions, ECS
 // clusters, EKS clusters, DynamoDB tables, SNS topics, and SQS queues for missing
 // required tags.
+// S3's bucket list is account-global, so it is audited once; every other service
+// here is regional and is audited once per region.
 func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
 	if len(required) == 0 {
 		return nil, nil
 	}
 
+	findings, err := p.auditS3Tags(ctx, required)
+	if err != nil {
+		return nil, fmt.Errorf("s3 tags: %w", err)
+	}
+
+	regional, err := eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.TagFinding, error) {
+		return rp.auditRegionalTags(ctx, required)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append(findings, regional...), nil
+}
+
+func (p *Provider) auditRegionalTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
 	type auditor struct {
 		name string
 		fn   func(context.Context, []string) ([]cloud.TagFinding, error)
 	}
 	auditors := []auditor{
 		{"ec2", p.auditEC2Tags},
-		{"s3", p.auditS3Tags},
 		{"rds", p.auditRDSTags},
 		{"lambda", p.auditLambdaTags},
 		{"ecs", p.auditECSTags},

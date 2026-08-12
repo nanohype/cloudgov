@@ -75,5 +75,5 @@ func runCerts(cmd *cobra.Command, _ []string) error {
 }
 
 func resolveCertProviders(ctx context.Context) ([]cloud.CertProvider, error) {
-	return providers.Resolve[cloud.CertProvider](ctx, providers.WithQuiet(quiet))
+	return providers.Resolve[cloud.CertProvider](ctx, providerOptions()...)
 }

@@ -75,6 +75,7 @@ type Option func(*options)
 type options struct {
 	profile string
 	quiet   bool
+	regions []string
 }
 
 // WithProfile selects a named credentials profile for providers that support
@@ -89,6 +90,12 @@ func WithQuiet(quiet bool) Option {
 	return func(o *options) { o.quiet = quiet }
 }
 
+// WithRegions restricts regional scans to the named regions, used by the root
+// --regions flag. Empty means every region enabled for the account.
+func WithRegions(regions []string) Option {
+	return func(o *options) { o.regions = regions }
+}
+
 // Default builds the registry of built-in providers — the single place
 // provider factories are registered.
 func Default(opts ...Option) *Registry {
@@ -97,7 +104,7 @@ func Default(opts ...Option) *Registry {
 		opt(&o)
 	}
 	return NewRegistry(
-		newAWSFactory(o.profile, o.quiet),
+		newAWSFactory(o.profile, o.quiet, o.regions),
 	)
 }
 
@@ -111,21 +118,28 @@ func Resolve[T any](ctx context.Context, opts ...Option) ([]T, error) {
 type awsFactory struct {
 	profile string
 	quiet   bool
+	regions []string
 }
 
 // newAWSFactory builds the AWS factory for the given named profile ("" = the
-// default credential chain) and quiet setting.
-func newAWSFactory(profile string, quiet bool) awsFactory {
-	return awsFactory{profile: profile, quiet: quiet}
+// default credential chain), quiet setting, and region restriction.
+func newAWSFactory(profile string, quiet bool, regions []string) awsFactory {
+	return awsFactory{profile: profile, quiet: quiet, regions: regions}
+}
+
+// opts are the provider options this factory applies to every provider it
+// builds, so Detect and New cannot drift apart.
+func (f awsFactory) opts() []cloudaws.Option {
+	return []cloudaws.Option{cloudaws.WithQuiet(f.quiet), cloudaws.WithRegions(f.regions)}
 }
 
 func (f awsFactory) Name() string { return "aws" }
 
 func (f awsFactory) Detect(ctx context.Context) bool {
-	p, err := cloudaws.NewWithProfile(ctx, f.profile, cloudaws.WithQuiet(f.quiet))
+	p, err := cloudaws.NewWithProfile(ctx, f.profile, f.opts()...)
 	return err == nil && p.Detect(ctx)
 }
 
 func (f awsFactory) New(ctx context.Context) (cloud.Provider, error) {
-	return cloudaws.NewWithProfile(ctx, f.profile, cloudaws.WithQuiet(f.quiet))
+	return cloudaws.NewWithProfile(ctx, f.profile, f.opts()...)
 }

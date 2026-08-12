@@ -48,6 +48,15 @@ type lambdaPolicyStmt struct {
 // Functions without a resource policy (NoSuchEntity / ResourceNotFoundException)
 // are silently skipped — they're only reachable via identity-based IAM.
 func (p *Provider) AuditLambdaPolicies(ctx context.Context) ([]cloud.LambdaPolicyFinding, error) {
+	return eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.LambdaPolicyFinding, error) {
+		return rp.auditLambdaPoliciesInRegion(ctx)
+	})
+}
+
+// auditLambdaPoliciesInRegion audits one region's functions. Lambda is regional,
+// and a resource policy opening a function to the world does so from whichever
+// region the function lives in.
+func (p *Provider) auditLambdaPoliciesInRegion(ctx context.Context) ([]cloud.LambdaPolicyFinding, error) {
 	var findings []cloud.LambdaPolicyFinding
 	var marker *string
 	for {

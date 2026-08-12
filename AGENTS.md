@@ -48,7 +48,15 @@ Every command produces machine-readable output and can gate on severity:
 cloudgov <command> --output json --quiet     # stable JSON to stdout
 cloudgov <command> --output sarif            # SARIF 2.1.0 (security domains)
 cloudgov <command> --fail-on HIGH            # exit 2 if any finding >= HIGH
+cloudgov <command> --regions us-west-2       # narrow the region sweep
 ```
+
+Regional scans cover every region enabled for the account unless `--regions`
+narrows them, so a finding's `region` field is the region it was read from
+rather than the one the caller's profile named. Global services (IAM, Cost
+Explorer, the S3 bucket list) are scanned once and report `global`. A region
+that cannot be read is recorded as incomplete, which is exit `3` — the scope was
+narrower than asked for, so a clean result is not evidence.
 
 **Exit codes:** `0` = clean, `1` = command error, `2` = a finding met or exceeded
 `--fail-on`, `3` = the scan could not observe everything it was asked to, so the

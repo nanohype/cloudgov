@@ -42,18 +42,13 @@ func (p *Provider) quotaLimit(ctx context.Context, serviceCode, quotaCode string
 func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 	var quotas []cloud.QuotaUsage
 
+	// IAM and the S3 bucket count are account-wide limits — one number for the
+	// account, reported once and stamped "global".
 	iamQuotas, err := p.iamQuotas(ctx)
 	if err != nil {
 		p.warnf("warn: iam quotas: %v\n", err)
 	} else {
 		quotas = append(quotas, iamQuotas...)
-	}
-
-	ec2Quotas, err := p.ec2Quotas(ctx)
-	if err != nil {
-		p.warnf("warn: ec2 quotas: %v\n", err)
-	} else {
-		quotas = append(quotas, ec2Quotas...)
 	}
 
 	s3Quotas, err := p.s3Quotas(ctx)
@@ -63,19 +58,16 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 		quotas = append(quotas, s3Quotas...)
 	}
 
-	lambdaQuotas, err := p.lambdaQuotas(ctx)
+	// The rest are per-region limits. A region at its EIP ceiling blocks the next
+	// apply there whatever headroom the configured region has, so each region
+	// gets its own row rather than one row standing in for the account.
+	regional, err := eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.QuotaUsage, error) {
+		return rp.regionalQuotas(ctx), nil
+	})
 	if err != nil {
-		p.warnf("warn: lambda quotas: %v\n", err)
-	} else {
-		quotas = append(quotas, lambdaQuotas...)
+		return nil, err
 	}
-
-	rdsQuotas, err := p.rdsQuotas(ctx)
-	if err != nil {
-		p.warnf("warn: rds quotas: %v\n", err)
-	} else {
-		quotas = append(quotas, rdsQuotas...)
-	}
+	quotas = append(quotas, regional...)
 
 	// Severity is derived from utilization; set it on the struct so it travels with
 	// the finding (JSON output, comparison) rather than being recomputed per reader.
@@ -84,6 +76,36 @@ func (p *Provider) ListQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
 	}
 
 	return quotas, nil
+}
+
+// regionalQuotas collects the per-region limits for one region. A service whose
+// quotas will not list is warned and skipped, which records the run as
+// incomplete rather than reporting that region as having headroom.
+func (p *Provider) regionalQuotas(ctx context.Context) []cloud.QuotaUsage {
+	var quotas []cloud.QuotaUsage
+
+	ec2Quotas, err := p.ec2Quotas(ctx)
+	if err != nil {
+		p.warnf("warn: %s: ec2 quotas: %v\n", p.cfg.Region, err)
+	} else {
+		quotas = append(quotas, ec2Quotas...)
+	}
+
+	lambdaQuotas, err := p.lambdaQuotas(ctx)
+	if err != nil {
+		p.warnf("warn: %s: lambda quotas: %v\n", p.cfg.Region, err)
+	} else {
+		quotas = append(quotas, lambdaQuotas...)
+	}
+
+	rdsQuotas, err := p.rdsQuotas(ctx)
+	if err != nil {
+		p.warnf("warn: %s: rds quotas: %v\n", p.cfg.Region, err)
+	} else {
+		quotas = append(quotas, rdsQuotas...)
+	}
+
+	return quotas
 }
 
 func (p *Provider) iamQuotas(ctx context.Context) ([]cloud.QuotaUsage, error) {
