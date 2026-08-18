@@ -12,6 +12,14 @@ const (
 	OrphanSnapshot     OrphanKind = "snapshot"
 	OrphanImage        OrphanKind = "image"
 
+	// Manual RDS snapshots outlive the database they were taken from: deleting an
+	// instance or cluster removes its automated backups but never its manual
+	// snapshots, so a torn-down stack leaves billable storage behind with nothing
+	// left to point at it. CDK/CloudFormation's RemovalPolicy.SNAPSHOT produces
+	// exactly this on every destroy.
+	OrphanDBSnapshot        OrphanKind = "db_snapshot"
+	OrphanDBClusterSnapshot OrphanKind = "db_cluster_snapshot"
+
 	// Cluster residue: resources tied to a now-deleted EKS cluster that the
 	// cluster's IaC teardown can't reach, so they linger. The log group blocks a
 	// same-named re-vend; the Karpenter infra is stale cruft.

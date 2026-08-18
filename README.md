@@ -142,6 +142,9 @@ Required IAM permissions for a read-only audit role:
         "acm:ListCertificates",
         "acm:DescribeCertificate",
         "rds:DescribeDBInstances",
+        "rds:DescribeDBClusters",
+        "rds:DescribeDBSnapshots",
+        "rds:DescribeDBClusterSnapshots",
         "lambda:ListFunctions",
         "lambda:GetFunction",
         "lambda:ListTags",
@@ -276,7 +279,7 @@ Cost increases >10% are shown in red; decreases are shown in green.
 
 ---
 
-### `cloudgov orphans` — unused disks, IPs, load balancers, and cluster residue
+### `cloudgov orphans` — unused disks, IPs, load balancers, snapshots, and cluster residue
 
 Finds unattached disks, reserved IPs with no instance, and idle load balancers (with
 estimated monthly cost), plus **cluster residue** — resources tied to a now-deleted EKS
@@ -284,6 +287,16 @@ cluster that the cluster's teardown can't reach: the control-plane log group (wh
 a same-named re-create) and Karpenter's interruption SQS queue + EventBridge rules. Residue
 is matched against `eks:ListClusters`, so a live cluster's resources are never flagged, and
 it's always reported regardless of `--min-cost` (it's a conflict, not a cost, problem).
+
+It also finds **stranded manual RDS snapshots**. Deleting a database removes its automated
+backups but never its manual snapshots, so a snapshot outlives the instance or cluster it
+was taken from and keeps billing for storage with nothing left to restore onto.
+CloudFormation and CDK make this routine: `RemovalPolicy.SNAPSHOT` takes a final manual
+snapshot on every stack destroy, so a staging stack torn down ten times leaves ten of them.
+Only `manual` snapshots are examined — automated ones are deleted with their database and
+cannot outlive it. Aurora does not report a size for cluster snapshots (its storage is
+elastic and billed on actual backup bytes), so those are reported with the size unknown
+rather than as an estimate of $0.00.
 
 ```sh
 # Scan the current AWS account

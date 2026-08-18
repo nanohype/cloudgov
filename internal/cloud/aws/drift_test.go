@@ -106,6 +106,20 @@ func (m *driftMockRDS) DescribeDBInstances(_ context.Context, _ *rds.DescribeDBI
 	return &rds.DescribeDBInstancesOutput{DBInstances: []rdstypes.DBInstance{*m.instance}}, nil
 }
 
+// rdsAPI also carries the snapshot surface used by the orphan scanner; these
+// tests do not exercise it.
+func (m *driftMockRDS) DescribeDBClusters(_ context.Context, _ *rds.DescribeDBClustersInput, _ ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
+	return &rds.DescribeDBClustersOutput{}, nil
+}
+
+func (m *driftMockRDS) DescribeDBSnapshots(_ context.Context, _ *rds.DescribeDBSnapshotsInput, _ ...func(*rds.Options)) (*rds.DescribeDBSnapshotsOutput, error) {
+	return &rds.DescribeDBSnapshotsOutput{}, nil
+}
+
+func (m *driftMockRDS) DescribeDBClusterSnapshots(_ context.Context, _ *rds.DescribeDBClusterSnapshotsInput, _ ...func(*rds.Options)) (*rds.DescribeDBClusterSnapshotsOutput, error) {
+	return &rds.DescribeDBClusterSnapshotsOutput{}, nil
+}
+
 type driftMockELBv2 struct {
 	lb  *elbtypes.LoadBalancer
 	err error
