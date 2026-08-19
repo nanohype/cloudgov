@@ -74,12 +74,16 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	// The tenant-role and Pod Identity checks need AWS credentials; skip them
-	// (with a note) when they're absent so the k8s-side audit still runs.
+	// when they're absent so the k8s-side audit still runs. Absent credentials
+	// are an incomplete observation rather than a note: the run did not perform a
+	// whole class of conformance checks, and a reader who cannot tell that from a
+	// clean report has been told the tenant conforms when half of it went
+	// unexamined.
 	var roles platform.IdentityReader
+	var awsProviders []*cloudaws.Provider
 	if awsP, aerr := cloudaws.New(ctx, cloudaws.WithQuiet(quiet)); aerr == nil && awsP.Detect(ctx) {
 		roles = awsP
-	} else if !quiet {
-		fmt.Fprintln(os.Stderr, "note: AWS credentials not detected; skipping tenant-role and Pod Identity conformance")
+		awsProviders = append(awsProviders, awsP)
 	}
 
 	findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
@@ -87,7 +91,17 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	findings = filterPlatformBySeverity(findings, strings.ToUpper(platformSeverity))
+
+	// Warnings raised while reading tenant roles accumulate on the provider and
+	// are only a record if something reads them.
+	incomplete := cloud.Incomplete(awsProviders)
+	if roles == nil {
+		incomplete = append(incomplete,
+			"AWS credentials not detected; tenant-role and Pod Identity conformance were not checked")
+	}
+
 	gate(findings, func(f cloud.PlatformFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	w := os.Stdout
 	if platformOutputFile != "" {
@@ -101,7 +115,7 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(platformOutputFmt) {
 	case "json":
-		return output.WritePlatform(w, findings)
+		return output.WritePlatform(w, findings, incomplete)
 	case "sarif":
 		return output.WritePlatformSARIF(w, findings, Version)
 	default:

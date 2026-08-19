@@ -23,10 +23,40 @@ import (
 // test for a call site nobody wrote.
 
 var (
-	// A handler that resolves a provider capable of reporting incompletions —
-	// either directly through the registry, or via this package's resolveXxx
-	// helpers (which is how the MCP server reaches the same providers).
-	resolvesCloudProvider = regexp.MustCompile(`providers\.Resolve\[cloud\.\w+\]|resolve\w+Providers\(ctx\)|providers\.Default\(`)
+	// The population is enumerated by IMPORT, not by construction idiom.
+	//
+	// The first version of this gate matched three registry idioms — Resolve[T],
+	// the resolveXxxProviders helpers, and providers.Default. cmd/platform.go and
+	// cmd/k8s.go build providers directly with cloudaws.New / cloudk8s.New and
+	// matched none of them, so both sat outside the population entirely and the
+	// gate reported full coverage without them. platform.go reads an AWS account
+	// with WithQuiet set — the exact option the record-versus-copy proof was
+	// written for — and nothing read the record.
+	//
+	// That is the gate's own failure mode: a coverage claim about what the
+	// detector RECOGNISES, stated as a claim about what EXISTS. Enumerating the
+	// population independently and requiring every member to be gated or
+	// explicitly exempt is what scripts/coverage.sh already does — a floored path
+	// with no data fails, and a package with coverage but no floor fails. This
+	// now works the same way, so the next construction idiom nobody has invented
+	// yet is covered by construction rather than by pattern.
+	//
+	// Importing internal/cloud alone does not count: that package is types
+	// (cloud.Severity, cloud.Finding), and compliance.go, gate.go, remediate.go
+	// and repo.go use it without reaching an account.
+	//
+	// THE LIMIT, STATED. This enumerates every command that reaches an account BY
+	// THESE THREE IMPORT PATHS — not, as the sentence above is easy to read,
+	// every command that reaches an account. Those coincide today: internal/
+	// providers is the only non-cmd package importing a provider package
+	// (verified with `go list -deps ./cmd`), so there is no transitive route out
+	// of the population. Nothing enforces that. Add internal/scanner tomorrow
+	// importing internal/cloud/aws, have a command import that and neither
+	// provider package directly, and it escapes — the same shape this gate was
+	// rewritten to close, one level up. The durable form computes the population
+	// from the import graph rather than from direct imports; until then this
+	// comment is the honest statement of what the check covers.
+	importsProviderPackage = regexp.MustCompile(`internal/cloud/aws"|internal/cloud/k8s"|internal/providers"`)
 	// The two halves of honouring the contract. A command either computes the
 	// incompletions itself via cloud.Incomplete, or gates on a report field fed
 	// by it — `cloudgov audit` takes the second route, since its runner collects
@@ -43,6 +73,19 @@ var exemptFromIncompleteGate = map[string]string{
 	// so the incomplete record travels in the JSON payload instead. Its tools are
 	// covered by TestMCPToolsCarryIncomplete below.
 	"mcp.go": "no exit code over MCP; incompletions travel in the response payload",
+
+	// root.go imports internal/providers to build providerOptions(). It runs no
+	// scan and reads no account.
+	"root.go": "wires provider options; runs no scan",
+
+	// The Kubernetes provider has no partial-observation concept to report. Every
+	// error path in internal/cloud/k8s/rbac.go returns rather than skipping a
+	// resource — the four `continue`s there are filters (system-reserved roles)
+	// and post-finding continues, not dropped probes — and the provider does not
+	// implement cloud.IncompleteReporter. Gating it would assert a guarantee the
+	// layer beneath cannot supply. If cloudk8s ever grows a skip, delete this
+	// entry rather than making it true by adding an empty call.
+	"k8s.go": "cloudk8s reports errors, not partial observations; implements no IncompleteReporter",
 }
 
 func commandSources(t *testing.T) map[string]string {
@@ -75,7 +118,7 @@ func TestEveryCloudCommandGatesOnIncomplete(t *testing.T) {
 
 	var checked int
 	for name, src := range srcs {
-		if !resolvesCloudProvider.MatchString(src) {
+		if !importsProviderPackage.MatchString(src) {
 			continue
 		}
 		if reason, ok := exemptFromIncompleteGate[name]; ok {
@@ -106,48 +149,58 @@ func TestEveryCloudCommandGatesOnIncomplete(t *testing.T) {
 // Without this, TestEveryCloudCommandGatesOnIncomplete has the same defect it
 // exists to catch: it would pass just as happily if the regexes matched nothing.
 func TestIncompleteContractDetectorCanFail(t *testing.T) {
-	compliant := `
-func runThing(cmd *cobra.Command, _ []string) error {
-	providers, err := providers.Resolve[cloud.CertProvider](ctx)
-	incomplete := cloud.Incomplete(providers)
+	// The population predicate is about imports now, so the fixtures are files,
+	// not function bodies. The case that matters is the last one: a handler that
+	// constructs a provider directly, matching no registry idiom. The previous
+	// detector missed exactly that shape and let cmd/platform.go run ungated.
+	registryStyle := `package cmd
+
+import "github.com/nanohype/cloudgov/internal/providers"
+
+func run() error {
+	ps, _ := providers.Resolve[cloud.CertProvider](ctx)
+	incomplete := cloud.Incomplete(ps)
 	gateIncomplete(incomplete)
-	return output.WriteCerts(w, findings, incomplete)
+	return nil
 }`
-	missingBoth := `
-func runThing(cmd *cobra.Command, _ []string) error {
-	providers, err := providers.Resolve[cloud.CertProvider](ctx)
-	return output.WriteCerts(w, findings)
+	directConstruction := `package cmd
+
+import cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
+
+func run() error {
+	p, _ := cloudaws.New(ctx)
+	_ = p
+	return nil
 }`
-	missingGate := `
-func runThing(cmd *cobra.Command, _ []string) error {
-	providers, err := providers.Resolve[cloud.CertProvider](ctx)
-	incomplete := cloud.Incomplete(providers)
-	return output.WriteCerts(w, findings, incomplete)
+	typesOnly := `package cmd
+
+import "github.com/nanohype/cloudgov/internal/cloud"
+
+func run() error {
+	var s cloud.Severity
+	_ = s
+	return nil
 }`
-	noProvider := `
-func runReport(cmd *cobra.Command, _ []string) error {
-	return renderFromFile(path)
-}`
+	noCloud := `package cmd
+
+func run() error { return renderFromFile(path) }`
 
 	for _, tc := range []struct {
-		name                             string
-		src                              string
-		wantResolves, wantComp, wantGate bool
+		name                        string
+		src                         string
+		wantInPopulation, wantGated bool
 	}{
-		{"compliant", compliant, true, true, true},
-		{"missing both halves", missingBoth, true, false, false},
-		{"computes but does not gate", missingGate, true, true, false},
-		{"no cloud provider at all", noProvider, false, false, false},
+		{"registry idiom, gated", registryStyle, true, true},
+		{"direct construction, ungated — the shape that was missed", directConstruction, true, false},
+		{"imports cloud types only, not a provider", typesOnly, false, false},
+		{"touches no cloud package", noCloud, false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := resolvesCloudProvider.MatchString(tc.src); got != tc.wantResolves {
-				t.Errorf("resolves detector: got %v, want %v", got, tc.wantResolves)
+			if got := importsProviderPackage.MatchString(tc.src); got != tc.wantInPopulation {
+				t.Errorf("population: got %v, want %v", got, tc.wantInPopulation)
 			}
-			if got := computesIncomplete.MatchString(tc.src); got != tc.wantComp {
-				t.Errorf("computes detector: got %v, want %v", got, tc.wantComp)
-			}
-			if got := gatesIncomplete.MatchString(tc.src); got != tc.wantGate {
-				t.Errorf("gates detector: got %v, want %v", got, tc.wantGate)
+			if got := gatesIncomplete.MatchString(tc.src); got != tc.wantGated {
+				t.Errorf("gated: got %v, want %v", got, tc.wantGated)
 			}
 		})
 	}
@@ -161,7 +214,7 @@ func TestIncompleteContractCoverageIsExact(t *testing.T) {
 
 	var gated, exempt []string
 	for name, src := range srcs {
-		if !resolvesCloudProvider.MatchString(src) {
+		if !importsProviderPackage.MatchString(src) {
 			continue
 		}
 		if _, ok := exemptFromIncompleteGate[name]; ok {
@@ -173,7 +226,7 @@ func TestIncompleteContractCoverageIsExact(t *testing.T) {
 		}
 	}
 
-	const wantGated = 13
+	const wantGated = 14
 	if len(gated) != wantGated {
 		t.Errorf("commands honouring the incomplete contract: got %d %v, want %d.\n"+
 			"If you added or removed a cloud command, update this count and the figure in AGENTS.md.",

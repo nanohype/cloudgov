@@ -34,9 +34,13 @@ func PlatformFindings(w io.Writer, findings []cloud.PlatformFinding) {
 type platformReport struct {
 	Findings []cloud.PlatformFinding `json:"findings"`
 	Total    int                     `json:"total"`
+
+	// Incomplete is what this audit could not examine. An empty findings list
+	// with a non-empty Incomplete is "could not tell", not "conformant".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WritePlatform marshals Platform conformance findings as JSON to w.
-func WritePlatform(w io.Writer, findings []cloud.PlatformFinding) error {
-	return writeJSON(w, platformReport{Findings: findings, Total: len(findings)})
+func WritePlatform(w io.Writer, findings []cloud.PlatformFinding, incomplete []string) error {
+	return writeJSON(w, platformReport{Findings: findings, Total: len(findings), Incomplete: incomplete})
 }

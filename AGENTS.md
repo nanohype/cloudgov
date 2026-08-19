@@ -70,17 +70,28 @@ scan that found nothing. What could not be read is listed on stderr and in the
 JSON report's `incomplete` array.
 
 **Scope of the contract, stated exactly.** Every command that reads a cloud
-account honours it — all 13: `audit`, `iam scan`, `storage audit`,
+account honours it — all 14: `audit`, `iam scan`, `storage audit`,
 `network audit`, `certs`, `tags`, `secrets scan`, `orphans`, `quota`,
-`inventory`, `cost diff`, `drift`, `lambda audit`. A conformance test
-(`cmd/incomplete_contract_test.go`) fails the build if a command resolves a
-cloud provider without gating on what that provider could not read, so a new
-command cannot quietly drop out of it.
+`inventory`, `cost diff`, `drift`, `lambda audit`, `platform audit`.
+
+`platform audit` reads an AWS account for the tenant-role and Pod Identity
+checks, and reports absent credentials as an incomplete observation rather than
+a note: skipping a whole class of conformance checks is not the same as passing
+them.
+
+The conformance test (`cmd/incomplete_contract_test.go`) enumerates every
+`cmd/` file that imports a provider package and fails the build on any that is
+neither gated nor explicitly exempt. It enumerates by import rather than by
+construction idiom, because an earlier version matched three registry idioms and
+silently excluded the two commands that build a provider directly — a coverage
+claim about what the check recognised, stated as a claim about what existed.
 
 It does not apply to commands that read no cloud account: `compare`, `report`,
 `baseline`, `remediate`, `compliance` and `repo audit` work from files or the
-GitHub API, and `k8s rbac` / `platform audit` read a cluster whose client
-reports errors rather than partial observations. Those exit 0/1/2 only.
+GitHub API. `k8s rbac` is exempt for a different reason — the Kubernetes
+provider returns errors rather than partial observations and implements no
+`IncompleteReporter`, so gating it would assert a guarantee the layer beneath
+cannot supply. Those exit 0/1/2 only.
 
 Exit `3` requires `--fail-on`. Passing it is what declares the run a gate;
 without it the run is informational and the incompletions are reported on stderr
