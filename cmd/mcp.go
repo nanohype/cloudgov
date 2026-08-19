@@ -413,15 +413,22 @@ func registerMCPTools(s *mcp.Server) {
 				return nil, nil, err
 			}
 			var roles platform.IdentityReader
+			var awsProviders []*cloudaws.Provider
 			if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
 				roles = awsP
+				awsProviders = append(awsProviders, awsP)
 			}
 			findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 			if err != nil {
 				return nil, nil, err
 			}
 			findings = filterPlatformBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
-			return jsonResult(func(w io.Writer) error { return output.WritePlatform(w, findings) })
+			incomplete := cloud.Incomplete(awsProviders)
+			if roles == nil {
+				incomplete = append(incomplete,
+					"AWS credentials not detected; tenant-role and Pod Identity conformance were not checked")
+			}
+			return jsonResult(func(w io.Writer) error { return output.WritePlatform(w, findings, incomplete) })
 		})
 }
 

@@ -913,9 +913,11 @@ one that found nothing.
 
 **Every command that reads a cloud account honours this** — `audit`, `iam scan`,
 `storage audit`, `network audit`, `certs`, `tags`, `secrets scan`, `orphans`,
-`quota`, `inventory`, `cost diff`, `drift`, and `lambda audit`. Commands that
-read no cloud account (`compare`, `report`, `baseline`, `remediate`,
-`compliance`, `repo audit`, `k8s rbac`, `platform audit`) exit `0`/`1`/`2` only.
+`quota`, `inventory`, `cost diff`, `drift`, `lambda audit`, and
+`platform audit`. Commands that read no cloud account (`compare`, `report`,
+`baseline`, `remediate`, `compliance`, `repo audit`) exit `0`/`1`/`2` only, as
+does `k8s rbac` — the Kubernetes client reports errors rather than partial
+observations.
 
 ---
 
