@@ -125,8 +125,20 @@ func mentionsError(cond ast.Expr) bool {
 	return found
 }
 
-// bodySkips reports whether the block continues the loop, skipping the resource.
-// Nested function literals are not descended into: a continue inside a closure
+// bodySkips reports whether the block abandons the resource — `continue` skips
+// this one, `break` abandons every remaining one.
+//
+// `break` is the worse case and is matched even though no silent one exists
+// today: every paginator break in this package already warns. It is here as a
+// tripwire, because `if err != nil { break }` is an ordinary way to stop
+// paginating on error, and a silent one truncates the result set while the run
+// still reports a complete scan. A gate that only knew about `continue` would
+// have a hole shaped like the one it was written to close.
+//
+// `return` is deliberately not matched: bailing out of the function usually
+// propagates the error to a caller, which is a louder and different shape.
+//
+// Nested function literals are not descended into: a branch inside a closure
 // belongs to that closure's own loop, not this one.
 func bodySkips(body *ast.BlockStmt) bool {
 	found := false
@@ -134,7 +146,7 @@ func bodySkips(body *ast.BlockStmt) bool {
 		if _, ok := n.(*ast.FuncLit); ok {
 			return false
 		}
-		if br, ok := n.(*ast.BranchStmt); ok && br.Tok == token.CONTINUE {
+		if br, ok := n.(*ast.BranchStmt); ok && (br.Tok == token.CONTINUE || br.Tok == token.BREAK) {
 			found = true
 		}
 		return true
@@ -230,11 +242,27 @@ func TestProbeReportingDetectorCanFail(t *testing.T) {
 			wantWarnInFirst: false,
 		},
 		{
-			name:            "error path that breaks is not a skip",
+			name:            "paginator break that reports is a skip, and an acceptable one",
 			src:             `if err != nil { p.warnf("warn: page: %v\n", err); break }`,
 			wantErrCond:     true,
-			wantSkip:        false,
+			wantSkip:        true,
 			wantWarnInFirst: true,
+		},
+		{
+			// The tripwire. No such site exists in the package today; if one is
+			// added, it truncates the result set silently and the gate says so.
+			name:            "silent break abandons every remaining resource",
+			src:             `if err != nil { break }`,
+			wantErrCond:     true,
+			wantSkip:        true,
+			wantWarnInFirst: false,
+		},
+		{
+			name:            "return is not matched; it propagates to a caller",
+			src:             `if err != nil { return nil, err }`,
+			wantErrCond:     true,
+			wantSkip:        false,
+			wantWarnInFirst: false,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
