@@ -70,6 +70,20 @@ func TestDeleteCommand(t *testing.T) {
 			want:   []string{"aws ec2 deregister-image --image-id 'ami-1'"},
 		},
 		{
+			// The instance and cluster forms take different flags on different
+			// subcommands; emitting one for the other silently fails at run time.
+			name:    "db snapshot deletes via the instance subcommand",
+			orphan:  cloud.OrphanResource{Kind: cloud.OrphanDBSnapshot, ID: "old-db-final", Region: "us-west-2"},
+			want:    []string{"aws rds delete-db-snapshot --db-snapshot-identifier 'old-db-final'", "--region 'us-west-2'"},
+			notWant: []string{"delete-db-cluster-snapshot"},
+		},
+		{
+			name:    "db cluster snapshot deletes via the cluster subcommand",
+			orphan:  cloud.OrphanResource{Kind: cloud.OrphanDBClusterSnapshot, ID: "stg-snap", Region: "us-west-2"},
+			want:    []string{"aws rds delete-db-cluster-snapshot --db-cluster-snapshot-identifier 'stg-snap'"},
+			notWant: []string{"delete-db-snapshot --db-snapshot-identifier"},
+		},
+		{
 			name:   "empty id has no delete path",
 			orphan: cloud.OrphanResource{Kind: cloud.OrphanDisk, ID: ""},
 			empty:  true,

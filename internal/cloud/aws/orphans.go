@@ -79,6 +79,12 @@ func (p *Provider) listOrphansInRegion(ctx context.Context) ([]cloud.OrphanResou
 	}
 	orphans = append(orphans, images...)
 
+	dbSnaps, err := p.orphanDBSnapshots(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("orphan db snapshots: %w", err)
+	}
+	orphans = append(orphans, dbSnaps...)
+
 	// Cluster residue (EKS log groups + Karpenter infra for deleted clusters) is
 	// best-effort: it warns and skips on error rather than failing the whole scan.
 	orphans = append(orphans, p.orphanClusterResidue(ctx)...)
@@ -174,7 +180,11 @@ func (p *Provider) orphanLoadBalancers(ctx context.Context) ([]cloud.OrphanResou
 				continue
 			}
 			empty, err := p.lbHasNoTargets(ctx, awssdk.ToString(lb.LoadBalancerArn))
-			if err != nil || !empty {
+			if err != nil {
+				p.warnf("warn: load balancer %s target health: %v\n", awssdk.ToString(lb.LoadBalancerName), err)
+				continue
+			}
+			if !empty {
 				continue
 			}
 			orphans = append(orphans, cloud.OrphanResource{
@@ -201,12 +211,16 @@ func (p *Provider) lbHasNoTargets(ctx context.Context, lbArn string) (bool, erro
 	if len(out.TargetGroups) == 0 {
 		return true, nil
 	}
+	// A target group we could not read is not a target group we know to be empty.
+	// Skipping it silently and falling through to "no targets" is how a live load
+	// balancer becomes a delete suggestion in the remediation script, so an
+	// unreadable probe fails the whole check instead of shrinking the evidence.
 	for _, tg := range out.TargetGroups {
 		health, err := p.elbv2.DescribeTargetHealth(ctx, &elasticloadbalancingv2.DescribeTargetHealthInput{
 			TargetGroupArn: tg.TargetGroupArn,
 		})
 		if err != nil {
-			continue
+			return false, fmt.Errorf("describe target health for %s: %w", awssdk.ToString(tg.TargetGroupArn), err)
 		}
 		if len(health.TargetHealthDescriptions) > 0 {
 			return false, nil

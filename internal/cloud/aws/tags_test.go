@@ -44,6 +44,20 @@ func (m *mockRDS) DescribeDBInstances(_ context.Context, _ *rds.DescribeDBInstan
 	return &rds.DescribeDBInstancesOutput{DBInstances: m.dbs}, nil
 }
 
+// rdsAPI also carries the snapshot surface used by the orphan scanner; these
+// tests do not exercise it.
+func (m *mockRDS) DescribeDBClusters(_ context.Context, _ *rds.DescribeDBClustersInput, _ ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
+	return &rds.DescribeDBClustersOutput{}, nil
+}
+
+func (m *mockRDS) DescribeDBSnapshots(_ context.Context, _ *rds.DescribeDBSnapshotsInput, _ ...func(*rds.Options)) (*rds.DescribeDBSnapshotsOutput, error) {
+	return &rds.DescribeDBSnapshotsOutput{}, nil
+}
+
+func (m *mockRDS) DescribeDBClusterSnapshots(_ context.Context, _ *rds.DescribeDBClusterSnapshotsInput, _ ...func(*rds.Options)) (*rds.DescribeDBClusterSnapshotsOutput, error) {
+	return &rds.DescribeDBClusterSnapshotsOutput{}, nil
+}
+
 type mockLambda struct {
 	functions []lambdatypes.FunctionConfiguration
 	tags      map[string]map[string]string // arn -> tags

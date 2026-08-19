@@ -75,6 +75,20 @@ func (m *invMockRDS) DescribeDBInstances(_ context.Context, _ *rds.DescribeDBIns
 	return &rds.DescribeDBInstancesOutput{DBInstances: m.dbs}, nil
 }
 
+// rdsAPI also carries the snapshot surface used by the orphan scanner; these
+// tests do not exercise it.
+func (m *invMockRDS) DescribeDBClusters(_ context.Context, _ *rds.DescribeDBClustersInput, _ ...func(*rds.Options)) (*rds.DescribeDBClustersOutput, error) {
+	return &rds.DescribeDBClustersOutput{}, nil
+}
+
+func (m *invMockRDS) DescribeDBSnapshots(_ context.Context, _ *rds.DescribeDBSnapshotsInput, _ ...func(*rds.Options)) (*rds.DescribeDBSnapshotsOutput, error) {
+	return &rds.DescribeDBSnapshotsOutput{}, nil
+}
+
+func (m *invMockRDS) DescribeDBClusterSnapshots(_ context.Context, _ *rds.DescribeDBClusterSnapshotsInput, _ ...func(*rds.Options)) (*rds.DescribeDBClusterSnapshotsOutput, error) {
+	return &rds.DescribeDBClusterSnapshotsOutput{}, nil
+}
+
 type invMockECS struct {
 	arns     []string
 	clusters []ecstypes.Cluster

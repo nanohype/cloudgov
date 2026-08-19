@@ -1,8 +1,11 @@
 package aws
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -10,6 +13,7 @@ import (
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elbtypes "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
+	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
@@ -390,6 +394,41 @@ func TestOrphanLoadBalancers(t *testing.T) {
 			},
 			wantIDs: []string{},
 		},
+		{
+			// An unreadable target-health probe must not shrink the evidence down
+			// to "no targets found". This LB has a target group; we simply cannot
+			// see into it, and the answer to "is it idle?" is unknown, not yes.
+			name: "unreadable target health does NOT make a live LB an orphan",
+			mock: &mockELBv2{
+				lbPages: [][]elbtypes.LoadBalancer{{
+					{LoadBalancerArn: awssdk.String("arn:lb/1"), LoadBalancerName: awssdk.String("busy-but-denied")},
+				}},
+				targetGroups: map[string][]elbtypes.TargetGroup{
+					"arn:lb/1": {{TargetGroupArn: awssdk.String("arn:tg/1")}},
+				},
+				healthErrForTGARN: "arn:tg/1",
+			},
+			wantIDs: []string{},
+		},
+		{
+			// The shape that produced a delete command for a live load balancer:
+			// every target group errors, the loop finds no descriptions, and the
+			// check falls through to "empty".
+			name: "all target health probes failing does NOT report an orphan",
+			mock: &mockELBv2{
+				lbPages: [][]elbtypes.LoadBalancer{{
+					{LoadBalancerArn: awssdk.String("arn:lb/1"), LoadBalancerName: awssdk.String("all-denied")},
+				}},
+				targetGroups: map[string][]elbtypes.TargetGroup{
+					"arn:lb/1": {
+						{TargetGroupArn: awssdk.String("arn:tg/1")},
+						{TargetGroupArn: awssdk.String("arn:tg/2")},
+					},
+				},
+				healthErr: errors.New("AccessDenied"),
+			},
+			wantIDs: []string{},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -429,13 +468,25 @@ func TestListOrphans_AggregatesAllDomains(t *testing.T) {
 				{LoadBalancerArn: awssdk.String("arn:lb/1"), LoadBalancerName: awssdk.String("empty")},
 			}},
 		},
+		rds: &snapMockRDS{
+			clusterSn: []rdstypes.DBClusterSnapshot{
+				clusterSnapshot("stranded-snap", "deleted-cluster", "available", 0),
+			},
+		},
 	}
 	got, err := p.ListOrphans(context.Background())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d orphans, want 3 (1 disk + 1 ip + 1 lb): %v", len(got), got)
+	if len(got) != 4 {
+		t.Fatalf("got %d orphans, want 4 (1 disk + 1 ip + 1 lb + 1 db snapshot): %v", len(got), got)
+	}
+	var kinds []cloud.OrphanKind
+	for _, o := range got {
+		kinds = append(kinds, o.Kind)
+	}
+	if !slices.Contains(kinds, cloud.OrphanDBClusterSnapshot) {
+		t.Errorf("db cluster snapshots must be part of the region sweep, got kinds %v", kinds)
 	}
 }
 
@@ -460,4 +511,43 @@ func (m *mockEC2) DescribeRegions(_ context.Context, _ *ec2.DescribeRegionsInput
 		out.Regions = append(out.Regions, ec2types.Region{RegionName: awssdk.String(r)})
 	}
 	return out, nil
+}
+
+// TestOrphanLoadBalancers_UnreadableHealthIsRecorded pins the other half of the
+// contract: not reporting the LB is only half right. A load balancer the scan
+// could not classify has to leave a record, or "we could not tell" is delivered
+// to the operator as "there is nothing here".
+func TestOrphanLoadBalancers_UnreadableHealthIsRecorded(t *testing.T) {
+	var warn bytes.Buffer
+	p := &Provider{
+		warnw: &warn,
+		elbv2: &mockELBv2{
+			lbPages: [][]elbtypes.LoadBalancer{{
+				{LoadBalancerArn: awssdk.String("arn:lb/1"), LoadBalancerName: awssdk.String("denied-lb")},
+			}},
+			targetGroups: map[string][]elbtypes.TargetGroup{
+				"arn:lb/1": {{TargetGroupArn: awssdk.String("arn:tg/1")}},
+			},
+			healthErr: errors.New("AccessDenied"),
+		},
+	}
+
+	got, err := p.orphanLoadBalancers(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("a load balancer whose targets could not be read must not be reported as an orphan, got %d", len(got))
+	}
+
+	incomplete := p.Incomplete()
+	if len(incomplete) == 0 {
+		t.Fatal("an unreadable load balancer must be recorded as an incomplete observation, got none")
+	}
+	if !strings.Contains(incomplete[0], "denied-lb") {
+		t.Errorf("incomplete observation should name the load balancer, got %q", incomplete[0])
+	}
+	if !strings.Contains(warn.String(), "denied-lb") {
+		t.Errorf("warning should name the load balancer, got %q", warn.String())
+	}
 }

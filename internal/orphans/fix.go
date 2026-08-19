@@ -97,6 +97,10 @@ func deleteCommand(o cloud.OrphanResource) string {
 		return "aws ec2 delete-snapshot --snapshot-id " + id + region
 	case cloud.OrphanImage:
 		return "aws ec2 deregister-image --image-id " + id + region
+	case cloud.OrphanDBSnapshot:
+		return "aws rds delete-db-snapshot --db-snapshot-identifier " + id + region
+	case cloud.OrphanDBClusterSnapshot:
+		return "aws rds delete-db-cluster-snapshot --db-cluster-snapshot-identifier " + id + region
 	case cloud.OrphanEKSLogGroup:
 		return "aws logs delete-log-group --log-group-name " + id + region
 	case cloud.OrphanKarpenterQueue:
