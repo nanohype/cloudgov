@@ -123,6 +123,7 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d platform conformance findings (context: %s)\n\n", len(findings), clients.ContextName)
 		}
 		output.PlatformFindings(w, findings)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

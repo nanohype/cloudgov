@@ -75,6 +75,7 @@ func runInventory(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d resources\n\n", summary.Total)
 		}
 		output.InventoryResources(w, resources)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

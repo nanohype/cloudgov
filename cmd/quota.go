@@ -72,6 +72,7 @@ func runQuota(cmd *cobra.Command, _ []string) error {
 				summary.Total, summary.Critical, summary.High, summary.Medium)
 		}
 		output.QuotaUsages(w, quotas)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

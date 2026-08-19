@@ -97,6 +97,24 @@ func runCompliance(_ *cobra.Command, args []string) error {
 		return cloud.SeverityInfo
 	})
 
+	// A control nobody could evaluate is not a control that passed. Without this,
+	// a benchmark run with no input reports grades every control NotEvaluated,
+	// scores them all Info, and exits 0 under an explicit --fail-on — reporting
+	// "benchmark passed" for a benchmark it never checked.
+	//
+	// Exit 3 rather than 2: an unevaluated control did not fail either, and
+	// grading it as a failure would be the same inversion pointed the other way.
+	// gateIncomplete leaves an existing exit 2 alone, so a real failure still
+	// outranks "could not tell".
+	unevaluated := make([]string, 0, len(report.Results))
+	for _, r := range report.Results {
+		if r.Status == compliance.StatusNotEvaluated {
+			unevaluated = append(unevaluated,
+				fmt.Sprintf("control %s (%s) not evaluated: %s", r.Control.ID, r.Control.Title, r.Detail))
+		}
+	}
+	gateIncomplete(unevaluated)
+
 	w := os.Stdout
 	if complianceOutputFile != "" {
 		f, err := os.Create(complianceOutputFile)

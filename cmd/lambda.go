@@ -95,6 +95,7 @@ func runLambdaAudit(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d Lambda policy findings\n\n", len(allFindings))
 		}
 		output.LambdaPolicyFindings(w, allFindings)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

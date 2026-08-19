@@ -207,9 +207,10 @@ func TestAudit_HealthyRepoIsSilent(t *testing.T) {
 	}
 }
 
-// TestAudit_DependabotGaps covers the #56 half: alerting on with no automated
-// fixes means every patchable CVE waits on a human noticing, which is how the
-// same advisory came to be fixed by hand in five separate repos.
+// TestAudit_DependabotGaps covers the half that alerting alone does not: alerts
+// enabled with security updates off means every patchable advisory waits on a
+// human noticing it, so the repository reports as watched while nothing acts on
+// what it sees.
 func TestAudit_DependabotGaps(t *testing.T) {
 	s := healthy("docs")
 	s.SecurityUpdatesEnabled = false

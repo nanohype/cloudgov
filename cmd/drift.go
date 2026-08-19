@@ -108,6 +108,7 @@ func runDrift(cmd *cobra.Command, args []string) error {
 				len(results), inSync, modified, deleted, errored)
 		}
 		output.DriftResults(w, results)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }
