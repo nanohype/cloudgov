@@ -22,6 +22,8 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
 fail=0
+checked=0
+skipped=0
 note() { printf '  %s\n' "$1" >&2; }
 
 # ─── what goreleaser will produce ───
@@ -51,11 +53,16 @@ if [ "${#urls[@]}" -eq 0 ]; then
 fi
 
 for url in "${urls[@]}"; do
-  # The bare releases page is a link for humans, not a download.
+  # The bare releases page is a link for humans, not a download. Skips are
+  # counted: the guard above rejects an empty match set, but it runs before this
+  # filter, so a README linking only to the releases page leaves a non-empty list
+  # that this loop then skips in full. Reporting the matched count would then
+  # claim agreement for URLs nothing compared.
   case "$url" in
-    */releases|*/releases/) continue ;;
+    */releases|*/releases/) skipped=$((skipped + 1)); continue ;;
   esac
 
+  checked=$((checked + 1))
   asset=${url##*/}
 
   if [ "$archive_versioned" -eq 1 ] || [ "$checksum_versioned" -eq 1 ]; then
@@ -97,4 +104,14 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 
-printf 'ok: %s documented release URL(s) agree with .goreleaser.yaml\n' "${#urls[@]}"
+# A verdict over nothing is not a pass. Every match being a link to the releases
+# page means no documented download URL was compared against the config, which is
+# the one thing this script exists to do.
+if [ "$checked" -eq 0 ]; then
+  echo "error: $skipped release link(s) found, none of them a download URL — nothing was compared." >&2
+  echo "       The install section documents no asset this can check against .goreleaser.yaml." >&2
+  exit 2
+fi
+
+printf 'ok: %s documented download URL(s) agree with .goreleaser.yaml (%s releases-page link(s) not compared)\n' \
+  "$checked" "$skipped"
