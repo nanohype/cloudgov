@@ -42,7 +42,7 @@ func ComplianceReport(w io.Writer, report compliance.ComplianceReport) {
 	summary := fmt.Sprintf("\n%s passed, %s failed, %s not evaluated (%d total)",
 		greenStyle.Render(fmt.Sprintf("%d", report.Summary.Passed)),
 		critStyle.Render(fmt.Sprintf("%d", report.Summary.Failed)),
-		dimStyle.Render(fmt.Sprintf("%d", report.Summary.NotEvaluated)),
+		unknownStyle.Render(fmt.Sprintf("%d", report.Summary.NotEvaluated)),
 		report.Summary.Total,
 	)
 	fmt.Fprintln(w, summary)

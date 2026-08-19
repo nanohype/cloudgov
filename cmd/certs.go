@@ -72,6 +72,7 @@ func runCerts(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d certificate findings\n\n", len(findings))
 		}
 		output.CertFindings(w, findings)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

@@ -76,6 +76,7 @@ func runSecretsScan(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d secret findings\n\n", len(findings))
 		}
 		output.SecretFindings(w, findings)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

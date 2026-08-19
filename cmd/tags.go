@@ -87,6 +87,7 @@ func runTags(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d tagging findings\n\n", len(findings))
 		}
 		output.TagFindings(w, findings)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

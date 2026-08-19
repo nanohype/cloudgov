@@ -67,6 +67,7 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d orphaned resources (~$%.2f/month)\n\n", len(orphans), total)
 		}
 		output.OrphanResources(w, orphans)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

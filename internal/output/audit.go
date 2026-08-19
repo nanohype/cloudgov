@@ -59,6 +59,8 @@ func AuditReport(w io.Writer, report *audit.Report) {
 	if s.DomainsSkipped > 0 {
 		fmt.Fprintf(w, "  %s domains skipped\n", dimStyle.Render(fmt.Sprintf("%d", s.DomainsSkipped)))
 	}
+
+	IncompleteNote(w, report.Incomplete)
 }
 
 // WriteAudit marshals a full audit report as JSON to w.

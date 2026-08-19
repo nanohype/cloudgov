@@ -80,6 +80,7 @@ func runNetworkAudit(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d network findings\n\n", len(findings))
 		}
 		output.NetworkFindings(w, findings)
+		output.IncompleteNote(w, incomplete)
 	}
 
 	if networkFix {

@@ -70,6 +70,7 @@ func runCostDiff(cmd *cobra.Command, _ []string) error {
 		return output.WriteCost(w, diffs, incomplete)
 	default:
 		output.CostDiffs(w, diffs)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }

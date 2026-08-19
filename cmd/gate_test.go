@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/compliance"
 )
 
 func TestGate(t *testing.T) {
@@ -121,5 +122,99 @@ func TestGateIncomplete_QuietSilencesOutputNotTheGate(t *testing.T) {
 
 	if loud != 3 || exitCode != 3 {
 		t.Errorf("exit code differed with --quiet: loud=%d quiet=%d, want 3 and 3", loud, exitCode)
+	}
+}
+
+// TestCompliance_UnevaluatedIsNotPassed pins the three-way verdict.
+//
+// A benchmark run with no input reports grades every control NotEvaluated. The
+// gate scored those the same as a pass, so `cloudgov compliance cis-aws-v3
+// --fail-on HIGH` reported 0 passed, 0 failed, 22 not evaluated and exited 0 —
+// a merge gate reads that as "the benchmark passed".
+//
+// All three cases are asserted together because each one alone is satisfiable
+// by a constant. A gate that always returns 3 passes the first case; a gate that
+// never fires passes the second.
+func TestCompliance_UnevaluatedIsNotPassed(t *testing.T) {
+	ctrl := func(id string, sev cloud.Severity) compliance.Control {
+		return compliance.Control{ID: id, Title: "control " + id, Severity: sev}
+	}
+
+	tests := []struct {
+		name     string
+		results  []compliance.ControlResult
+		failOn   string
+		wantExit int
+		why      string
+	}{
+		{
+			name: "nothing could be evaluated is not a pass",
+			results: []compliance.ControlResult{
+				{Control: ctrl("1.4", cloud.SeverityCritical), Status: compliance.StatusNotEvaluated, Detail: "no IAM findings provided"},
+				{Control: ctrl("5.2", cloud.SeverityHigh), Status: compliance.StatusNotEvaluated, Detail: "no network findings provided"},
+			},
+			failOn:   "HIGH",
+			wantExit: 3,
+			why:      "the run could not see enough to answer either way",
+		},
+		{
+			// The quiet half. Without this the fix is indistinguishable from a
+			// gate that always fires.
+			name: "every control evaluated cleanly still exits 0",
+			results: []compliance.ControlResult{
+				{Control: ctrl("1.4", cloud.SeverityCritical), Status: compliance.StatusPass, Detail: "no root access key"},
+				{Control: ctrl("5.2", cloud.SeverityHigh), Status: compliance.StatusPass, Detail: "no open ingress"},
+			},
+			failOn:   "HIGH",
+			wantExit: 0,
+			why:      "a fully evaluated, clean benchmark is a pass",
+		},
+		{
+			// A real failure outranks "could not tell": exit 2 is not downgraded.
+			name: "a failing control still reports 2, not 3",
+			results: []compliance.ControlResult{
+				{Control: ctrl("1.16", cloud.SeverityCritical), Status: compliance.StatusFail, Detail: "admin policies found"},
+				{Control: ctrl("5.2", cloud.SeverityHigh), Status: compliance.StatusNotEvaluated, Detail: "no network findings provided"},
+			},
+			failOn:   "HIGH",
+			wantExit: 2,
+			why:      "a control that failed is a stronger statement than one nobody checked",
+		},
+		{
+			name: "informational run reports nothing",
+			results: []compliance.ControlResult{
+				{Control: ctrl("1.4", cloud.SeverityCritical), Status: compliance.StatusNotEvaluated, Detail: "no IAM findings provided"},
+			},
+			failOn:   "",
+			wantExit: 0,
+			why:      "--fail-on is what declares a run a gate",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exitCode = 0
+			failOn = tt.failOn
+			quiet = true
+			t.Cleanup(func() { exitCode = 0; failOn = ""; quiet = false })
+
+			gate(tt.results, func(r compliance.ControlResult) cloud.Severity {
+				if r.Status == compliance.StatusFail {
+					return r.Control.Severity
+				}
+				return cloud.SeverityInfo
+			})
+			var unevaluated []string
+			for _, r := range tt.results {
+				if r.Status == compliance.StatusNotEvaluated {
+					unevaluated = append(unevaluated, r.Control.ID)
+				}
+			}
+			gateIncomplete(unevaluated)
+
+			if exitCode != tt.wantExit {
+				t.Errorf("exit code: got %d, want %d — %s", exitCode, tt.wantExit, tt.why)
+			}
+		})
 	}
 }

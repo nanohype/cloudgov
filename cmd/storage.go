@@ -80,6 +80,7 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d storage findings\n\n", len(findings))
 		}
 		output.BucketFindings(w, findings)
+		output.IncompleteNote(w, incomplete)
 	}
 
 	if storageFix {

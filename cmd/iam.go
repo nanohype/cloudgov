@@ -135,6 +135,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 			fmt.Fprintf(os.Stderr, "\nFound %d findings across %d principals\n\n", len(allFindings), totalPrincipals)
 		}
 		output.IAMFindings(w, allFindings, totalPrincipals)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }
