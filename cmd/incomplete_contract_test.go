@@ -44,6 +44,18 @@ var (
 	// Importing internal/cloud alone does not count: that package is types
 	// (cloud.Severity, cloud.Finding), and compliance.go, gate.go, remediate.go
 	// and repo.go use it without reaching an account.
+	//
+	// THE LIMIT, STATED. This enumerates every command that reaches an account BY
+	// THESE THREE IMPORT PATHS — not, as the sentence above is easy to read,
+	// every command that reaches an account. Those coincide today: internal/
+	// providers is the only non-cmd package importing a provider package
+	// (verified with `go list -deps ./cmd`), so there is no transitive route out
+	// of the population. Nothing enforces that. Add internal/scanner tomorrow
+	// importing internal/cloud/aws, have a command import that and neither
+	// provider package directly, and it escapes — the same shape this gate was
+	// rewritten to close, one level up. The durable form computes the population
+	// from the import graph rather than from direct imports; until then this
+	// comment is the honest statement of what the check covers.
 	importsProviderPackage = regexp.MustCompile(`internal/cloud/aws"|internal/cloud/k8s"|internal/providers"`)
 	// The two halves of honouring the contract. A command either computes the
 	// incompletions itself via cloud.Incomplete, or gates on a report field fed
