@@ -75,11 +75,13 @@ func runTags(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	incomplete := cloud.Incomplete(providers)
 	gate(findings, func(f cloud.TagFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	switch strings.ToLower(tagsOutputFmt) {
 	case "json":
-		return output.WriteTags(w, findings)
+		return output.WriteTags(w, findings, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d tagging findings\n\n", len(findings))

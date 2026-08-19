@@ -52,12 +52,17 @@ func InventoryResources(w io.Writer, resources []cloud.InventoryResource) {
 type inventoryReport struct {
 	Resources []cloud.InventoryResource `json:"resources"`
 	Total     int                       `json:"total"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteInventory marshals inventory resources as JSON to w.
-func WriteInventory(w io.Writer, resources []cloud.InventoryResource) error {
+func WriteInventory(w io.Writer, resources []cloud.InventoryResource, incomplete []string) error {
 	return writeJSON(w, inventoryReport{
-		Resources: resources,
-		Total:     len(resources),
+		Resources:  resources,
+		Total:      len(resources),
+		Incomplete: incomplete,
 	})
 }

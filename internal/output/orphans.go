@@ -43,10 +43,14 @@ type orphansReport struct {
 	Resources           []cloud.OrphanResource `json:"resources"`
 	Total               int                    `json:"total"`
 	EstimatedMonthlyUSD float64                `json:"estimated_monthly_usd"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteOrphans marshals orphan resources as JSON to w.
-func WriteOrphans(w io.Writer, orphans []cloud.OrphanResource) error {
+func WriteOrphans(w io.Writer, orphans []cloud.OrphanResource, incomplete []string) error {
 	var total float64
 	for _, o := range orphans {
 		total += o.MonthlyCost
@@ -55,5 +59,6 @@ func WriteOrphans(w io.Writer, orphans []cloud.OrphanResource) error {
 		Resources:           orphans,
 		Total:               len(orphans),
 		EstimatedMonthlyUSD: total,
+		Incomplete:          incomplete,
 	})
 }

@@ -66,11 +66,13 @@ func runNetworkAudit(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	incomplete := cloud.Incomplete(providers)
 	gate(findings, func(f cloud.NetworkFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	switch strings.ToLower(networkOutputFmt) {
 	case "json":
-		if err := output.WriteNetwork(w, findings); err != nil {
+		if err := output.WriteNetwork(w, findings, incomplete); err != nil {
 			return err
 		}
 	default:

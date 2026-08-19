@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -8,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
-	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/output"
+	"github.com/nanohype/cloudgov/internal/providers"
 )
 
 var lambdaCmd = &cobra.Command{
@@ -54,21 +55,25 @@ func init() {
 func runLambdaAudit(cmd *cobra.Command, _ []string) error {
 	ctx := cmd.Context()
 
-	p, err := cloudaws.New(ctx)
-	if err != nil {
-		return fmt.Errorf("initialize aws: %w", err)
-	}
-	if !p.Detect(ctx) {
-		return fmt.Errorf("no AWS credentials detected")
-	}
-	allFindings, err := p.AuditLambdaPolicies(ctx)
+	providers, err := resolveLambdaPolicyProviders(ctx)
 	if err != nil {
 		return err
 	}
 
+	var allFindings []cloud.LambdaPolicyFinding
+	for _, p := range providers {
+		found, err := p.AuditLambdaPolicies(ctx)
+		if err != nil {
+			return fmt.Errorf("%s: %w", p.Name(), err)
+		}
+		allFindings = append(allFindings, found...)
+	}
+
 	allFindings = filterLambdaBySeverity(allFindings, cloud.Severity(strings.ToUpper(lambdaSeverity)))
 
+	incomplete := cloud.Incomplete(providers)
 	gate(allFindings, func(f cloud.LambdaPolicyFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	w := os.Stdout
 	if lambdaOutputFile != "" {
@@ -82,7 +87,7 @@ func runLambdaAudit(cmd *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(lambdaOutputFmt) {
 	case "json":
-		return output.WriteLambdaPolicy(w, allFindings)
+		return output.WriteLambdaPolicy(w, allFindings, incomplete)
 	case "sarif":
 		return output.WriteLambdaSARIF(w, allFindings, Version)
 	default:
@@ -103,4 +108,8 @@ func filterLambdaBySeverity(in []cloud.LambdaPolicyFinding, min cloud.Severity) 
 		}
 	}
 	return out
+}
+
+func resolveLambdaPolicyProviders(ctx context.Context) ([]cloud.LambdaPolicyProvider, error) {
+	return providers.Resolve[cloud.LambdaPolicyProvider](ctx, providerOptions()...)
 }

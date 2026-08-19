@@ -103,7 +103,7 @@ func TestIntegration_Orphans(t *testing.T) {
 		t.Fatalf("scan result: %+v", got)
 	}
 	assertRendered(t,
-		func(b *bytes.Buffer) error { return output.WriteOrphans(b, got) },
+		func(b *bytes.Buffer) error { return output.WriteOrphans(b, got, nil) },
 		func(b *bytes.Buffer) { output.OrphanResources(b, got) },
 		"vol-int", "available")
 }
@@ -145,7 +145,7 @@ func TestIntegration_Network(t *testing.T) {
 		t.Fatalf("scan result: %+v", got)
 	}
 	assertRendered(t,
-		func(b *bytes.Buffer) error { return output.WriteNetwork(b, got) },
+		func(b *bytes.Buffer) error { return output.WriteNetwork(b, got, nil) },
 		func(b *bytes.Buffer) { output.NetworkFindings(b, got) },
 		"sg-int", "0.0.0.0/0")
 }
@@ -166,7 +166,7 @@ func TestIntegration_Certs(t *testing.T) {
 		t.Fatalf("scan result: %+v", got)
 	}
 	assertRendered(t,
-		func(b *bytes.Buffer) error { return output.WriteCerts(b, got) },
+		func(b *bytes.Buffer) error { return output.WriteCerts(b, got, nil) },
 		func(b *bytes.Buffer) { output.CertFindings(b, got) },
 		"int.example.com", "EXPIRED")
 }
@@ -187,7 +187,7 @@ func TestIntegration_Tags(t *testing.T) {
 		t.Fatalf("scan result: %+v", got)
 	}
 	assertRendered(t,
-		func(b *bytes.Buffer) error { return output.WriteTags(b, got) },
+		func(b *bytes.Buffer) error { return output.WriteTags(b, got, nil) },
 		func(b *bytes.Buffer) { output.TagFindings(b, got) },
 		"i-int", "ec2:instance")
 }
@@ -208,7 +208,7 @@ func TestIntegration_Secrets(t *testing.T) {
 		t.Fatalf("scan result: %+v", got)
 	}
 	assertRendered(t,
-		func(b *bytes.Buffer) error { return output.WriteSecrets(b, got) },
+		func(b *bytes.Buffer) error { return output.WriteSecrets(b, got, nil) },
 		func(b *bytes.Buffer) { output.SecretFindings(b, got) },
 		"int-fn", "AKIA****")
 }

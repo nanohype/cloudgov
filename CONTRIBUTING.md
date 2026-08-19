@@ -357,6 +357,44 @@ func TestScan(t *testing.T) {
 }
 ```
 
+### 7. Honour the incomplete contract
+
+If the command reads a cloud account, it must gate on what the provider could
+not read. Two lines, next to the severity gate:
+
+```go
+incomplete := cloud.Incomplete(providers)
+gate(findings, func(f cloud.MyGroupFinding) cloud.Severity { return f.Severity })
+gateIncomplete(incomplete)
+```
+
+and the incompletions travel in the JSON report, so the writer takes them too:
+
+```go
+return output.WriteMyGroup(w, findings, incomplete)
+```
+
+This is not optional politeness. `cloudgov`'s exit 0 is consumed as evidence
+supporting approval, so a scan that could not read part of an account has to be
+distinguishable from one that found nothing. `cmd/incomplete_contract_test.go`
+fails the build if a command resolves a cloud provider and skips this.
+
+### 8. Register the MCP tool
+
+Every scan is reachable over MCP as well as the CLI. Add it in
+`registerMCPTools` (`cmd/mcp.go`), reusing the same `resolve*Providers` helper
+and scanner as the CLI handler — the MCP surface must not drift into a second
+implementation. There is no exit code over MCP, so the `incomplete` array in the
+response is the only carrier: compute it there too.
+
+### 9. Update `AGENTS.md` and the README
+
+Add the tool to the MCP table in `AGENTS.md` and the command to the README
+reference. `cmd/incomplete_contract_test.go` fails the build if the AGENTS.md
+table and the registered tools disagree in either direction — the table drifted
+once already, documenting a tool that was registered nowhere, and an agent
+following a doc that overstates the code gets "unknown tool".
+
 ---
 
 ## Test requirements

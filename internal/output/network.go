@@ -37,9 +37,13 @@ func NetworkFindings(w io.Writer, findings []cloud.NetworkFinding) {
 type networkReport struct {
 	Findings []cloud.NetworkFinding `json:"findings"`
 	Total    int                    `json:"total"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteNetwork marshals network findings as JSON to w.
-func WriteNetwork(w io.Writer, findings []cloud.NetworkFinding) error {
-	return writeJSON(w, networkReport{Findings: findings, Total: len(findings)})
+func WriteNetwork(w io.Writer, findings []cloud.NetworkFinding, incomplete []string) error {
+	return writeJSON(w, networkReport{Findings: findings, Total: len(findings), Incomplete: incomplete})
 }

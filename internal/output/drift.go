@@ -55,9 +55,13 @@ func DriftResults(w io.Writer, results []cloud.DriftResult) {
 type driftReport struct {
 	Results []cloud.DriftResult `json:"results"`
 	Total   int                 `json:"total"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteDrift marshals drift results as JSON to w.
-func WriteDrift(w io.Writer, results []cloud.DriftResult) error {
-	return writeJSON(w, driftReport{Results: results, Total: len(results)})
+func WriteDrift(w io.Writer, results []cloud.DriftResult, incomplete []string) error {
+	return writeJSON(w, driftReport{Results: results, Total: len(results), Incomplete: incomplete})
 }

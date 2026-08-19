@@ -239,7 +239,7 @@ func TestWriteOrphans(t *testing.T) {
 	}
 
 	out := roundTrip[orphansOut](t, func(buf *bytes.Buffer) error {
-		return WriteOrphans(buf, orphans)
+		return WriteOrphans(buf, orphans, nil)
 	})
 
 	if out.Total != len(orphans) {
@@ -273,7 +273,7 @@ func TestWriteOrphansEmpty(t *testing.T) {
 		EstimatedMonthlyUSD float64           `json:"estimated_monthly_usd"`
 	}
 	out := roundTrip[orphansOut](t, func(buf *bytes.Buffer) error {
-		return WriteOrphans(buf, nil)
+		return WriteOrphans(buf, nil, nil)
 	})
 	if out.Total != 0 {
 		t.Errorf("total: got %d, want 0", out.Total)
@@ -293,7 +293,7 @@ func TestWriteOrphansMonthlyCostSum(t *testing.T) {
 		Total               int     `json:"total"`
 	}
 	out := roundTrip[orphansOut](t, func(buf *bytes.Buffer) error {
-		return WriteOrphans(buf, orphans)
+		return WriteOrphans(buf, orphans, nil)
 	})
 	if out.EstimatedMonthlyUSD != 0 {
 		t.Errorf("estimated_monthly_usd: got %f, want 0", out.EstimatedMonthlyUSD)
@@ -341,7 +341,7 @@ func TestWriteCost(t *testing.T) {
 	}
 
 	out := roundTrip[costOut](t, func(buf *bytes.Buffer) error {
-		return WriteCost(buf, diffs)
+		return WriteCost(buf, diffs, nil)
 	})
 
 	if len(out.Diffs) != 1 {
@@ -383,7 +383,7 @@ func TestWriteCostEmpty(t *testing.T) {
 		Diffs []json.RawMessage `json:"diffs"`
 	}
 	out := roundTrip[costOut](t, func(buf *bytes.Buffer) error {
-		return WriteCost(buf, nil)
+		return WriteCost(buf, nil, nil)
 	})
 	if len(out.Diffs) != 0 {
 		t.Errorf("diffs length: got %d, want 0", len(out.Diffs))
@@ -406,7 +406,7 @@ func TestWriteCostMultipleProviders(t *testing.T) {
 	}
 
 	out := roundTrip[costOut](t, func(buf *bytes.Buffer) error {
-		return WriteCost(buf, diffs)
+		return WriteCost(buf, diffs, nil)
 	})
 
 	if len(out.Diffs) != 3 {

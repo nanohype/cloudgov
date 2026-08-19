@@ -46,9 +46,13 @@ func CertFindings(w io.Writer, findings []cloud.CertFinding) {
 type certsReport struct {
 	Findings []cloud.CertFinding `json:"findings"`
 	Total    int                 `json:"total"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteCerts marshals certificate findings as JSON to w.
-func WriteCerts(w io.Writer, findings []cloud.CertFinding) error {
-	return writeJSON(w, certsReport{Findings: findings, Total: len(findings)})
+func WriteCerts(w io.Writer, findings []cloud.CertFinding, incomplete []string) error {
+	return writeJSON(w, certsReport{Findings: findings, Total: len(findings), Incomplete: incomplete})
 }

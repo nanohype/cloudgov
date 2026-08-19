@@ -48,10 +48,14 @@ type quotaReport struct {
 	Critical int                `json:"critical"`
 	High     int                `json:"high"`
 	Medium   int                `json:"medium"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteQuotas marshals quota usage data as JSON to w.
-func WriteQuotas(w io.Writer, quotas []cloud.QuotaUsage) error {
+func WriteQuotas(w io.Writer, quotas []cloud.QuotaUsage, incomplete []string) error {
 	var crit, high, med int
 	for _, q := range quotas {
 		switch q.EffectiveSeverity() {
@@ -64,10 +68,11 @@ func WriteQuotas(w io.Writer, quotas []cloud.QuotaUsage) error {
 		}
 	}
 	return writeJSON(w, quotaReport{
-		Quotas:   quotas,
-		Total:    len(quotas),
-		Critical: crit,
-		High:     high,
-		Medium:   med,
+		Quotas:     quotas,
+		Total:      len(quotas),
+		Critical:   crit,
+		High:       high,
+		Medium:     med,
+		Incomplete: incomplete,
 	})
 }
