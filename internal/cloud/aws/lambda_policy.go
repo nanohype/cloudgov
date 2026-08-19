@@ -72,15 +72,21 @@ func (p *Provider) auditLambdaPoliciesInRegion(ctx context.Context) ([]cloud.Lam
 			})
 			if err != nil {
 				if isLambdaPolicyMissing(err) {
-					continue // no resource policy — not a finding
+					continue // no resource policy — a real state, not a failed read
 				}
-				continue // other errors (e.g. AccessDenied on one fn) shouldn't abort the scan
+				// Any other error means this function's policy went unaudited. Left
+				// silent, a denied GetPolicy is indistinguishable from a function
+				// whose policy grants nothing — the scan reports no public-invoke
+				// finding either way.
+				p.warnf("warn: get policy for lambda %s: %v\n", fnName, err)
+				continue
 			}
 			if policyOut.Policy == nil {
 				continue
 			}
 			var doc lambdaResourcePolicy
 			if err := json.Unmarshal([]byte(*policyOut.Policy), &doc); err != nil {
+				p.warnf("warn: parse policy for lambda %s: %v\n", fnName, err)
 				continue
 			}
 			findings = append(findings, p.classifyLambdaPolicy(fnName, fnArn, doc)...)

@@ -238,6 +238,7 @@ func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cl
 				Resource: fn.FunctionArn,
 			})
 			if err != nil {
+				p.warnf("warn: list tags for lambda %s: %v\n", awssdk.ToString(fn.FunctionArn), err)
 				continue
 			}
 			tagMap := make(map[string]struct{})
@@ -328,7 +329,11 @@ func (p *Provider) auditEKSTags(ctx context.Context, required []string) ([]cloud
 		}
 		for _, name := range listed.Clusters {
 			desc, err := p.eks.DescribeCluster(ctx, &eks.DescribeClusterInput{Name: awssdk.String(name)})
-			if err != nil || desc.Cluster == nil {
+			if err != nil {
+				p.warnf("warn: describe eks cluster %s: %v\n", name, err)
+				continue
+			}
+			if desc.Cluster == nil {
 				continue
 			}
 			tagMap := make(map[string]struct{}, len(desc.Cluster.Tags))
@@ -370,11 +375,16 @@ func (p *Provider) auditDynamoDBTags(ctx context.Context, required []string) ([]
 		}
 		for _, name := range listed.TableNames {
 			desc, err := p.dynamodb.DescribeTable(ctx, &dynamodb.DescribeTableInput{TableName: awssdk.String(name)})
-			if err != nil || desc.Table == nil || desc.Table.TableArn == nil {
+			if err != nil {
+				p.warnf("warn: describe dynamodb table %s: %v\n", name, err)
+				continue
+			}
+			if desc.Table == nil || desc.Table.TableArn == nil {
 				continue
 			}
 			tagMap, err := p.dynamodbTableTags(ctx, awssdk.ToString(desc.Table.TableArn))
 			if err != nil {
+				p.warnf("warn: list tags for dynamodb table %s: %v\n", name, err)
 				continue
 			}
 			missing := missingTags(required, tagMap)
@@ -441,6 +451,7 @@ func (p *Provider) auditSNSTags(ctx context.Context, required []string) ([]cloud
 			}
 			tagsOut, err := p.sns.ListTagsForResource(ctx, &sns.ListTagsForResourceInput{ResourceArn: awssdk.String(arn)})
 			if err != nil {
+				p.warnf("warn: list tags for sns topic %s: %v\n", arn, err)
 				continue
 			}
 			tagMap := make(map[string]struct{}, len(tagsOut.Tags))
@@ -484,6 +495,7 @@ func (p *Provider) auditSQSTags(ctx context.Context, required []string) ([]cloud
 		for _, url := range listed.QueueUrls {
 			tagsOut, err := p.sqs.ListQueueTags(ctx, &sqs.ListQueueTagsInput{QueueUrl: awssdk.String(url)})
 			if err != nil {
+				p.warnf("warn: list tags for sqs queue %s: %v\n", url, err)
 				continue
 			}
 			tagMap := make(map[string]struct{}, len(tagsOut.Tags))

@@ -51,7 +51,7 @@ func (p *Provider) listCertificatesInRegion(ctx context.Context) ([]cloud.CertFi
 				CertificateArn: awssdk.String(arn),
 			})
 			if err != nil {
-				// Skip certs we can't describe
+				p.warnf("warn: describe certificate %s: %v\n", arn, err)
 				continue
 			}
 			cert := detail.Certificate

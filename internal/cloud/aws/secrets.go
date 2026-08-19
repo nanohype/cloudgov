@@ -128,6 +128,7 @@ func (p *Provider) scanECSSecrets(ctx context.Context) ([]cloud.SecretFinding, e
 				TaskDefinition: awssdk.String(arn),
 			})
 			if err != nil {
+				p.warnf("warn: describe task definition %s: %v\n", arn, err)
 				continue
 			}
 			td := descOut.TaskDefinition
@@ -178,6 +179,7 @@ func (p *Provider) scanEC2UserDataSecrets(ctx context.Context) ([]cloud.SecretFi
 					Attribute:  ec2types.InstanceAttributeNameUserData,
 				})
 				if err != nil {
+					p.warnf("warn: read user data for instance %s: %v\n", instID, err)
 					continue
 				}
 				if attrOut.UserData == nil || attrOut.UserData.Value == nil {
@@ -185,6 +187,7 @@ func (p *Provider) scanEC2UserDataSecrets(ctx context.Context) ([]cloud.SecretFi
 				}
 				decoded, err := base64.StdEncoding.DecodeString(awssdk.ToString(attrOut.UserData.Value))
 				if err != nil {
+					p.warnf("warn: decode user data for instance %s: %v\n", instID, err)
 					continue
 				}
 				userData := string(decoded)
@@ -226,6 +229,7 @@ func (p *Provider) scanSSMSecrets(ctx context.Context) ([]cloud.SecretFinding, e
 				Name: awssdk.String(name),
 			})
 			if err != nil {
+				p.warnf("warn: get ssm parameter %s: %v\n", name, err)
 				continue
 			}
 			val := awssdk.ToString(getOut.Parameter.Value)
@@ -263,6 +267,7 @@ func (p *Provider) scanCloudFormationSecrets(ctx context.Context) ([]cloud.Secre
 				StackName: awssdk.String(stackName),
 			})
 			if err != nil {
+				p.warnf("warn: describe stack %s: %v\n", stackName, err)
 				continue
 			}
 			for _, stack := range descOut.Stacks {
