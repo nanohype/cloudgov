@@ -162,7 +162,8 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 			for _, ap := range page.AttachedPolicies {
 				ps, err := p.getManagedPolicyPermissions(ctx, awssdk.ToString(ap.PolicyArn))
 				if err != nil {
-					continue // best-effort
+					p.warnf("warn: read managed policy %s for role %s: %v\n", awssdk.ToString(ap.PolicyArn), principal.Name, err)
+					continue
 				}
 				perms = append(perms, ps...)
 			}
@@ -183,10 +184,12 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 					PolicyName: awssdk.String(policyName),
 				})
 				if err != nil {
+					p.warnf("warn: read inline policy %s for role %s: %v\n", policyName, principal.Name, err)
 					continue
 				}
 				doc, err := parseDocument(awssdk.ToString(out.PolicyDocument))
 				if err != nil {
+					p.warnf("warn: parse inline policy %s for role %s: %v\n", policyName, principal.Name, err)
 					continue
 				}
 				perms = append(perms, documentToPermissions(doc)...)
@@ -207,6 +210,7 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 			for _, ap := range page.AttachedPolicies {
 				ps, err := p.getManagedPolicyPermissions(ctx, awssdk.ToString(ap.PolicyArn))
 				if err != nil {
+					p.warnf("warn: read managed policy %s for user %s: %v\n", awssdk.ToString(ap.PolicyArn), principal.Name, err)
 					continue
 				}
 				perms = append(perms, ps...)
@@ -228,10 +232,12 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 					PolicyName: awssdk.String(policyName),
 				})
 				if err != nil {
+					p.warnf("warn: read inline policy %s for user %s: %v\n", policyName, principal.Name, err)
 					continue
 				}
 				doc, err := parseDocument(awssdk.ToString(out.PolicyDocument))
 				if err != nil {
+					p.warnf("warn: parse inline policy %s for user %s: %v\n", policyName, principal.Name, err)
 					continue
 				}
 				perms = append(perms, documentToPermissions(doc)...)
