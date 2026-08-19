@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"strings"
 )
 
 // roundTrip encodes via fn into a buffer, then decodes into T.
@@ -421,5 +422,65 @@ func TestWriteCostMultipleProviders(t *testing.T) {
 		if d.TotalDelta != deltas[i] {
 			t.Errorf("diffs[%d].TotalDelta: got %f, want %f", i, d.TotalDelta, deltas[i])
 		}
+	}
+}
+
+// TestReportsCarryIncompleteIndependentOfFlags pins the second half of the
+// contract: the JSON `incomplete` array is populated at observation time, not on
+// the same path as the stderr message.
+//
+// --quiet routes the provider's warning copy to io.Discard and --fail-on decides
+// whether the run is a gate. Neither is allowed to reach the report: a script
+// running `--quiet --output json` is exactly the consumer that has nothing but
+// the payload to tell a clean account from an unreadable one.
+func TestReportsCarryIncompleteIndependentOfFlags(t *testing.T) {
+	incomplete := []string{"describe regions: AccessDenied; scanned us-east-1 only"}
+
+	writers := map[string]func(w *bytes.Buffer) error{
+		"certs":     func(w *bytes.Buffer) error { return WriteCerts(w, nil, incomplete) },
+		"network":   func(w *bytes.Buffer) error { return WriteNetwork(w, nil, incomplete) },
+		"tags":      func(w *bytes.Buffer) error { return WriteTags(w, nil, incomplete) },
+		"secrets":   func(w *bytes.Buffer) error { return WriteSecrets(w, nil, incomplete) },
+		"orphans":   func(w *bytes.Buffer) error { return WriteOrphans(w, nil, incomplete) },
+		"quota":     func(w *bytes.Buffer) error { return WriteQuotas(w, nil, incomplete) },
+		"inventory": func(w *bytes.Buffer) error { return WriteInventory(w, nil, incomplete) },
+		"lambda":    func(w *bytes.Buffer) error { return WriteLambdaPolicy(w, nil, incomplete) },
+		"cost":      func(w *bytes.Buffer) error { return WriteCost(w, nil, incomplete) },
+		"drift":     func(w *bytes.Buffer) error { return WriteDrift(w, nil, incomplete) },
+		"iam":       func(w *bytes.Buffer) error { return WriteIAM(w, nil, 0, nil, incomplete) },
+		"storage":   func(w *bytes.Buffer) error { return WriteStorage(w, nil, incomplete) },
+	}
+
+	for name, write := range writers {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := write(&buf); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+
+			var got map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			arr, ok := got["incomplete"].([]any)
+			if !ok {
+				t.Fatalf("report has no incomplete array; a partial scan reports as clean.\n%s", buf.String())
+			}
+			if len(arr) != 1 || !strings.Contains(arr[0].(string), "AccessDenied") {
+				t.Errorf("incomplete array should carry the observation, got %v", arr)
+			}
+		})
+	}
+}
+
+// A report with nothing unread must not carry an empty array — omitempty keeps
+// "saw everything" and "saw nothing" textually distinct for a consumer.
+func TestReportsOmitIncompleteWhenComplete(t *testing.T) {
+	var buf bytes.Buffer
+	if err := WriteCerts(&buf, nil, nil); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if strings.Contains(buf.String(), "incomplete") {
+		t.Errorf("a complete scan should omit the incomplete key entirely, got %s", buf.String())
 	}
 }
