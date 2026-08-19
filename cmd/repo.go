@@ -53,11 +53,20 @@ var (
 )
 
 func init() {
-	repoCmd.PersistentFlags().StringVar(&repoOrg, "org", "nanohype", "GitHub organization")
+	// No default organization. A default here does not save a keystroke, it picks
+	// a target: `gh repo list` succeeds against any public org, so a bare
+	// `cloudgov repo audit` would sweep whichever organization was compiled in
+	// and report findings about repositories the caller does not own.
+	repoCmd.PersistentFlags().StringVar(&repoOrg, "org", "", "GitHub organization to audit")
 	repoCmd.PersistentFlags().StringVar(&repoExpectedFile, "expected", "expected-repo-settings.yaml",
 		"path to the committed expected settings")
 	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", "table", "output format: table, json")
 	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", "minimum severity to report")
+
+	// Marked required so cobra rejects the omission by name. Without this an
+	// empty org reaches checkName and fails with `org "" is not a valid GitHub
+	// name`, which describes the value rather than the missing flag.
+	_ = repoCmd.MarkPersistentFlagRequired("org")
 
 	repoCmd.AddCommand(repoAuditCmd)
 }
