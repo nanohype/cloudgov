@@ -49,6 +49,9 @@ func runQuota(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	incomplete := cloud.Incomplete(providers)
+	gateIncomplete(incomplete)
+
 	w := os.Stdout
 	if quotaOutputFile != "" {
 		f, err := os.Create(quotaOutputFile)
@@ -61,7 +64,7 @@ func runQuota(cmd *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(quotaOutputFmt) {
 	case "json":
-		return output.WriteQuotas(w, quotas)
+		return output.WriteQuotas(w, quotas, incomplete)
 	default:
 		summary := quota.Summarize(quotas)
 		if !quiet {

@@ -53,6 +53,9 @@ func runInventory(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	incomplete := cloud.Incomplete(providers)
+	gateIncomplete(incomplete)
+
 	w := os.Stdout
 	if inventoryOutputFile != "" {
 		f, err := os.Create(inventoryOutputFile)
@@ -65,7 +68,7 @@ func runInventory(cmd *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(inventoryOutputFmt) {
 	case "json":
-		return output.WriteInventory(w, resources)
+		return output.WriteInventory(w, resources, incomplete)
 	default:
 		if !quiet {
 			summary := inventory.Summarize(resources)

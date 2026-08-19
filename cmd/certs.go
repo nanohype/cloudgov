@@ -58,11 +58,13 @@ func runCerts(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	incomplete := cloud.Incomplete(providers)
 	gate(findings, func(f cloud.CertFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	switch strings.ToLower(certsOutputFmt) {
 	case "json":
-		return output.WriteCerts(w, findings)
+		return output.WriteCerts(w, findings, incomplete)
 	case "sarif":
 		return output.WriteCertsSARIF(w, findings, Version)
 	default:

@@ -52,6 +52,9 @@ func runCostDiff(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	incomplete := cloud.Incomplete(providers)
+	gateIncomplete(incomplete)
+
 	w := os.Stdout
 	if costOutputFile != "" {
 		f, err := os.Create(costOutputFile)
@@ -64,7 +67,7 @@ func runCostDiff(cmd *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(costOutputFmt) {
 	case "json":
-		return output.WriteCost(w, diffs)
+		return output.WriteCost(w, diffs, incomplete)
 	default:
 		output.CostDiffs(w, diffs)
 	}

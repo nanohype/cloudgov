@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/nanohype/cloudgov/internal/audit"
 	"github.com/nanohype/cloudgov/internal/certs"
@@ -26,6 +28,7 @@ import (
 	"github.com/nanohype/cloudgov/internal/output"
 	"github.com/nanohype/cloudgov/internal/platform"
 	"github.com/nanohype/cloudgov/internal/quota"
+	"github.com/nanohype/cloudgov/internal/repo"
 	"github.com/nanohype/cloudgov/internal/secrets"
 	"github.com/nanohype/cloudgov/internal/storage"
 	"github.com/nanohype/cloudgov/internal/tags"
@@ -125,6 +128,12 @@ type complianceInput struct {
 	TagsReport    string `json:"tags_report,omitempty"`
 }
 
+type repoInput struct {
+	Org      string `json:"org,omitempty" jsonschema:"GitHub organization (default nanohype)"`
+	Expected string `json:"expected,omitempty" jsonschema:"path to the expected-repo-settings YAML (default expected-repo-settings.yaml)"`
+	Severity string `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
+}
+
 // registerMCPTools wires every scan/audit operation as an MCP tool. Each handler
 // reuses the same resolve*Providers helpers and internal scanners as the CLI and
 // returns the identical JSON report.
@@ -173,7 +182,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteNetwork(w, findings) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteNetwork(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "certs", Description: "List TLS certificates (ACM) expiring within a threshold."},
@@ -186,7 +196,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteCerts(w, findings) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteCerts(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "tags", Description: "Find AWS resources missing required tags."},
@@ -199,7 +210,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteTags(w, findings) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteTags(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "secrets_scan", Description: "Scan AWS runtime config (Lambda env, ECS task defs, EC2 user data) for embedded secrets, including leaked third-party cloud credentials."},
@@ -212,7 +224,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteSecrets(w, findings) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteSecrets(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "orphans", Description: "Find unused AWS resources (unattached disks, idle IPs, idle load balancers) wasting money."},
@@ -225,7 +238,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteOrphans(w, res) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteOrphans(w, res, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "quota", Description: "Report AWS service quota utilization vs limits."},
@@ -238,7 +252,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteQuotas(w, res) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteQuotas(w, res, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "inventory", Description: "List AWS resources across types with region, tags, and creation date."},
@@ -251,7 +266,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteInventory(w, res) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteInventory(w, res, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "cost_diff", Description: "Compare AWS spend between two time windows and surface per-service deltas."},
@@ -264,7 +280,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteCost(w, diffs) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteCost(w, diffs, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "drift", Description: "Compare a Terraform state file against live AWS resources to detect drift."},
@@ -281,7 +298,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteDrift(w, results) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteDrift(w, results, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "audit", Description: "Run the full security + cost audit (IAM, storage, network, orphans, certs, tags, secrets) in one shot."},
@@ -325,16 +343,53 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "lambda_audit", Description: "Audit AWS Lambda resource-based policies for public-invoke and confused-deputy risk."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
-			p, err := cloudaws.New(ctx)
+			providers, err := resolveLambdaPolicyProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := p.AuditLambdaPolicies(ctx)
-			if err != nil {
-				return nil, nil, err
+			var findings []cloud.LambdaPolicyFinding
+			for _, p := range providers {
+				found, err := p.AuditLambdaPolicies(ctx)
+				if err != nil {
+					return nil, nil, fmt.Errorf("%s: %w", p.Name(), err)
+				}
+				findings = append(findings, found...)
 			}
 			findings = filterLambdaBySeverity(findings, mcpSeverity(in.Severity))
-			return jsonResult(func(w io.Writer) error { return output.WriteLambdaPolicy(w, findings) })
+			incomplete := cloud.Incomplete(providers)
+			return jsonResult(func(w io.Writer) error { return output.WriteLambdaPolicy(w, findings, incomplete) })
+		})
+
+	mcp.AddTool(s, &mcp.Tool{Name: "repo_audit", Description: "Audit GitHub branch protection, required checks and Dependabot state against the committed expected shape."},
+		func(ctx context.Context, _ *mcp.CallToolRequest, in repoInput) (*mcp.CallToolResult, any, error) {
+			org := in.Org
+			if org == "" {
+				org = "nanohype"
+			}
+			expectedPath := in.Expected
+			if expectedPath == "" {
+				expectedPath = "expected-repo-settings.yaml"
+			}
+			raw, err := os.ReadFile(expectedPath)
+			if err != nil {
+				return nil, nil, fmt.Errorf("read expected settings: %w", err)
+			}
+			var exp repo.Expected
+			if err := yaml.Unmarshal(raw, &exp); err != nil {
+				return nil, nil, fmt.Errorf("parse %s: %w", expectedPath, err)
+			}
+			findings, err := repo.Audit(ctx, repo.NewGHReader(), org, exp)
+			if err != nil {
+				return nil, nil, err
+			}
+			minRank := cloud.SeverityRank(mcpSeverity(in.Severity))
+			var kept []cloud.RepoFinding
+			for _, f := range findings {
+				if cloud.SeverityRank(f.Severity) >= minRank {
+					kept = append(kept, f)
+				}
+			}
+			return jsonResult(func(w io.Writer) error { return output.WriteRepo(w, kept) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "compliance", Description: "Map prior scan JSON reports to a compliance benchmark (cis-aws-v3 or soc2)."},

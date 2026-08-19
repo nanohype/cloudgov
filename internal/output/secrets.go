@@ -54,9 +54,13 @@ func SecretFindings(w io.Writer, findings []cloud.SecretFinding) {
 type secretsReport struct {
 	Findings []cloud.SecretFinding `json:"findings"`
 	Total    int                   `json:"total"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteSecrets marshals secret findings as JSON to w.
-func WriteSecrets(w io.Writer, findings []cloud.SecretFinding) error {
-	return writeJSON(w, secretsReport{Findings: findings, Total: len(findings)})
+func WriteSecrets(w io.Writer, findings []cloud.SecretFinding, incomplete []string) error {
+	return writeJSON(w, secretsReport{Findings: findings, Total: len(findings), Incomplete: incomplete})
 }

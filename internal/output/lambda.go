@@ -51,9 +51,13 @@ func LambdaPolicyFindings(w io.Writer, findings []cloud.LambdaPolicyFinding) {
 type lambdaPolicyReport struct {
 	Findings []cloud.LambdaPolicyFinding `json:"findings"`
 	Total    int                         `json:"total"`
+
+	// Incomplete is what this scan could not read. An empty findings list with a
+	// non-empty Incomplete is "could not tell", not "nothing to report".
+	Incomplete []string `json:"incomplete,omitempty"`
 }
 
 // WriteLambdaPolicy marshals Lambda resource-policy findings as JSON to w.
-func WriteLambdaPolicy(w io.Writer, findings []cloud.LambdaPolicyFinding) error {
-	return writeJSON(w, lambdaPolicyReport{Findings: findings, Total: len(findings)})
+func WriteLambdaPolicy(w io.Writer, findings []cloud.LambdaPolicyFinding, incomplete []string) error {
+	return writeJSON(w, lambdaPolicyReport{Findings: findings, Total: len(findings), Incomplete: incomplete})
 }

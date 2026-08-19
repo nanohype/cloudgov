@@ -70,7 +70,9 @@ func runDrift(cmd *cobra.Command, args []string) error {
 			break
 		}
 	}
+	incomplete := cloud.Incomplete(providers)
 	gateBool(drifted)
+	gateIncomplete(incomplete)
 
 	w := os.Stdout
 	if driftOutputFile != "" {
@@ -84,7 +86,7 @@ func runDrift(cmd *cobra.Command, args []string) error {
 
 	switch strings.ToLower(driftOutputFmt) {
 	case "json":
-		return output.WriteDrift(w, results)
+		return output.WriteDrift(w, results, incomplete)
 	case "sarif":
 		return output.WriteDriftSARIF(w, results, Version)
 	default:

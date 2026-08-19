@@ -62,11 +62,13 @@ func runSecretsScan(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	incomplete := cloud.Incomplete(providers)
 	gate(findings, func(f cloud.SecretFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(incomplete)
 
 	switch strings.ToLower(secretsOutputFmt) {
 	case "json":
-		return output.WriteSecrets(w, findings)
+		return output.WriteSecrets(w, findings, incomplete)
 	case "sarif":
 		return output.WriteSecretsSARIF(w, findings, Version)
 	default:

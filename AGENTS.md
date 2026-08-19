@@ -69,10 +69,31 @@ dropped, so a scan run with partial permissions must be distinguishable from a
 scan that found nothing. What could not be read is listed on stderr and in the
 JSON report's `incomplete` array.
 
+**Scope of the contract, stated exactly.** Every command that reads a cloud
+account honours it — all 13: `audit`, `iam scan`, `storage audit`,
+`network audit`, `certs`, `tags`, `secrets scan`, `orphans`, `quota`,
+`inventory`, `cost diff`, `drift`, `lambda audit`. A conformance test
+(`cmd/incomplete_contract_test.go`) fails the build if a command resolves a
+cloud provider without gating on what that provider could not read, so a new
+command cannot quietly drop out of it.
+
+It does not apply to commands that read no cloud account: `compare`, `report`,
+`baseline`, `remediate`, `compliance` and `repo audit` work from files or the
+GitHub API, and `k8s rbac` / `platform audit` read a cluster whose client
+reports errors rather than partial observations. Those exit 0/1/2 only.
+
+Exit `3` requires `--fail-on`. Passing it is what declares the run a gate;
+without it the run is informational and the incompletions are reported on stderr
+and in the JSON without changing the exit code.
+
+Over MCP there is no exit code, so the `incomplete` array in the response is the
+only carrier. Every tool that reads a cloud account populates it.
+
 JSON report schemas are Go structs in `internal/output/<domain>.go` — one typed
 envelope per domain (`iamReport`, `storageReport`, …), sharing the writer in
-`internal/output/jsoncore.go`. SARIF is emitted by iam,
-storage, network, certs, secrets, audit, k8s, lambda, compliance, and drift.
+`internal/output/jsoncore.go`. SARIF is emitted by iam, storage, certs, secrets, audit, k8s, lambda,
+platform, compliance, and drift. `network`, `tags`, `orphans`, `quota`,
+`inventory`, `cost diff` and `repo audit` emit `table` and `json` only.
 
 ## Use in the fab merge-gate
 

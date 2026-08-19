@@ -883,12 +883,39 @@ regardless, and their findings are stamped `global`. A bucket's own region comes
 from the bucket, since `ListBuckets` is account-global and returns no location.
 
 If the region set cannot be discovered, the scan narrows to the configured
-region and records that as an incomplete observation: the run reports exit code
-3 rather than presenting a one-region result as an account sweep.
+region and records that as an incomplete observation, so a one-region result is
+never presented as an account sweep. With `--fail-on` set, that run exits 3.
 
 `drift` is not fanned out. It compares named resources against a Terraform state
 file you supply, so its scope is that file's, and querying every region for one
 resource ID would return not-found from all the others.
+
+---
+
+## Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0` | Clean — the scan saw everything it was asked to and found nothing at or above `--fail-on` |
+| `1` | Command error — bad flags, unreadable file, no credentials, an API call that failed outright |
+| `2` | A finding met or exceeded `--fail-on` |
+| `3` | The scan could not observe everything it was asked to, so the result is not evidence either way |
+
+Exit `2` and `3` require `--fail-on`. Passing it is what declares the run a gate;
+without it a run is informational and exits `0` or `1` only. Incomplete
+observations are still reported on stderr and in the JSON `incomplete` array
+either way — `--quiet` silences the stderr copy, not the record.
+
+Exit `3` exists because `0` gets read as evidence *for* approval. A denied
+`GetBucketVersioning` looks exactly like a versioned bucket if the error is
+dropped, so a scan run with partial permissions has to be distinguishable from
+one that found nothing.
+
+**Every command that reads a cloud account honours this** — `audit`, `iam scan`,
+`storage audit`, `network audit`, `certs`, `tags`, `secrets scan`, `orphans`,
+`quota`, `inventory`, `cost diff`, `drift`, and `lambda audit`. Commands that
+read no cloud account (`compare`, `report`, `baseline`, `remediate`,
+`compliance`, `repo audit`, `k8s rbac`, `platform audit`) exit `0`/`1`/`2` only.
 
 ---
 

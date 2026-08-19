@@ -45,6 +45,9 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	incomplete := cloud.Incomplete(providers)
+	gateIncomplete(incomplete)
+
 	w := os.Stdout
 	if orphanOutputFile != "" {
 		f, err := os.Create(orphanOutputFile)
@@ -57,7 +60,7 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 
 	switch strings.ToLower(orphanOutputFmt) {
 	case "json":
-		return output.WriteOrphans(w, orphans)
+		return output.WriteOrphans(w, orphans, incomplete)
 	default:
 		total := orphanscanner.TotalMonthlyCost(orphans)
 		if !quiet {
