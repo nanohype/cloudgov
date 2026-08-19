@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -57,12 +58,12 @@ func NewGHReader() *GHReader {
 	}}
 }
 
+// asExitError unwraps to *exec.ExitError. errors.As rather than a type assertion:
+// an assertion only matches when the ExitError is the outermost error, so any
+// wrapping upstream silently turns "gh failed with this stderr" into the generic
+// branch and the actual diagnostic is dropped.
 func asExitError(err error, target **exec.ExitError) bool {
-	if ee, ok := err.(*exec.ExitError); ok {
-		*target = ee
-		return true
-	}
-	return false
+	return errors.As(err, target)
 }
 
 // ListRepos returns every non-archived repository in the org.

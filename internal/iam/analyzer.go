@@ -83,7 +83,6 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 	g, gctx := errgroup.WithContext(ctx)
 
 	for _, p := range toScan {
-		p := p // capture loop variable
 		sem <- struct{}{}
 		g.Go(func() error {
 			defer func() {

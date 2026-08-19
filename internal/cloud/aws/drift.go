@@ -142,12 +142,21 @@ func (p *Provider) checkS3BucketDrift(ctx context.Context, bucketName string, at
 		Bucket: awssdk.String(bucketName),
 	})
 	if err != nil {
-		return cloud.DriftResult{
-			ResourceType: "aws_s3_bucket",
-			ResourceID:   bucketName,
-			Status:       cloud.DriftDeleted,
-			Detail:       "S3 bucket not found or not accessible",
-		}, nil
+		// "not found" and "not allowed to look" are different facts and must not
+		// share a status. Reporting a denied HeadBucket as DELETED tells the
+		// operator their bucket is gone and invites them to re-create declared
+		// state that is, in fact, still there. Only a genuine 404 is deletion;
+		// anything else is an unread resource, which is what DriftError is for.
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && (apiErr.ErrorCode() == "NotFound" || apiErr.ErrorCode() == "NoSuchBucket") {
+			return cloud.DriftResult{
+				ResourceType: "aws_s3_bucket",
+				ResourceID:   bucketName,
+				Status:       cloud.DriftDeleted,
+				Detail:       "S3 bucket not found in AWS",
+			}, nil
+		}
+		return cloud.DriftResult{}, fmt.Errorf("head bucket %s: %w", bucketName, err)
 	}
 
 	// Check versioning
