@@ -16,6 +16,7 @@ import (
 	rdstypes "github.com/aws/aws-sdk-go-v2/service/rds/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	smithy "github.com/aws/smithy-go"
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
@@ -232,11 +233,45 @@ func TestCheckIAMPolicyDrift_InSync(t *testing.T) {
 	}
 }
 
-func TestCheckS3BucketDrift_DeletedOnHeadFailure(t *testing.T) {
-	p := &Provider{s3: &driftMockS3{headErr: errors.New("not found")}}
-	got, _ := p.CheckDrift(context.Background(), "aws_s3_bucket", "missing", nil)
-	if got.Status != cloud.DriftDeleted {
-		t.Errorf("status: got %v, want DriftDeleted", got.Status)
+// A real 404 is the only shape that means the bucket is gone.
+func TestCheckS3BucketDrift_DeletedOnNotFound(t *testing.T) {
+	for _, code := range []string{"NotFound", "NoSuchBucket"} {
+		t.Run(code, func(t *testing.T) {
+			p := &Provider{s3: &driftMockS3{headErr: &smithy.GenericAPIError{Code: code, Message: "gone"}}}
+			got, err := p.CheckDrift(context.Background(), "aws_s3_bucket", "missing", nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.Status != cloud.DriftDeleted {
+				t.Errorf("status: got %v, want DriftDeleted", got.Status)
+			}
+		})
+	}
+}
+
+// Everything else is an unread bucket, not a deleted one. Reporting a denied
+// HeadBucket as DELETED tells the operator their declared bucket is gone and
+// invites them to re-create state that is still there — the same
+// denied-looks-like-clean failure this tool exists to catch, inverted.
+func TestCheckS3BucketDrift_UnreadableIsNotDeleted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"access denied", &smithy.GenericAPIError{Code: "AccessDenied", Message: "denied"}},
+		{"forbidden", &smithy.GenericAPIError{Code: "Forbidden", Message: "403"}},
+		{"transport failure", errors.New("connection reset")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Provider{s3: &driftMockS3{headErr: tc.err}}
+			got, err := p.CheckDrift(context.Background(), "aws_s3_bucket", "mybucket", nil)
+			if err == nil {
+				t.Fatal("an unreadable bucket must return an error, not a drift verdict")
+			}
+			if got.Status == cloud.DriftDeleted {
+				t.Error("an unreadable bucket must never be reported as DELETED")
+			}
+		})
 	}
 }
 

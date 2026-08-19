@@ -11,7 +11,30 @@ formatters:
   enable:
     - gofmt
 
+# golangci-lint truncates to 50 issues per linter and 3 per identical message by
+# default, and a truncated run still exits the same way a complete one does. For a
+# repo whose own gates were passing vacuously, a linter that silently stops
+# reporting is the same failure wearing a different hat, so nothing is capped.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
 linters:
+  # Without an explicit enable list, golangci-lint v2 runs its default five
+  # (errcheck, govet, ineffassign, staticcheck, unused) and nothing else. That
+  # default set has no opinion about error wrapping or about a branch that checks
+  # an error and then discards it — which is exactly the class this codebase cares
+  # about, since a dropped probe error is what makes a denied read indistinguishable
+  # from a clean resource.
+  enable:
+    - errorlint     # %v on an error where %w is meant; errors.Is/As over ==
+    - nilerr        # checked the error, returned nil anyway
+    - unconvert     # redundant conversions
+    - wastedassign  # value assigned and never read
+    - copyloopvar   # stale loop-variable capture
+    - misspell
+    - bidichk       # bidi control runes in source
+
   settings:
     errcheck:
       # The fmt.Fprint* family (writes to stdout/stderr/tabwriter/strings.Builder)
