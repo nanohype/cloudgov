@@ -86,7 +86,7 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	// unexamined.
 	var roles platform.IdentityReader
 	var awsProviders []*cloudaws.Provider
-	if awsP, aerr := cloudaws.New(ctx, cloudaws.WithQuiet(quiet)); aerr == nil && awsP.Detect(ctx) {
+	if awsP, aerr := cloudaws.New(ctx, awsProviderOptions()...); aerr == nil && awsP.Detect(ctx) {
 		roles = awsP
 		awsProviders = append(awsProviders, awsP)
 	}

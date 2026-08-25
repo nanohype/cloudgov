@@ -222,3 +222,115 @@ func TestEstateValueDetectorFindsEachValuePosition(t *testing.T) {
 		}
 	}
 }
+
+// Run-scoped flags must reach every command, including the two that construct a
+// provider directly.
+//
+// `--regions` and `--quiet` are set once on the root and are meaningless unless
+// every provider is built with them. Two commands needed a concrete
+// *cloudaws.Provider — the Platform auditor and its MCP handler — and called
+// cloudaws.New themselves with at most WithQuiet, so `platform audit --regions`
+// accepted the flag, documented it, and scanned every region anyway.
+//
+// The rule is not "never call cloudaws.New": it is that a call must take the
+// shared option set, so a flag added to the root reaches these two the same way
+// it reaches the twelve that resolve by capability.
+func TestEveryDirectProviderConstructionTakesTheSharedOptions(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+
+	calls := 0
+	offenders := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel == nil || sel.Sel.Name != "New" {
+				return true
+			}
+			pkg, ok := sel.X.(*ast.Ident)
+			if !ok || pkg.Name != "cloudaws" {
+				return true
+			}
+			calls++
+			if !usesSharedAWSOptions(call) {
+				offenders++
+				t.Errorf("%s:%d constructs the AWS provider without awsProviderOptions(); "+
+					"a run-scoped flag such as --regions is accepted, documented, and silently "+
+					"ignored by this command", name, fset.Position(call.Pos()).Line)
+			}
+			return true
+		})
+	}
+
+	if calls == 0 {
+		t.Fatal("no direct AWS provider construction found in cmd/; the detector has stopped reading the source")
+	}
+	t.Logf("examined %d direct construction(s), %d without the shared options", calls, offenders)
+}
+
+func usesSharedAWSOptions(call *ast.CallExpr) bool {
+	for _, arg := range call.Args {
+		inner, ok := arg.(*ast.CallExpr)
+		if !ok {
+			continue
+		}
+		if ident, ok := inner.Fun.(*ast.Ident); ok && ident.Name == "awsProviderOptions" {
+			return true
+		}
+	}
+	return false
+}
+
+// The detector must find a bare construction, or the sweep above proves nothing.
+func TestDirectConstructionDetectorFindsABareCall(t *testing.T) {
+	fset := token.NewFileSet()
+	src := "package cmd\n\n" +
+		"func good() { _, _ = cloudaws.New(ctx, awsProviderOptions()...) }\n" +
+		"func bare() { _, _ = cloudaws.New(ctx) }\n" +
+		"func alsoBare() { _, _ = cloudaws.New(ctx, cloudaws.WithQuiet(true)) }\n"
+	file, err := parser.ParseFile(fset, "probe.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse probe: %v", err)
+	}
+	total, bare := 0, 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel == nil || sel.Sel.Name != "New" {
+			return true
+		}
+		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "cloudaws" {
+			return true
+		}
+		total++
+		if !usesSharedAWSOptions(call) {
+			bare++
+		}
+		return true
+	})
+	if total != 3 {
+		t.Fatalf("found %d construction(s) in a fixture with three", total)
+	}
+	if bare != 2 {
+		t.Errorf("found %d bare construction(s) in a fixture with exactly two — one with no options "+
+			"and one passing an option directly instead of the shared set", bare)
+	}
+}

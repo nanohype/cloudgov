@@ -470,7 +470,7 @@ func registerMCPTools(s *mcp.Server) {
 			}
 			var roles platform.IdentityReader
 			var awsProviders []*cloudaws.Provider
-			if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
+			if awsP, aerr := cloudaws.New(ctx, awsProviderOptions()...); aerr == nil && awsP.Detect(ctx) {
 				roles = awsP
 				awsProviders = append(awsProviders, awsP)
 			}
@@ -558,23 +558,6 @@ func jsonResult(write func(io.Writer) error) (*mcp.CallToolResult, any, error) {
 		return nil, nil, err
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: buf.String()}}}, nil, nil
-}
-
-// mcpClusterOptions decides what a caller-named kubeconfig is allowed to do.
-//
-// A kubeconfig can authenticate by running an exec credential plugin, and the
-// command it runs is named by the file. Over the CLI the operator typed the
-// path, so the file and the process are already under the same authority. Over
-// MCP the path is a tool argument — model output — reaching a process that
-// holds live AWS credentials, so a named file must not be able to choose which
-// binary runs. An empty argument names no file: the server falls back to its
-// own kubeconfig chain, which is the operator's, and an exec plugin there is
-// the operator's own choice.
-func mcpClusterOptions(kubeconfig string) []cloudk8s.Option {
-	if kubeconfig == "" {
-		return nil
-	}
-	return []cloudk8s.Option{cloudk8s.WithoutExecCredentials()}
 }
 
 // resolveMCPSeverity resolves a tool's `severity` argument, defaulting to LOW.

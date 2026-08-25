@@ -66,6 +66,12 @@ var (
 // legitimately do not call gateIncomplete, each with the reason. Adding a name
 // here is a deliberate act that shows up in review; forgetting the call is not.
 var exemptFromIncompleteGate = map[string]string{
+	"mcp_cluster.go": "Declares no command and resolves nothing. It holds one pure function — " +
+		"the exec-credential guard — which imports the Kubernetes package and is therefore matched " +
+		"by an import-based rule that is asking about command handlers. The per-handler check " +
+		"(TestEveryProviderResolvingHandlerGatesOnIncomplete) asks the question at the right " +
+		"granularity and covers this file's contents.",
+
 	// The MCP server has no exit code to set — it is a request/response surface,
 	// so the incomplete record travels in the JSON payload instead. Its tools are
 	// covered by TestMCPToolsCarryIncomplete below.

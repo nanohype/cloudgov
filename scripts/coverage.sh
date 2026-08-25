@@ -30,7 +30,16 @@ profile="${1:-coverage.out}"
 floors_file=".coverage-floors"
 module="github.com/nanohype/cloudgov"
 
-out=$(go test ./... -coverprofile="$profile" -covermode=atomic -count=1)
+# Captured to be parsed, and printed either way. Under `set -e` a failing `go
+# test` aborted here with the output still inside $out, so the gate exited 1
+# having printed NOTHING on either stream — the reader is told the coverage gate
+# failed and not which test did.
+if ! out=$(go test ./... -coverprofile="$profile" -covermode=atomic -count=1 2>&1); then
+  printf '%s\n' "$out"
+  echo "== coverage NOT met ==" >&2
+  echo "error: the test run failed, so there is no coverage to measure." >&2
+  exit 1
+fi
 echo "$out"
 
 total=$(go tool cover -func="$profile" | awk '/^total:/ {gsub(/%/,"",$3); print $3}')

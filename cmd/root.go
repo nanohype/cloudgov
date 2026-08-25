@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,21 @@ var regions []string
 // providers. Commands resolve through this rather than assembling the list
 // themselves, so a run-scoped flag reaches every command by construction — a
 // scan that silently missed one would report a narrower account than it read.
+// awsProviderOptions is the same set for the two places that must construct the
+// AWS provider directly rather than resolving by capability: the Platform
+// auditor and its MCP handler need a concrete *cloudaws.Provider to read tenant
+// IAM, which the capability interfaces do not express.
+//
+// It exists so those two are not the exception to the sentence above. They were:
+// both called cloudaws.New with at most WithQuiet, so `--regions` was accepted,
+// documented and silently ignored by `platform audit`.
+func awsProviderOptions(extra ...cloudaws.Option) []cloudaws.Option {
+	return append([]cloudaws.Option{
+		cloudaws.WithQuiet(quiet),
+		cloudaws.WithRegions(regions),
+	}, extra...)
+}
+
 func providerOptions(extra ...providers.Option) []providers.Option {
 	return append([]providers.Option{
 		providers.WithQuiet(quiet),

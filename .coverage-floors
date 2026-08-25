@@ -36,6 +36,12 @@ file    cmd/gate.go                    100
 # evaluate.
 file    internal/compliance/evaluate.go  100
 file    internal/compliance/loader.go    100
+# The exec-credential guard: the whole control on whether a kubeconfig NAMED BY
+# THE MODEL may run an arbitrary command in a process holding live AWS
+# credentials. It sits in its own file because a package floor cannot reach it —
+# four lines inside cmd, which is at 17%, so it measured 0% while the package sat
+# above its floor.
+file    cmd/mcp_cluster.go               100
 
 # ── packages at or above the org floor ────────────────────────────────────────
 #
