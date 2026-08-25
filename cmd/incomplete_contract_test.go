@@ -1,9 +1,15 @@
 package cmd
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -37,16 +43,16 @@ var (
 	// (cloud.Severity, cloud.Finding), and compliance.go, gate.go, remediate.go
 	// and repo.go use it without reaching an account.
 	//
-	// THE LIMIT, STATED. This enumerates every command reaching an account BY
-	// THESE THREE IMPORT PATHS, which is narrower than "every command that
-	// reaches an account". They coincide only while no non-cmd package sits
-	// between a command and a provider — check with `go list -deps ./cmd`.
-	// Nothing enforces that: a new internal/scanner importing
-	// internal/cloud/aws, imported in turn by a command that imports neither
-	// provider package directly, escapes the population. That is the same shape
-	// this check exists to close, one level up. The durable form computes the
-	// population from the transitive import graph; this comment is the honest
-	// statement of what the check covers until it does.
+	// This enumerates every command reaching an account by these three import
+	// paths, which equals "every command that reaches an account" only while no
+	// intermediate package sits between a command and a provider.
+	//
+	// That condition is enforced rather than assumed:
+	// TestNoPackageStandsBetweenACommandAndAProvider fails if any package under
+	// internal/ other than the registry imports one. Without it, a new
+	// internal/scanner importing internal/cloud/aws and imported in turn by a
+	// handler would escape this population entirely — the same shape this check
+	// exists to close, one level up.
 	importsProviderPackage = regexp.MustCompile(`internal/cloud/aws"|internal/cloud/k8s"|internal/providers"`)
 	// The two halves of honouring the contract. A command either computes the
 	// incompletions itself via cloud.Incomplete, or gates on a report field fed
@@ -250,12 +256,48 @@ func TestAGENTSMCPTableMatchesRegisteredTools(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 
-	registered := map[string]bool{}
-	// Scoped to &mcp.Tool{Name: ...} so the server's own name is not mistaken
-	// for a tool.
-	for _, m := range regexp.MustCompile(`mcp\.Tool\{Name:[ \t]*"([a-z_0-9]+)"`).FindAllStringSubmatch(string(src), -1) {
-		registered[m[1]] = true
+	// The registration side is read from the AST, not from the source text.
+	//
+	// A regex over raw source counts a COMMENTED-OUT registration as registered.
+	// On its own that is a false positive, but paired with a table row nobody
+	// removed it becomes a cancellation: the tool stops existing, both sides
+	// still "have" it, and the gate stays green while an agent is told to call
+	// something that is not there. A comment is not an AST node, so parsing
+	// removes the whole shape.
+	fset := token.NewFileSet()
+	file, perr := parser.ParseFile(fset, "mcp.go", src, 0)
+	if perr != nil {
+		t.Fatalf("parse mcp.go: %v", perr)
 	}
+	registered := map[string]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		sel, ok := lit.Type.(*ast.SelectorExpr)
+		if !ok || sel.Sel == nil || sel.Sel.Name != "Tool" {
+			return true
+		}
+		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "mcp" {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); !ok || key.Name != "Name" {
+				continue
+			}
+			if v, ok := kv.Value.(*ast.BasicLit); ok && v.Kind == token.STRING {
+				if name, uerr := strconv.Unquote(v.Value); uerr == nil {
+					registered[name] = true
+				}
+			}
+		}
+		return true
+	})
 	if len(registered) == 0 {
 		t.Fatal("no registered MCP tools found; this check would pass vacuously")
 	}
@@ -280,5 +322,185 @@ func TestAGENTSMCPTableMatchesRegisteredTools(t *testing.T) {
 			t.Errorf("MCP tool %q is registered but absent from the AGENTS.md table: "+
 				"an agent choosing from the docs will never find it", name)
 		}
+	}
+}
+
+// No package sits between a command and a provider.
+//
+// TestEveryCloudCommandGatesOnIncomplete builds its population from DIRECT
+// imports of the three provider packages, which is narrower than "every command
+// that reaches an account". The two coincide only while no intermediate package
+// imports a provider and is itself imported by a command — a new
+// internal/scanner importing internal/cloud/aws, imported in turn by a handler
+// that imports neither provider package directly, would escape the population
+// entirely.
+//
+// That comment stated the limit for several revisions and enforced nothing, which
+// is the shape this repository keeps finding: a class named in prose is a
+// memorial, not a control. This is the control.
+//
+// The rule: only the registry may stand between a command and a provider. It
+// resolves by capability and every resolver in cmd/ is a one-liner over it, so
+// a command reaching a provider through anything else is a new architecture as
+// well as a new escape.
+func TestNoPackageStandsBetweenACommandAndAProvider(t *testing.T) {
+	const module = "github.com/nanohype/cloudgov"
+	providerPkgs := map[string]bool{
+		module + "/internal/cloud/aws": true,
+		module + "/internal/cloud/k8s": true,
+	}
+	// The registry exists to import providers; that is its whole job.
+	allowed := map[string]bool{
+		module + "/internal/providers": true,
+		module + "/internal/cloud/aws": true,
+		module + "/internal/cloud/k8s": true,
+		module + "/cmd":                true,
+	}
+
+	root := filepath.Join("..", "internal")
+	examined := 0
+	offenders := 0
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		examined++
+
+		fset := token.NewFileSet()
+		file, perr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if perr != nil {
+			return fmt.Errorf("parse %s: %w", path, perr)
+		}
+
+		// The package this file belongs to, as an import path.
+		dir := filepath.ToSlash(filepath.Dir(path))
+		pkg := module + strings.TrimPrefix(dir, "..")
+		if allowed[pkg] {
+			return nil
+		}
+
+		for _, imp := range file.Imports {
+			target, uerr := strconv.Unquote(imp.Path.Value)
+			if uerr != nil {
+				continue
+			}
+			if providerPkgs[target] {
+				offenders++
+				t.Errorf("%s imports %s. Only internal/providers may stand between a command and a "+
+					"provider — an intermediate package lets a handler reach an account without "+
+					"importing a provider directly, which is how it escapes the incomplete-contract "+
+					"population", path, target)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk internal/: %v", err)
+	}
+
+	if examined == 0 {
+		t.Fatal("no Go files found under internal/; the enumeration is broken, not the tree")
+	}
+	t.Logf("examined %d non-test file(s) under internal/, %d standing between a command and a provider", examined, offenders)
+}
+
+// The walk must be able to find one, or the clean sweep above means nothing.
+func TestProviderImportDetectorFindsOne(t *testing.T) {
+	const module = "github.com/nanohype/cloudgov"
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "probe.go", `package scanner
+
+import (
+	// `+"`"+module+`/internal/cloud/aws`+"`"+` named only in a comment must not count.
+	"fmt"
+
+	cloudaws "`+module+`/internal/cloud/aws"
+)
+`, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse probe: %v", err)
+	}
+
+	found := 0
+	for _, imp := range file.Imports {
+		target, uerr := strconv.Unquote(imp.Path.Value)
+		if uerr != nil {
+			continue
+		}
+		if target == module+"/internal/cloud/aws" {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("the detector found %d provider imports in a fixture carrying exactly one "+
+			"(plus one named in a comment); a clean sweep would prove nothing", found)
+	}
+}
+
+// A tool that exists only as a comment is not registered.
+//
+// The registration side used to be a regex over raw source, which counted a
+// commented-out `mcp.AddTool(s, &mcp.Tool{Name: "x"}, ...)` as shipping. Alone
+// that is a false positive; paired with a table row nobody removed it becomes a
+// cancellation — the tool stops existing, both sides still carry it, and an
+// agent is told to call something that is not there.
+//
+// This is the control for that. It parses the same way the check does, so a
+// return to text matching fails here.
+func TestCommentedOutToolIsNotRegistered(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "probe.go", `package cmd
+
+func register(s *mcp.Server) {
+	// mcp.AddTool(s, &mcp.Tool{Name: "zz_ghost"}, nil)
+	mcp.AddTool(s, &mcp.Tool{Name: "zz_live"}, nil)
+}
+`, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse probe: %v", err)
+	}
+
+	names := map[string]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, ok := n.(*ast.CompositeLit)
+		if !ok {
+			return true
+		}
+		sel, ok := lit.Type.(*ast.SelectorExpr)
+		if !ok || sel.Sel == nil || sel.Sel.Name != "Tool" {
+			return true
+		}
+		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "mcp" {
+			return true
+		}
+		for _, elt := range lit.Elts {
+			kv, ok := elt.(*ast.KeyValueExpr)
+			if !ok {
+				continue
+			}
+			if key, ok := kv.Key.(*ast.Ident); !ok || key.Name != "Name" {
+				continue
+			}
+			if v, ok := kv.Value.(*ast.BasicLit); ok && v.Kind == token.STRING {
+				if name, uerr := strconv.Unquote(v.Value); uerr == nil {
+					names[name] = true
+				}
+			}
+		}
+		return true
+	})
+
+	if !names["zz_live"] {
+		t.Error("the live registration was not found; the walk finds nothing at all")
+	}
+	if names["zz_ghost"] {
+		t.Error("a registration that exists only as a comment was counted as shipping")
+	}
+	if len(names) != 1 {
+		t.Errorf("found %d registrations in a fixture carrying one live and one commented out", len(names))
 	}
 }

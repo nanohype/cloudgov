@@ -232,10 +232,20 @@ func TestGateRefusesAnUnrankableThreshold(t *testing.T) {
 	sev := func(i item) cloud.Severity { return i.sev }
 	items := []item{{cloud.SeverityInfo}}
 
+	// Both package globals are restored, not just the one each case sets. The
+	// pre-existing cases in this file set exitCode before reading it, so a case
+	// that leaves it dirty is invisible until test order changes — which is
+	// exactly the failure `go test -shuffle` exists to surface, and exactly the
+	// convention a new test should not quietly break.
+	restore := func() func() {
+		savedExit, savedFailOn := exitCode, failOn
+		return func() { exitCode, failOn = savedExit, savedFailOn }
+	}
+
 	t.Run("unrankable threshold does not trip the gate", func(t *testing.T) {
+		defer restore()()
 		exitCode = 0
 		failOn = "HIHG"
-		defer func() { failOn = "" }()
 		gate(items, sev)
 		if exitCode != 0 {
 			t.Errorf("exit code = %d; an unrankable threshold must not trip the gate on an INFO finding", exitCode)
@@ -243,9 +253,9 @@ func TestGateRefusesAnUnrankableThreshold(t *testing.T) {
 	})
 
 	t.Run("a real threshold still trips it", func(t *testing.T) {
+		defer restore()()
 		exitCode = 0
 		failOn = "INFO"
-		defer func() { failOn = "" }()
 		gate(items, sev)
 		if exitCode != 2 {
 			t.Errorf("exit code = %d, want 2 — an INFO finding at an INFO threshold", exitCode)
@@ -253,9 +263,9 @@ func TestGateRefusesAnUnrankableThreshold(t *testing.T) {
 	})
 
 	t.Run("a threshold above the findings does not", func(t *testing.T) {
+		defer restore()()
 		exitCode = 0
 		failOn = "HIGH"
-		defer func() { failOn = "" }()
 		gate(items, sev)
 		if exitCode != 0 {
 			t.Errorf("exit code = %d; an INFO finding is below a HIGH threshold", exitCode)

@@ -115,6 +115,7 @@ compare_urls() {
   if [ "$fail" -ne 0 ]; then
     echo >&2
     echo "README release URLs disagree with $goreleaser." >&2
+    echo "== release-URL agreement NOT met ==" >&2
     return 1
   fi
 

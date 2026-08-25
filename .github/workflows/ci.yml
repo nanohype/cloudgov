@@ -31,6 +31,12 @@ jobs:
       - name: go build
         run: go build ./...
 
+      - name: test with a shuffled order
+        # Package-level state shared between tests is invisible in declaration
+        # order and surfaces the first time a suite runs in a different one. The
+        # seed is printed on failure, so a shuffle-only break is reproducible.
+        run: go test ./... -shuffle=on -count=1
+
       - name: test with per-package coverage floors
         # Runs the suite with coverage and enforces .coverage-floors (each package
         # has its own floor, ratcheting up as coverage lands). Produces coverage.out.

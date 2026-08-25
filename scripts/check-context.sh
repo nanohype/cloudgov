@@ -41,23 +41,71 @@ lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
 #
 # Comments and string bodies are stripped before matching, and that is
 # load-bearing in both directions. A detached context is a CALL, so a token inside
-# a string literal is a mention rather than an occurrence. Matching a comment would report a violation that is only a
-# mention. Worse, EXCLUDING on a comment fails the gate open: a real
-# `context.Background()` whose line carries a trailing comment mentioning
-# `signal.NotifyContext(context.Background()` was filtered out as if it were the
-# bootstrap. A gate that reads comments as code fails in exactly the case it
-# exists for.
+# a string literal is a mention rather than an occurrence, and matching one is a
+# false positive. Excluding on a comment is worse: it fails the gate OPEN, because
+# a real `context.Background()` whose line carries a trailing comment mentioning
+# the allowed bootstrap gets filtered out as if it were the bootstrap. A gate that
+# reads comments as code fails in exactly the case it exists for.
+#
+# THE ESCAPE SURFACE, ENUMERATED. This matches text, so forms that mean the same
+# thing to the compiler and differ on the line evade it. Probed by running them:
+#
+#   `context . Background ( )`     — legal Go, evades. gofmt normalises it, and
+#                                     CI runs gofmt through golangci-lint's
+#                                     formatter, so a file reaching this gate is
+#                                     already normalised. That is a dependency on
+#                                     another gate, stated rather than assumed.
+#   a call split across lines      — same, and same normalisation.
+#   `b := context.Background; b()` — evades. Nothing in the tree does this and a
+#                                     text matcher cannot follow a value; the
+#                                     durable form is a go/types resolution, which
+#                                     this shell gate is the wrong shape for.
+#   an aliased import              — CLOSED below, by reading the binding per file.
 #
 # The trailing `|| true` on the pipeline is deliberate: grep exits 1 on "no
 # matches", which under `set -e` would abort the script on the *success* case.
 scan_tree() {
-  local root="$1" file stripped
+  local root="$1" file stripped alias
   while IFS= read -r file; do
     case "$file" in *_test.go) continue ;; esac
     stripped=$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$file")
+
+    # The name the context package is bound to IN THIS FILE. A file importing it
+    # under an alias calls `ctxpkg.Background()`, which a pattern hardcoding
+    # "context." does not match at all — an escape that needs no intent, just an
+    # import line.
+    #
+    # Read from the RAW file, not the stripped view: the import PATH is string
+    # content, and `strings=blank` empties it. This is the view-per-check rule in
+    # its other direction — the matcher below wants code, this wants the string,
+    # and taking both from one view gets one of them wrong.
+    # Four spellings bind the package, and only two of them carry an alias:
+    #
+    #   import "context"           -> context     (the `import` keyword is not a name)
+    #   import ctxpkg "context"    -> ctxpkg
+    #       "context"              -> context     (inside a parenthesised block)
+    #       ctxpkg "context"       -> ctxpkg
+    #
+    # Reading the token before the path without dropping the keyword binds the
+    # alias to `import`, and `import.Background()` matches nothing — which is how
+    # this closure regressed the plain case while fixing the aliased one. The
+    # floor caught it.
+    alias=$(
+      # `import ctxpkg "context"` — a single-line aliased import.
+      sed -nE 's/^[[:space:]]*import[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' "$file"
+      # `    ctxpkg "context"` — an aliased import inside a block. The `import`
+      # keyword is excluded explicitly rather than by pattern shape, because an
+      # optional-group spelling binds the alias to the keyword on the plain
+      # `import "context"` line and matches nothing thereafter.
+      sed -nE 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' "$file" |
+        grep -v '^import$' || true
+    )
+    alias=$(printf '%s\n' "$alias" | grep -v '^$' | head -1)
+    [ -n "$alias" ] || alias="context"
+
     printf '%s\n' "$stripped" \
-      | grep -nE 'context\.(Background|TODO)\(\)' \
-      | grep -v 'signal\.NotifyContext(context\.Background()' \
+      | grep -nE "${alias}\\.(Background|TODO)\\(\\)" \
+      | grep -v "signal\\.NotifyContext(${alias}\\.Background()" \
       | sed "s|^|${file}:|" \
       || true
   done < <(find "$root" -name '*.go' -type f 2>/dev/null | sort)
@@ -175,6 +223,59 @@ RUNE
   fi
   rm -f "$tmp/internal/cloud/aws/rune.go"
 
+  # A file importing the context package under an alias. A pattern hardcoding
+  # "context." matches nothing here, so the violation is invisible — and nothing
+  # about writing it requires intent, only an import line.
+  cat >"$tmp/internal/cloud/aws/aliased.go" <<'ALIASED'
+package aws
+
+import (
+	ctxpkg "context"
+)
+
+func aliased() ctxpkg.Context {
+	return ctxpkg.Background()
+}
+ALIASED
+  if [[ -z "$(scan_tree "$tmp" | grep 'aliased.go')" ]]; then
+    die "a detached context reached through an aliased import was not reported"
+  fi
+  rm -f "$tmp/internal/cloud/aws/aliased.go"
+
+  # The plain single-line import. Reading the token before the path without
+  # excluding the `import` keyword binds the alias to it, and `import.Background()`
+  # matches nothing — the alias closure regressed this while fixing the aliased
+  # case, and only the positive-control harness noticed.
+  cat >"$tmp/internal/cloud/aws/plainimport.go" <<'PLAIN'
+package aws
+
+import "context"
+
+func plainImport() context.Context {
+	return context.Background()
+}
+PLAIN
+  if [[ -z "$(scan_tree "$tmp" | grep 'plainimport.go')" ]]; then
+    die "a detached context under a single-line 'import \"context\"' was not reported"
+  fi
+  rm -f "$tmp/internal/cloud/aws/plainimport.go"
+
+  # And the complement: a file that binds some OTHER package to a name must not
+  # have that name matched, or the alias handling becomes a false-positive engine.
+  cat >"$tmp/internal/cloud/aws/otherpkg.go" <<'OTHER'
+package aws
+
+import (
+	ctxpkg "example.com/notcontext"
+)
+
+func other() { _ = ctxpkg.Background() }
+OTHER
+  if [[ -n "$(scan_tree "$tmp" | grep 'otherpkg.go')" ]]; then
+    die "a Background() call on a package that is not context was flagged: $(scan_tree "$tmp" | grep 'otherpkg.go')"
+  fi
+  rm -f "$tmp/internal/cloud/aws/otherpkg.go"
+
   # The complement, so the rule above cannot be satisfied by treating every
   # single quote as ordinary text: a rune literal that genuinely CONTAINS the
   # banned token is a character, not a call.
@@ -275,7 +376,7 @@ MENTIONS
     die "tree still flagged after every plant was removed: $(scan_tree "$tmp")"
   fi
 
-  echo "context-awareness self-test passed: gate catches Background() and TODO() under cmd/ and internal/, and stays silent on compliant code and tests."
+  echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal and past a masking comment, cites the right line, and stays silent on compliant code, tests and foreign packages."
 }
 
 cd "$(dirname "$0")/.."
@@ -301,6 +402,7 @@ if [[ -n "$offenders" ]]; then
   echo "" >&2
   echo "Derive the context from cmd.Context() so SIGINT/SIGTERM cancels in-flight cloud calls." >&2
   echo "The only allowed detached context is the signal.NotifyContext base in Execute()." >&2
+  echo "== context-awareness NOT met ==" >&2
   exit 1
 fi
 

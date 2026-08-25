@@ -103,13 +103,17 @@ scan_unwatched() {
       # would name the wrong problem to whoever reads this gate.
       if (raw ~ /uses:[[:space:]]*[^[:space:]]+@v?[0-9]+[[:space:]]*$/) next
 
-      if (line ~ /[^0-9A-Za-z.]v?[0-9]+\.[0-9]+\.[0-9]+/ && !(FNR in covered)) {
+      if (line ~ /[^0-9A-Za-z.](v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+)/ && !(FNR in covered)) {
         print fname ":" FNR ": " raw
       }
     }
   ' <(awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file") "$file"
 }
 
+# A two-component number counts as a version only with a `v` — `v2.12` is the
+# form golangci-lint-action takes, while a bare `2.12` is as likely a licence id
+# (Apache-2.0), a ratio or a date fragment. Three components need no prefix.
+#
 # scan_versions prints one line per version-like token in $1, watched or not,
 # ignoring comments. Used for the files asserted to carry none: a version named
 # in prose is a mention, and failing on one would push the next author to delete
@@ -117,7 +121,7 @@ scan_unwatched() {
 scan_versions() {
   local file="$1"
   awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file" |
-    grep -nE '(^|[^0-9A-Za-z.])v?[0-9]+\.[0-9]+\.[0-9]+' || true
+    grep -nE '(^|[^0-9A-Za-z.])(v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+)' || true
 }
 
 # ── Why this script self-tests ────────────────────────────────────────────────
@@ -288,7 +292,10 @@ for glob in "${WATCHED_GLOBS[@]}"; do
     [ "$file" = "go.mod" ] && continue
     # The denominator, per pin rather than per file: a file with every pin
     # watched and a file the scanner could not read produce the same silence.
-    watched_pins=$((watched_pins + $(grep -cE '(^|[^0-9A-Za-z.])v?[0-9]+\.[0-9]+\.[0-9]+' "$file" || true)))
+    # Counted per PIN, not per line. grep -c counts matching LINES, so two pins
+    # on one line raise the denominator by one and a gate reporting "20 tokens"
+    # would be describing 19. -o prints each match.
+    watched_pins=$((watched_pins + $(grep -oE '(^|[^0-9A-Za-z.])(v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+)' "$file" | wc -l | tr -d ' ')))
     unwatched=$(scan_unwatched "$file" "$covered_lines_file")
     if [ -n "$unwatched" ]; then
       echo "::error::${file}: version pin(s) nothing can bump — add a '# renovate: datasource=... depName=...' comment above each:" >&2

@@ -12,9 +12,10 @@
 # the only form of it that survives an unrelated edit.
 #
 # Scope is stated on extract_paths below and is narrower than the sentence above:
-# file claims written as code spans, not directory claims. The exclusions are
-# listed one per line with a reason rather than folded into one pattern, because
-# a pattern that quietly matches less is how this kind of check goes silent.
+# markdown link targets, and file claims written as code spans. Directory claims
+# are out, with the reason given there. The exclusions are listed one per line
+# with a reason rather than folded into one pattern, because a pattern that
+# quietly matches less is how this kind of check goes silent.
 #
 # Usage: scripts/check-doc-paths.sh
 
@@ -48,14 +49,41 @@ extract_paths() {
   awk '
     {
       line = $0
+
+      # Markdown link targets are path claims too, and they are the ones a reader
+      # actually clicks. `[the contract](AGENTS.md)` names a file exactly as
+      # `AGENTS.md` in backticks does, and skipping it left the most followed
+      # references unchecked.
+      rest = line
+      while (match(rest, /\]\([^)]+\)/)) {
+        target = substr(rest, RSTART + 2, RLENGTH - 3)
+        rest = substr(rest, RSTART + RLENGTH)
+        if (target ~ /^#/) continue
+        candidates[++cn] = target
+        linked[cn] = 1
+      }
+
       n = split(line, parts, "`")
       # Odd-indexed parts (2, 4, ...) are the spans between backticks.
       for (i = 2; i <= n; i += 2) {
-        span = parts[i]
+        candidates[++cn] = parts[i]
+      }
+
+      for (ci = 1; ci <= cn; ci++) {
+        span = candidates[ci]
+        is_link = (ci in linked)
+        delete candidates[ci]
+        delete linked[ci]
 
         if (span ~ /[[:space:]]/) continue               # prose, not a path
-        if (span !~ /\//) continue                       # a bare name: out of scope
-        if (span !~ /\.(go|sh|md|ya?ml|json|awk|py|txt|html)$/) continue
+        # A link target is a path by POSITION, so it needs neither a slash nor a
+        # known extension to be a claim — `[the contract](AGENTS.md)` and
+        # `[the licence](LICENSE)` both name a file. A backtick span needs both,
+        # because there a bare word is not distinguishable from prose.
+        if (!is_link) {
+          if (span !~ /\//) continue
+          if (span !~ /\.(go|sh|md|ya?ml|json|awk|py|txt|html)$/) continue
+        }
 
         if (span ~ /^https?:/) continue                  # a URL
         if (span ~ /^[$~]/) continue                     # a variable or a home path
@@ -66,13 +94,19 @@ extract_paths() {
         if (span ~ /@/) continue                         # a module or action ref
         if (span ~ /:[0-9]/) continue                    # file:line citation
 
-        # A first segment carrying a dot is a domain, so the span is an import
-        # path rather than a path in this tree.
-        split(span, seg, "/")
-        if (seg[1] ~ /\./ && seg[1] !~ /^\.[a-z]/) continue
+        # A first segment carrying a dot, WHEN THERE ARE FURTHER SEGMENTS, is a
+        # domain — so the span is an import path rather than a path in this tree.
+        # The multi-segment condition is load-bearing: without it a single-segment
+        # filename like AGENTS.md reads as a bare domain and is dropped, which is
+        # how link targets to root-level files went unchecked.
+        if (span ~ /\//) {
+          split(span, seg, "/")
+          if (seg[1] ~ /\./ && seg[1] !~ /^\.[a-z]/) continue
+        }
 
         print FNR ":" span
       }
+      cn = 0
     }
   ' "$file"
 }
@@ -88,7 +122,7 @@ self_test_die() {
 }
 
 self_test() {
-  local tmp found
+  local tmp found want excluded
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
@@ -124,12 +158,42 @@ MD
     *) self_test_die "scripts/coverage.sh is on line 2 and was cited elsewhere: $(printf '%s\n' "$found" | grep 'coverage.sh')" ;;
   esac
 
+  # ── the escape surface, probed rather than reasoned about ──
+  #
+  # A markdown link target is what a reader actually clicks, and it needs neither
+  # a slash nor an extension to be a claim about this repository.
+  cat >"$tmp/links.md" <<'MD'
+See [the agent contract](AGENTS.md) and [the licence](LICENSE).
+An [external link](https://example.test/a) is not a path.
+An [anchor](#section) is not a path.
+A [nested one](internal/cloud/aws/iam.go) is.
+MD
+  found="$(extract_paths "$tmp/links.md")"
+  for want in 'AGENTS.md' 'LICENSE' 'internal/cloud/aws/iam.go'; do
+    printf '%s
+' "$found" | grep -q "$want" ||
+      self_test_die "a markdown link target was not extracted: $want (got: $found)"
+  done
+  for excluded in 'https://' '#section'; do
+    if printf '%s
+' "$found" | grep -qF -- "$excluded"; then
+      self_test_die "extracted ${excluded} from a link target, which is out of scope"
+    fi
+  done
+
+  # A bare word in backticks is still out of scope: there, unlike in link
+  # position, a name is not distinguishable from prose.
+  printf 'The word `LICENSE` appears in running text.
+' >"$tmp/bareword.md"
+  [ -z "$(extract_paths "$tmp/bareword.md")" ] ||
+    self_test_die "a bare word in backticks was treated as a path claim"
+
   # A document naming no paths must extract nothing rather than something.
   printf 'Prose with no code spans at all.\n' >"$tmp/bare.md"
   [ -z "$(extract_paths "$tmp/bare.md")" ] ||
     self_test_die "extracted a path from a document that names none"
 
-  echo "check-doc-paths self-test passed: it extracts repo paths, skips URLs, flags, placeholders and citations, and cites the right line."
+  echo "check-doc-paths self-test passed: it extracts repo paths and markdown link targets, skips URLs, anchors, flags, placeholders, citations and bare words, and cites the right line."
 }
 
 self_test
@@ -165,7 +229,7 @@ if [ "$claims" -eq 0 ]; then
 fi
 
 if [ "$fail" -ne 0 ]; then
-  echo "== documented paths do NOT all resolve =="
+  echo "== documented paths NOT met =="
   exit 1
 fi
 printf 'ok: %s path claim(s) across %s markdown file(s) all resolve\n' "$claims" "$checked"

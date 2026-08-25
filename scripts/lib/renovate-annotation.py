@@ -31,6 +31,27 @@ import json
 import re
 import sys
 
+# The keys Renovate defines for a regex customManager. Anything else is a key it
+# ignores — see the allowlist check below for why that is worse than a missing
+# required key rather than milder.
+REGEX_MANAGER_KEYS = {
+    "customType",
+    "description",
+    "managerFilePatterns",
+    "fileMatch",
+    "matchStrings",
+    "matchStringsStrategy",
+    "depNameTemplate",
+    "packageNameTemplate",
+    "datasourceTemplate",
+    "versioningTemplate",
+    "currentValueTemplate",
+    "depTypeTemplate",
+    "extractVersionTemplate",
+    "registryUrlTemplate",
+    "autoReplaceStringTemplate",
+}
+
 # Renovate writes named groups as (?<name>...); Python spells them (?P<name>...).
 NAMED_GROUP = re.compile(r"\(\?<(?![=!])")
 
@@ -138,6 +159,23 @@ def main() -> int:
             sys.stderr.write(
                 f"customManagers[{index}] declares no managerFilePatterns, so Renovate applies it "
                 f"to no file — it watches nothing while reading as a live rule\n")
+            return 2
+
+        # An UNKNOWN key is the silent-on-both-sides case, and it is the one a
+        # required-key check cannot reach. `datasourceTemplat` for
+        # `datasourceTemplate` leaves the manager well-formed enough to match:
+        # Renovate drops the template and resolves no datasource, while a gate
+        # counting matches sees full coverage. Neither side reports anything.
+        #
+        # So the keys are an allowlist rather than a required set. A key Renovate
+        # does not define is a key it ignores, and a key it ignores is a
+        # behaviour the author intended and did not get.
+        unknown = sorted(set(manager) - REGEX_MANAGER_KEYS)
+        if unknown:
+            sys.stderr.write(
+                f"customManagers[{index}] declares key(s) Renovate does not define for a regex\n"
+                f"manager: {', '.join(unknown)}. Renovate ignores them, so the behaviour they were\n"
+                f"meant to configure is silently absent.\n")
             return 2
 
         patterns = manager.get("matchStrings") or []
