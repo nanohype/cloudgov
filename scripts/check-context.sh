@@ -209,7 +209,7 @@ CLEANTEST
   )
 
   local entry path needle found
-  for entry in "${plants[@]}"; do
+  for entry in ${plants[@]+"${plants[@]}"}; do
     path="${entry%%|*}"
     needle="${entry##*|}"
 

@@ -317,7 +317,7 @@ jobs:
     steps:
       - uses: nanohype/.github/actions/merge-gate@0000000000000000000000000000000000000000 # main
 YML
-  saved_exempt=("${MERGE_GATE_EXEMPT[@]}")
+  saved_exempt=(${MERGE_GATE_EXEMPT[@]+"${MERGE_GATE_EXEMPT[@]}"})
   MERGE_GATE_EXEMPT=()
   check_merge_gate_coverage "$wf" >/dev/null ||
     self_test_die "rejected a workflow whose gate lists every job"
@@ -410,7 +410,7 @@ YML
   check_merge_gate_coverage "$wf" >/dev/null 2>&1 || vacuous_rc=$?
   [ "$vacuous_rc" -eq 2 ] ||
     self_test_die "a directory whose workflows carry no merge gate must be an unanswerable question, not a pass (got ${vacuous_rc})"
-  MERGE_GATE_EXEMPT=("${saved_exempt[@]}")
+  MERGE_GATE_EXEMPT=(${saved_exempt[@]+"${saved_exempt[@]}"})
 
   echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, an empty workflow directory, and a gate missing from the contributor checklist."
 }

@@ -290,7 +290,7 @@ covered_lines_file="$(mktemp)"
 trap 'rm -f "$covered_lines_file"' EXIT
 
 watched_paths=()
-for glob in "${WATCHED_GLOBS[@]}"; do
+for glob in ${WATCHED_GLOBS[@]+"${WATCHED_GLOBS[@]}"}; do
   for file in $glob; do
     [ -f "$file" ] || continue
     [ "$file" = "go.mod" ] && continue
@@ -303,12 +303,12 @@ if [ "${#watched_paths[@]}" -eq 0 ]; then
   exit 2
 fi
 
-if ! renovate_covered_lines renovate.json "${watched_paths[@]}" >"$covered_lines_file"; then
+if ! renovate_covered_lines renovate.json ${watched_paths[@]+"${watched_paths[@]}"} >"$covered_lines_file"; then
   echo "::error::renovate.json cannot be applied to the watched files, so nothing can be said about which pins are watched" >&2
   exit 2
 fi
 
-for glob in "${WATCHED_GLOBS[@]}"; do
+for glob in ${WATCHED_GLOBS[@]+"${WATCHED_GLOBS[@]}"}; do
   for file in $glob; do
     [ -f "$file" ] || continue
     watched_files=$((watched_files + 1))
@@ -339,7 +339,7 @@ if [ "$watched_files" -eq 0 ]; then
   exit 2
 fi
 
-for file in "${NO_VERSION_FILES[@]}"; do
+for file in ${NO_VERSION_FILES[@]+"${NO_VERSION_FILES[@]}"}; do
   if [ ! -f "$file" ]; then
     echo "::error::${file} is classified as carrying no version but does not exist; the classification names a file that is gone" >&2
     fail=1
@@ -362,7 +362,7 @@ done
 # The no-version classification is already an assertion: a listed file that
 # acquires a version fails above. The other half is the one that rots toward
 # permissive — a listed file that has nothing to say.
-for file in "${NO_VERSION_FILES[@]}"; do
+for file in ${NO_VERSION_FILES[@]+"${NO_VERSION_FILES[@]}"}; do
   [ -f "$file" ] || continue
   if [ ! -s "$file" ]; then
     echo "::error::${file} is classified as carrying no version but is empty; the entry asserts nothing" >&2

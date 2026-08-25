@@ -81,7 +81,7 @@ compare_urls() {
     return 2
   fi
 
-  for url in "${urls[@]}"; do
+  for url in ${urls[@]+"${urls[@]}"}; do
     # The bare releases page is a link for humans, not a download. Skips are
     # counted: the guard above rejects an empty match set, but it runs before this
     # filter, so a README linking only to the releases page leaves a non-empty list

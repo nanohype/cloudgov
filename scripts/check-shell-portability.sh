@@ -66,6 +66,7 @@ BASH4_LABELS=(
   'coproc'
   'fall-through case clause'
   'variable-set test'
+  'unguarded empty-array expansion under set -u'
 )
 
 BASH4_PATTERNS=(
@@ -84,6 +85,17 @@ BASH4_PATTERNS=(
   '(^|[^[:alnum:]_-])coproc([[:space:]]|$)'
   ';;&'
   '\[\[[^]]*-v[[:space:]]'
+  '[$][{][A-Za-z_][A-Za-z0-9_]*[[][@*][]][}]'
+)
+
+# A per-rule exclusion, applied to the LINE a hit is on. Only one rule needs it:
+# the guarded form of an empty-array expansion, `${a[@]+${a[@]+"${a[@]}"}}`, contains the
+# bare form inside itself, so the rule would report the fix as the defect. An
+# empty entry means the rule has no exclusion.
+BASH4_EXCLUDES=(
+  '' '' '' '' '' '' '' '' '' '' '' '' '' ''
+  ''
+  '\[[@*]\](\+|:-)'
 )
 
 BASH4_FIXTURES=(
@@ -102,13 +114,15 @@ BASH4_FIXTURES=(
   'coproc ZZ { cat; }'
   'case x in x) : ;;& *) : ;; esac'
   'zz=1; [[ -v zz ]]'
+  'zz=(); echo "${zz[@]}"'
 )
 
 # A table whose columns have drifted pairs each rule with someone else's fixture,
 # and every assertion below still passes while testing the wrong thing.
 if [ "${#BASH4_LABELS[@]}" -ne "${#BASH4_PATTERNS[@]}" ] ||
-  [ "${#BASH4_LABELS[@]}" -ne "${#BASH4_FIXTURES[@]}" ]; then
-  echo "error: the construct table has ${#BASH4_LABELS[@]} label(s), ${#BASH4_PATTERNS[@]} pattern(s) and ${#BASH4_FIXTURES[@]} fixture(s); its columns have drifted apart" >&2
+  [ "${#BASH4_LABELS[@]}" -ne "${#BASH4_FIXTURES[@]}" ] ||
+  [ "${#BASH4_LABELS[@]}" -ne "${#BASH4_EXCLUDES[@]}" ]; then
+  echo "error: the construct table has ${#BASH4_LABELS[@]} label(s), ${#BASH4_PATTERNS[@]} pattern(s), ${#BASH4_FIXTURES[@]} fixture(s) and ${#BASH4_EXCLUDES[@]} exclusion(s); its columns have drifted apart" >&2
   exit 2
 fi
 
@@ -137,7 +151,7 @@ declared_shell() {
 # single quotes it is literal text. A fixture written as a single-quoted literal
 # — the way this gate's own self-test writes its probes — is therefore not a use.
 scan_constructs() {
-  local file="$1" i label pattern stripped
+  local file="$1" i label pattern stripped hits exclude
   # Heredocs are blanked FIRST, on the raw file. A heredoc tag is usually
   # quoted — `<<'"'"'FIX'"'"'` — so a string-blanking pass run before this one erases the
   # tag and leaves the body looking like ordinary code.
@@ -148,9 +162,13 @@ scan_constructs() {
   for i in "${!BASH4_PATTERNS[@]}"; do
     label="${BASH4_LABELS[$i]}"
     pattern="${BASH4_PATTERNS[$i]}"
-    printf '%s\n' "$stripped" |
-      grep -nE -- "$pattern" |
-      sed "s|^|${label}:|" || true
+    hits="$(printf '%s\n' "$stripped" | grep -nE -- "$pattern" || true)"
+    exclude="${BASH4_EXCLUDES[$i]}"
+    if [ -n "$exclude" ]; then
+      hits="$(printf '%s\n' "$hits" | grep -vE -- "$exclude" || true)"
+    fi
+    [ -n "$hits" ] || continue
+    printf '%s\n' "$hits" | sed "s|^|${label}:|" 
   done
 }
 

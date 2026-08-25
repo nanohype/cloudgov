@@ -50,6 +50,19 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
 backup_dir="$(mktemp -d)"
+# ── an abort must not read as a pass ────────────────────────────────────────
+#
+# This suite aborted partway through under bash 3.2 — one control proved, twelve
+# never run — and STILL EXITED 0. The abort message went to stderr and the status
+# said everything was fine, which is the exact shape this floor exists to catch
+# in other gates, occurring in the floor itself.
+#
+# `set -e` cannot cover it: the status of the shell after an abort depends on
+# where the abort happened. So completion is asserted positively. The flag is set
+# only by the last line of the file, and the trap fails if the script leaves by
+# any other route.
+suite_completed=0
+
 mutated=()
 
 restore_all() {
@@ -64,7 +77,22 @@ restore_all() {
   done
   rm -rf "$backup_dir"
 }
-trap restore_all EXIT
+
+# ONE trap on EXIT, doing both jobs. A second `trap ... EXIT` REPLACES the first
+# rather than adding to it, so registering restoration and completion separately
+# left whichever was installed second as the only one that ran — and the
+# completion check, installed first, silently did nothing.
+on_exit() {
+  local status=$?
+  restore_all
+  if [ "$suite_completed" -ne 1 ]; then
+    echo "== positive controls NOT met ==" >&2
+    echo "error: this suite did not run to completion; what it printed describes only the part that ran." >&2
+    exit 1
+  fi
+  exit "$status"
+}
+trap on_exit EXIT
 
 # mutate records a file's original content (or its absence) so restore_all can
 # put it back, then leaves the caller to write the violation.
@@ -83,7 +111,13 @@ unmutate_since() {
     unmutate "${mutated[i]}"
     unset 'mutated[i]'
   done
-  mutated=("${mutated[@]}")
+  # `${mutated[@]+"${mutated[@]}"}` on an EMPTY array is an unbound variable under `set -u` on
+  # bash 3.2 — the bash a macOS system path provides, and the one a contributor
+  # following CONTRIBUTING.md runs this with. It aborts here after proving one
+  # control, and the abort message is the only sign: the process still exits 0,
+  # so the floor reports a suite it never ran. The `+` form expands to nothing
+  # when the array is unset rather than erroring.
+  mutated=(${mutated[@]+${mutated[@]+"${mutated[@]}"}})
 }
 
 unmutate() {
@@ -145,32 +179,34 @@ CRASH_INDICATORS=(
 # THE CONTRACT, not a vocabulary guess: every gate in scripts/ ends a rejection
 # with `== <what> NOT met ==`, or with `<gate> self-test FAILED: <reason>` when it
 # could not establish its own trustworthiness. Broadening this pattern until it
-# matches whatever the gates happen to print would defeat it — the point is that
-# reaching the line is the evidence.
+# matches whatever the gates happen to print would defeat it — reaching the line
+# is the evidence.
 #
-# Both halves are needed. Absence of a crash indicator does not prove the gate
-# got to its own conclusion, and a verdict line printed before a later crash does
-# not prove it finished — so the output must carry a verdict AND no crash.
+# THREE RULES, AND ALL THREE MUST HOLD.
 #
-# TWO RULES, AND THE NUMBER COMES FIRST.
+# 1. THE STATUS. 126 or 127 means the shell could not execute something: a
+#    missing interpreter, a vanished binary. A gate that exits that way evaluated
+#    nothing, and this is the only rule that sees the worst shape of it — a gate
+#    exiting 127 having printed NOTHING carries no text to match, and a floor
+#    reading only text records it as the strictest gate in the suite.
 #
-# A status of 126 or 127 means the shell could not execute something: a missing
-# interpreter, a vanished binary. A gate that exits that way evaluated nothing.
-# The text rule cannot see the worst shape of this — a gate that exits 127 having
-# printed NOTHING carries no indicator to match, and a floor screening only text
-# records it as the strictest gate in the suite. The number is the only thing
-# left to read.
+# 2. A VERDICT LINE. Absence of a crash is not evidence the gate reached its own
+#    conclusion.
 #
-# The text rule stays for the shape the number cannot see: a gate that died
-# mid-run, said so, and exited 1 like an ordinary rejection.
+# 3. NO CRASH IN THE GATE'S OWN OUTPUT. A verdict printed after the gate's helper
+#    died does not mean it finished: it means it finished the part that still
+#    ran. Checking only the verdict scores that as a controlled catch — which is
+#    the evidence the dependency controls rest on, so it would be self-defeating
+#    exactly where it matters most.
 #
-# ORDER MATTERS BETWEEN THEM. A gate whose own verdict QUOTES a diagnostic — the
-# portability gate reports `mapfile: command not found` as its finding — reaches a
-# verdict and prints it. Letting a text indicator veto a printed verdict marks a
-# working gate as crashed, so the verdict is checked before the text and the text
-# only decides cases where no verdict was reached.
+# WHOSE OUTPUT IT IS, is what rule 3 turns on. A gate REPORTS diagnostics as
+# findings: the portability gate's whole verdict is that a script says
+# `mapfile: command not found` under an old bash. Matching crash text anywhere
+# marks that working gate as crashed. So the reported lines are removed first —
+# `::error::` lines and the indented continuations beneath them are the gate
+# quoting something — and rule 3 applies to what the gate said in its own voice.
 controlled_rejection() {
-  local output="$1" status="${2:-1}" indicator
+  local output="$1" status="${2:-1}" indicator own_voice
 
   # The number, first, because a silent crash has nothing else to read.
   case "$status" in
@@ -179,18 +215,19 @@ controlled_rejection() {
       ;;
   esac
 
-  if printf '%s\n' "$output" | grep -qE '^(== .* NOT met ==|[a-z-]+ self-test FAILED: )'; then
-    return 0
-  fi
+  # A verdict must be present.
+  printf '%s\n' "$output" | grep -qE '^(== .* NOT met ==|[a-z-]+ self-test FAILED: )' || return 1
 
-  # No verdict. Whether it crashed or merely exited quietly, it is not a catch —
-  # the indicators below only sharpen the message.
-  for indicator in "${CRASH_INDICATORS[@]}"; do
-    if printf '%s\n' "$output" | grep -qF -- "$indicator"; then
+  # What the gate said in its own voice: everything it did not present as a
+  # quoted finding.
+  own_voice="$(printf '%s\n' "$output" | grep -v '^::error::' | grep -v '^[[:space:]]')"
+
+  for indicator in ${CRASH_INDICATORS[@]+"${CRASH_INDICATORS[@]}"}; do
+    if printf '%s\n' "$own_voice" | grep -qF -- "$indicator"; then
       return 1
     fi
   done
-  return 1
+  return 0
 }
 
 # ── Why this script self-tests ────────────────────────────────────────────────
@@ -279,12 +316,28 @@ cat: /nonexistent/zzctl06path: No such file or directory'
     self_test_die "scored an exit 127 as a rejection even with a crash message present"
   rm -rf "$silent_tmp"
 
-  # A gate whose own VERDICT quotes a diagnostic has reached a verdict. Letting a
-  # text indicator veto a printed verdict marks a working gate as crashed.
-  controlled_rejection "$(printf '::error::x uses mapfile: command not found\n== shell portability NOT met ==\n')" 1 ||
-    self_test_die "a printed verdict was vetoed because the finding it reports quotes a shell diagnostic"
+  # ── a verdict is not enough on its own ──
+  #
+  # A gate whose helper died and which then printed its verdict finished only the
+  # part that still ran. Each of these carries a real verdict line, and each is a
+  # crash in the gate's OWN voice.
+  ! controlled_rejection "$(printf 'zzgate.sh: line 4: zzhelper: command not found\n== zzgate NOT met ==\n')" 1 ||
+    self_test_die "scored a gate whose helper was not found as a controlled rejection because it printed a verdict afterwards"
+  ! controlled_rejection "$(printf 'Traceback (most recent call last):\n  File x\n== zzgate NOT met ==\n')" 1 ||
+    self_test_die "scored a gate whose python helper raised as a controlled rejection because it printed a verdict afterwards"
+  ! controlled_rejection "$(printf '::error::internal/zz/planted.go is wrong\n== zzgate NOT met ==\ncleanup: /nonexistent: No such file or directory\n')" 1 ||
+    self_test_die "scored a gate that died during cleanup, after its verdict, as a controlled rejection"
 
-  echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, a non-zero exit with no verdict, a SILENT exit 127, and a real verdict that quotes a shell diagnostic."
+  # The other direction, and the reason rule 3 reads only the gate's own voice: a
+  # gate REPORTS diagnostics as findings. The portability gate's entire verdict is
+  # that a script says `command not found` under an old bash, and that is quoted
+  # in an ::error:: line and the indented continuation beneath it.
+  controlled_rejection "$(printf '::error::x uses a bash 4 construct:\n    zzbuiltin:12:zzbuiltin -t y < /dev/null\n== shell portability NOT met ==\n')" 1 ||
+    self_test_die "a working gate was marked as crashed because the finding it REPORTS quotes a shell diagnostic"
+  controlled_rejection "$(printf '::error::x fails under bash 3.2:\n    x.sh: line 2: zzbuiltin: command not found\n== shell portability NOT met ==\n')" 1 ||
+    self_test_die "a gate quoting an old shell's diagnostic inside its own finding was marked as crashed"
+
+  echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, a non-zero exit with no verdict, a SILENT exit 127, a verdict printed after the gate's own helper died, and a real verdict that QUOTES a shell diagnostic as its finding."
 }
 
 self_test
@@ -342,7 +395,7 @@ run_control() {
     return
   fi
   # A gate can exit 0 having crashed in a subshell whose status was swallowed.
-  for indicator in "${CRASH_INDICATORS[@]}"; do
+  for indicator in ${CRASH_INDICATORS[@]+"${CRASH_INDICATORS[@]}"}; do
     if printf '%s\n' "$clean" | grep -qF -- "$indicator"; then
       echo "::error::$(basename "$gate") accepted the unmodified tree with a crash indicator in its output (${indicator}); its pass is not a verdict" >&2
       fail=1
@@ -725,3 +778,5 @@ if [ "$fail" -ne 0 ]; then
   exit 1
 fi
 printf 'ok: %s gate(s) each accepted the clean tree and rejected its own violation, every mutation verified by inspection\n' "${#controlled[@]}"
+
+suite_completed=1
