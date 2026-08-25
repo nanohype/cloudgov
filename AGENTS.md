@@ -40,6 +40,15 @@ params are optional unless marked **required**.
 Credentials resolve via the standard AWS SDK chain and kubeconfig chain — the
 same as the CLI. The server is read-only; it never mutates cloud or cluster state.
 
+The `kubeconfig` parameter is narrower over MCP than the `--kubeconfig` flag is
+over the CLI: a file named through the parameter may not authenticate by running
+an exec credential plugin, and the call fails naming the command it refused. The
+plugin's command line comes from the file, so naming the file chooses which
+binary runs inside a process holding live cloud credentials — authority an
+operator typing a path already holds and a tool argument does not. Omit the
+parameter to use the server's own kubeconfig chain, where an exec plugin is the
+operator's own choice and is honoured.
+
 ## Invoke via CLI (scripts / CI)
 
 Every command produces machine-readable output and can gate on severity:

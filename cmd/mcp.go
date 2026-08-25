@@ -329,7 +329,7 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "k8s_rbac", Description: "Scan cluster-scoped Kubernetes RBAC for over-privileged ClusterRoles and broad bindings."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
-			p, err := cloudk8s.New(ctx, in.Kubeconfig)
+			p, err := cloudk8s.New(ctx, in.Kubeconfig, mcpClusterOptions(in.Kubeconfig)...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -408,7 +408,7 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "platform_audit", Description: "Audit nanohype Platform tenants for conformance to the eks-agent-platform contract: namespace + PSS, ResourceQuota, tenant-egress NetworkPolicy, and the tenant role + EKS Pod Identity binding."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
-			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig)
+			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig, mcpClusterOptions(in.Kubeconfig)...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -479,6 +479,23 @@ func jsonResult(write func(io.Writer) error) (*mcp.CallToolResult, any, error) {
 		return nil, nil, err
 	}
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: buf.String()}}}, nil, nil
+}
+
+// mcpClusterOptions decides what a caller-named kubeconfig is allowed to do.
+//
+// A kubeconfig can authenticate by running an exec credential plugin, and the
+// command it runs is named by the file. Over the CLI the operator typed the
+// path, so the file and the process are already under the same authority. Over
+// MCP the path is a tool argument — model output — reaching a process that
+// holds live AWS credentials, so a named file must not be able to choose which
+// binary runs. An empty argument names no file: the server falls back to its
+// own kubeconfig chain, which is the operator's, and an exec plugin there is
+// the operator's own choice.
+func mcpClusterOptions(kubeconfig string) []cloudk8s.Option {
+	if kubeconfig == "" {
+		return nil
+	}
+	return []cloudk8s.Option{cloudk8s.WithoutExecCredentials()}
 }
 
 func mcpSeverity(s string) cloud.Severity {
