@@ -27,9 +27,19 @@ file    internal/secrets/scanner.go    100
 # branch here reports a red run as green, which is worse than any single missed
 # finding.
 file    cmd/gate.go                    100
+# The compliance evaluator decides whether an auditor is told a CIS or SOC 2
+# control passed. An untaken branch here is a verdict nobody has proven the tool
+# can reach, and a verdict is the one output a reader cannot check for
+# themselves. The loaders sit at 100 for the same reason one layer down: they
+# decode the reports the verdicts are computed from, and a field that silently
+# fails to decode turns a domain full of findings into a control with nothing to
+# evaluate.
+file    internal/compliance/evaluate.go  100
+file    internal/compliance/loader.go    100
 
 # ── packages at or above the org floor ────────────────────────────────────────
 package internal/certs              90
+package internal/compliance         97
 package internal/cloud/aws          82
 package internal/cost               95
 package internal/drift              88
@@ -50,7 +60,6 @@ package internal/tags               94
 # not permission to stay there.
 package internal/baseline           72    # baseline store + comparison
 package internal/output             70    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
-package internal/compliance         66    # benchmark mapping over saved reports
 package internal/cloud              65    # capability interfaces + shared types; mostly declarations
 package internal/compare            64    # report normalization
 package internal/audit              69    # the orchestrator; each domain it calls is floored on its own
