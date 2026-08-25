@@ -73,10 +73,28 @@ scan_tree() {
     # errexit suppressed throughout, so a failing command inside this loop would
     # not abort it and the file would simply contribute no lines. That turns a
     # stripper that cannot read a file into a file with nothing to report.
+    # The IMPORT BLOCK, taken by position rather than by pattern.
+    #
+    # No text view answers this. The import path is string content, so blanking
+    # strings erases the alias; keeping strings admits any line in the file that
+    # happens to end in `"context"` — a raw string literal spanning lines does
+    # exactly that, and a comment did before it. Both are the same mistake: asking
+    # a whole-file matcher a question that is only about one region.
+    #
+    # Go permits one `import` block or several, each `import "path"` or
+    # `import ( ... )`. Everything after the first non-import top-level
+    # declaration is code, and an alias cannot be declared there.
     if ! decommented=$(awk -v style=go -f "${lib_dir}/strip-comments.awk" "$file"); then
       echo "scan_tree: the comment stripper failed on ${file}; this file was not examined" >&2
       return 1
     fi
+    imports=$(printf '%s\n' "$decommented" | awk '
+      /^import[[:space:]]*\(/ { inblock = 1; next }
+      inblock && /^\)/        { inblock = 0; next }
+      inblock                  { print; next }
+      /^import[[:space:]]/     { print; next }
+      /^(func|type|var|const)[[:space:]]/ { exit }
+    ')
     if ! stripped=$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$file"); then
       echo "scan_tree: the comment stripper failed on ${file}; this file was not examined" >&2
       return 1
@@ -111,12 +129,12 @@ scan_tree() {
     # floor caught it.
     alias=$(
       # `import ctxpkg "context"` — a single-line aliased import.
-      sed -nE 's/^[[:space:]]*import[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' <<<"$decommented"
+      sed -nE 's/^[[:space:]]*import[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' <<<"$imports"
       # `    ctxpkg "context"` — an aliased import inside a block. The `import`
       # keyword is excluded explicitly rather than by pattern shape, because an
       # optional-group spelling binds the alias to the keyword on the plain
       # `import "context"` line and matches nothing thereafter.
-      sed -nE 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' <<<"$decommented" |
+      sed -nE 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' <<<"$imports" |
         grep -v '^import$' || true
     )
     alias=$(printf '%s\n' "$alias" | grep -v '^$' | head -1)
@@ -353,6 +371,31 @@ func commentAlias() context.Context {
 	return context.Background()
 }
 ALIAS
+  # ── an alias must not be readable out of a RAW STRING either ──
+  #
+  # The same mistake as the comment case, one view over: taking the alias from a
+  # view that KEEPS strings admits any line in the file ending in `"context"`,
+  # and a raw string literal spans lines. Both are closed by reading the import
+  # block by position rather than matching the whole file.
+  cat >"$tmp/internal/cloud/aws/rawalias.go" <<'RAW'
+package aws
+
+import "context"
+
+var doc = `
+	ctxpkg "context"
+`
+
+func rawAlias() context.Context {
+	return context.Background()
+}
+RAW
+  rawalias_scan="$(scan_or_die "$tmp")"
+  if ! reports "$rawalias_scan" 'rawalias.go'; then
+    die "a detached context went unreported because a raw string literal set the import alias; the alias must come from the import block, not from a match anywhere in the file"
+  fi
+  rm -f "$tmp/internal/cloud/aws/rawalias.go"
+
   commentalias_scan="$(scan_or_die "$tmp")"
   if ! reports "$commentalias_scan" 'commentalias.go'; then
     die "a detached context went unreported because a block comment set the import alias; one such comment disables this gate for the file that carries it"
@@ -452,7 +495,7 @@ MENTIONS
     die "tree still flagged after every plant was removed: $residue_scan"
   fi
 
-  echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal, past a masking comment and past an alias named only in a comment, cites the right line, and stays silent on compliant code, tests and foreign packages."
+  echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal, past a masking comment and past an alias named only in a comment or a raw string, cites the right line, and stays silent on compliant code, tests and foreign packages."
 }
 
 cd "$(dirname "$0")/.."

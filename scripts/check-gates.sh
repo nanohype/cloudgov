@@ -77,13 +77,28 @@ describe_workflow() {
     /^[a-zA-Z]/ { in_jobs = 0 }
     !in_jobs { next }
 
-    # A top-level job id: exactly two spaces of indent, then "id:".
-    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-      job = $0
-      sub(/^  /, "", job); sub(/:[[:space:]]*$/, "", job)
-      print "JOB " job
-      collecting = 0
-      next
+    # A job id under `jobs:`. Three things vary and all three were assumed:
+    #
+    #   the QUOTE   — YAML permits `deploy:`, '"'"'deploy'"'"': and "deploy":, and a
+    #                 rule matching only the bare form makes a quoted job
+    #                 invisible; it runs, it can go red, and it gates nothing.
+    #   the INDENT  — two spaces is a convention, not a rule.
+    #   the CHARSET — a quoted key may hold characters a bare one may not.
+    #
+    # The indent is taken from the FIRST job seen and every later key must match
+    # it, so a nested map key at a deeper indent is not mistaken for a job.
+    /^[[:space:]]+["'"'"']?[A-Za-z0-9_.-]+["'"'"']?:[[:space:]]*$/ {
+      indent = match($0, /[^[:space:]]/)
+      if (job_indent == 0) job_indent = indent
+      if (indent == job_indent) {
+        job = $0
+        sub(/^[[:space:]]+/, "", job)
+        sub(/:[[:space:]]*$/, "", job)
+        gsub(/^["'"'"']|["'"'"']$/, "", job)
+        print "JOB " job
+        collecting = 0
+        next
+      }
     }
 
     # The gate job is the one whose steps run the merge-gate action. Identified
@@ -91,7 +106,11 @@ describe_workflow() {
     # remove the check.
     /merge-gate@/ { print "GATE " job }
 
-    /^    needs:/ {
+    # `needs:` at the JOB own level, not at any depth. The merge-gate action
+    # takes an input literally called `needs`, nested two levels deeper inside
+    # `with:`, and a depth-blind rule collects the expression there as if it were
+    # a dependency list.
+    /^[[:space:]]+needs:/ && match($0, /[^[:space:]]/) == job_indent + 2 {
       rest = $0
       sub(/^    needs:[[:space:]]*/, "", rest)
       gate_needs_job = job
@@ -105,7 +124,7 @@ describe_workflow() {
     # to the end of the job and every token in it — `steps:`, an action ref, an
     # `if:` expression — is recorded as a dependency, so the gate reads as
     # covering jobs it has never heard of.
-    collecting && /^    [A-Za-z0-9_-]+:/ { collecting = 0 }
+    collecting && /^[[:space:]]+["'"'"']?[A-Za-z0-9_.-]+["'"'"']?:/ { collecting = 0 }
     collecting { emit($0) }
 
     function emit(text,   n, i, parts, closed) {
@@ -116,6 +135,7 @@ describe_workflow() {
       n = split(text, parts, /[[:space:]]+/)
       for (i = 1; i <= n; i++) {
         if (parts[i] == "" || parts[i] == "-") continue
+        gsub(/^["'"'"']|["'"'"']$/, "", parts[i])
         print "NEED " gate_needs_job " " parts[i]
       }
       if (closed) collecting = 0
@@ -355,6 +375,40 @@ YML
   rejection="$(check_merge_gate_coverage "$wf" 2>&1 >/dev/null || true)"
   printf '%s\n' "$rejection" | grep -qF "'beta'" ||
     self_test_die "rejected without naming the ungated job, so the rejection does not say what is wrong: ${rejection}"
+
+  # A QUOTED job key, and one at a different indent. Both are legal YAML and
+  # both were invisible: the rule matched a bare key at exactly two spaces, so a
+  # job written either way ran, could go red, and gated nothing.
+  cat >"$wf/quoted.yml" <<'YML'
+name: quoted
+on: pull_request
+jobs:
+    alpha:
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo alpha
+    "deploy-to-prod":
+      runs-on: ubuntu-latest
+      steps:
+        - run: echo deploying
+    merge-gate:
+      runs-on: ubuntu-latest
+      needs:
+        [
+          alpha,
+        ]
+      if: always()
+      steps:
+        - uses: nanohype/.github/actions/merge-gate@0000000000000000000000000000000000000000 # main
+YML
+  MERGE_GATE_EXEMPT=()
+  if check_merge_gate_coverage "$wf" >/dev/null 2>&1; then
+    self_test_die "a quoted job key at a four-space indent was invisible to the coverage check; it runs, it can go red, and it gates nothing"
+  fi
+  rejection="$(check_merge_gate_coverage "$wf" 2>&1 >/dev/null || true)"
+  printf '%s\n' "$rejection" | grep -qF "deploy-to-prod" ||
+    self_test_die "rejected without naming the quoted job: ${rejection}"
+  rm -f "$wf/quoted.yml"
 
   # An exemption must name a job that exists and is genuinely ungated.
   MERGE_GATE_EXEMPT=("covered.yml|beta|a stated reason")
