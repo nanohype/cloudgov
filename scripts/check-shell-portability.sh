@@ -27,15 +27,87 @@ repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 lib_dir="${repo_root}/scripts/lib"
 
-# Each entry is "label|extended-regex". Enumerated rather than derived: this is a
-# closed list of builtins and expansions bash gained after 3.2, and a rule that
-# tried to infer them from a parse would find none of them.
-BASH4_CONSTRUCTS=(
-  'mapfile|(^|[^[:alnum:]_-])mapfile[[:space:]]'
-  'readarray|(^|[^[:alnum:]_-])readarray[[:space:]]'
-  'associative array|declare[[:space:]]+-[A-Za-z]*A|local[[:space:]]+-[A-Za-z]*A'
-  'case-modifying expansion|\$\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(,,|\^\^)'
+# THREE PARALLEL ARRAYS, indexed together: label, pattern, fixture.
+#
+# Not one packed string per entry. A separator inside a field takes such a string
+# apart, and two of these fields legitimately contain the characters a separator
+# would use — the rule for `|&` is one of them. The arrays are checked for equal
+# length below, because a table whose columns drift is a rule paired with the
+# wrong fixture and it fails silently.
+#
+# DERIVED PER FEATURE, NOT PER SPELLING. An earlier form of this list named
+# `${x^^}` and not `${x^}`, `declare -A` and not -n, -l or -u. Every miss was an
+# adjacent spelling of an absence already known about, and the gate passed its
+# positive control throughout: a control proves detection of the case it plants,
+# never coverage of the class it names. Each rule now matches the FEATURE — the
+# option letter, the expansion operator, the redirection form — not one way of
+# writing it.
+#
+# The fixture is what keeps the list honest. The self-test runs every one under a
+# bash older than 4 and requires it to FAIL there, so an entry stays only while
+# the thing it describes is genuinely absent from bash 3.2. An entry that stops
+# being bash-4-only fails the gate rather than quietly widening it.
+BASH4_LABELS=(
+  'mapfile/readarray builtin'
+  'declare/local/typeset -A (associative array)'
+  'declare/local/typeset -n (nameref)'
+  'declare/local/typeset -l or -u (case attribute)'
+  'case-modifying or transform expansion'
+  'negative array subscript'
+  'printf -v into an array element'
+  'wait -n'
+  'read -N'
+  'pipe stdout and stderr together'
+  'named file descriptor redirection'
+  'shopt globstar'
+  'coproc'
+  'fall-through case clause'
+  'variable-set test'
 )
+
+BASH4_PATTERNS=(
+  '(^|[^[:alnum:]_-])(mapfile|readarray)([[:space:]]|$)'
+  '(declare|local|typeset)[[:space:]]+-[[:alpha:]]*A'
+  '(declare|local|typeset)[[:space:]]+-[[:alpha:]]*n'
+  '(declare|local|typeset)[[:space:]]+-[[:alpha:]]*[lu]'
+  '[$]\{[A-Za-z_][A-Za-z0-9_]*(\[[^]]*\])?(\^|,|@[A-Za-z])'
+  '[$]\{[A-Za-z_][A-Za-z0-9_]*\[[[:space:]]*-[0-9]'
+  'printf[[:space:]]+-v[[:space:]]+["'"'"']?[A-Za-z_][A-Za-z0-9_]*\['
+  '(^|[^[:alnum:]_-])wait[[:space:]]+-[[:alpha:]]*n'
+  '(^|[^[:alnum:]_-])read[[:space:]]+-[[:alpha:]]*N'
+  '[|]&'
+  '\{[A-Za-z_][A-Za-z0-9_]*\}[<>]'
+  'shopt[[:space:]]+-[su][[:space:]]+globstar'
+  '(^|[^[:alnum:]_-])coproc([[:space:]]|$)'
+  ';;&'
+  '\[\[[^]]*-v[[:space:]]'
+)
+
+BASH4_FIXTURES=(
+  'mapfile -t zz < /dev/null'
+  'declare -A zz; zz[k]=v'
+  'zzv=1; declare -n zzr=zzv'
+  'declare -l zz=ABC'
+  'zz=ab; echo "${zz^}"'
+  'zz=(1 2); echo "${zz[-1]}"'
+  'zz=(x); printf -v "zz[0]" "%s" hi'
+  'true & wait -n'
+  'read -N1 zz < /dev/null'
+  'echo hi |& cat'
+  'exec {zzfd}>/dev/null'
+  'shopt -s globstar'
+  'coproc ZZ { cat; }'
+  'case x in x) : ;;& *) : ;; esac'
+  'zz=1; [[ -v zz ]]'
+)
+
+# A table whose columns have drifted pairs each rule with someone else's fixture,
+# and every assertion below still passes while testing the wrong thing.
+if [ "${#BASH4_LABELS[@]}" -ne "${#BASH4_PATTERNS[@]}" ] ||
+  [ "${#BASH4_LABELS[@]}" -ne "${#BASH4_FIXTURES[@]}" ]; then
+  echo "error: the construct table has ${#BASH4_LABELS[@]} label(s), ${#BASH4_PATTERNS[@]} pattern(s) and ${#BASH4_FIXTURES[@]} fixture(s); its columns have drifted apart" >&2
+  exit 2
+fi
 
 # declared_shell prints bash, sh, or other for $1, from its shebang.
 declared_shell() {
@@ -62,7 +134,7 @@ declared_shell() {
 # single quotes it is literal text. A fixture written as a single-quoted literal
 # — the way this gate's own self-test writes its probes — is therefore not a use.
 scan_constructs() {
-  local file="$1" entry label pattern stripped
+  local file="$1" i label pattern stripped
   # Heredocs are blanked FIRST, on the raw file. A heredoc tag is usually
   # quoted — `<<'"'"'FIX'"'"'` — so a string-blanking pass run before this one erases the
   # tag and leaves the body looking like ordinary code.
@@ -70,9 +142,9 @@ scan_constructs() {
     echo "scan_constructs: the comment stripper failed on ${file}; it was not examined" >&2
     return 1
   fi
-  for entry in "${BASH4_CONSTRUCTS[@]}"; do
-    label="${entry%%|*}"
-    pattern="${entry#*|}"
+  for i in "${!BASH4_PATTERNS[@]}"; do
+    label="${BASH4_LABELS[$i]}"
+    pattern="${BASH4_PATTERNS[$i]}"
     printf '%s\n' "$stripped" |
       grep -nE -- "$pattern" |
       sed "s|^|${label}:|" || true
@@ -110,23 +182,39 @@ self_test() {
   [ "$(declared_shell "$tmp/b.sh")" = sh ] || self_test_die "a /bin/sh shebang was not classified as sh"
   [ "$(declared_shell "$tmp/c.py")" = other ] || self_test_die "a python shebang was classified as a shell script"
 
-  # ── one violation per fixture, and the detector proven in both directions ──
+  # ── every entry, both directions, one fixture each ──
   #
   # Each construct gets its own file. A fixture carrying two would be rejected
   # for whichever is found first and would prove nothing about the other.
-  printf '#!/usr/bin/env bash\nmapfile -t x < /dev/null\n' >"$tmp/m.sh"
-  printf '#!/usr/bin/env bash\nreadarray -t x < /dev/null\n' >"$tmp/r.sh"
-  printf '#!/usr/bin/env bash\ndeclare -A x\n' >"$tmp/d.sh"
-  printf '#!/usr/bin/env bash\ny=ABC\necho "${y,,}"\n' >"$tmp/l.sh"
-  # Quoted singly so this list is data to the scanner as well as to the reader:
-  # a bare `mapfile` token here is a use of the construct as far as any view of
-  # this file's code is concerned, and the gate would reject itself for carrying
-  # its own fixtures.
-  for probe in 'm:mapfile' 'r:readarray' 'd:associative' 'l:case-modifying'; do
-    found="$(scanned "$tmp/${probe%%:*}.sh")"
-    printf '%s\n' "$found" | grep -qF "${probe#*:}" ||
-      self_test_die "a ${probe#*:} construct was not detected (got: ${found})"
+  #
+  # Two assertions per entry, and the second is what makes the list a class
+  # rather than a habit:
+  #
+  #   the scanner DETECTS it        — the rule matches the feature it names
+  #   an old bash REJECTS it        — the feature really is absent from bash 3.2
+  #
+  # Without the second, an entry can describe something bash 3.2 supports
+  # perfectly well and nobody finds out. Without the first, the entry is prose.
+  local i label fixture probe_file detected old_probe old_rc verified=0
+  for i in "${!BASH4_PATTERNS[@]}"; do
+    label="${BASH4_LABELS[$i]}"
+    fixture="${BASH4_FIXTURES[$i]}"
+    probe_file="$tmp/construct.sh"
+    printf '#!/usr/bin/env bash\nset -euo pipefail\n%s\n' "$fixture" >"$probe_file"
+
+    detected="$(scanned "$probe_file")"
+    [ -n "$detected" ] ||
+      self_test_die "the rule for '${label}' does not match its own fixture: ${fixture}"
+
+    if [ -n "${SELF_TEST_OLD_BASH:-}" ]; then
+      old_rc=0
+      old_probe="$("$SELF_TEST_OLD_BASH" "$probe_file" 2>&1)" || old_rc=$?
+      [ "$old_rc" -ne 0 ] ||
+        self_test_die "'${label}' is listed as unavailable before bash 4, and $("$SELF_TEST_OLD_BASH" --version | head -1 | sed 's/ (.*//') ran it without error; the entry describes an absence that is not there"
+      verified=$((verified + 1))
+    fi
   done
+  rm -f "$tmp/construct.sh"
 
   # A clean bash 4-free script must produce nothing — the same detector, the
   # other direction, so a rule matching everything fails here too.
@@ -156,8 +244,39 @@ self_test() {
   [ -z "$(scanned "$tmp/prose.sh")" ] ||
     self_test_die "a construct named in a comment was counted as a use of it"
 
-  echo "check-shell-portability self-test passed: it classifies shebangs, detects each bash 4 construct on its own fixture, stays silent on portable code, and does not read a comment as code."
+  # The denominator, and which of the two answers this machine gave. A table
+  # verified by execution and one merely asserted are different claims, and a
+  # single "passed" line for both hides the machine that could have checked.
+  if [ -n "${SELF_TEST_OLD_BASH:-}" ]; then
+    printf 'check-shell-portability self-test passed: %s construct(s) each detected by its own rule and each CONFIRMED absent by running it under %s; shebangs classified; portable code, comments and heredoc bodies left alone.\n' \
+      "$verified" "$("$SELF_TEST_OLD_BASH" --version | head -1 | sed 's/ (.*//')"
+  else
+    printf 'check-shell-portability self-test passed: %s construct(s) each detected by its own rule; shebangs classified; portable code, comments and heredoc bodies left alone. No bash older than 4 on this machine, so the table was NOT confirmed by execution.\n' \
+      "${#BASH4_PATTERNS[@]}"
+  fi
 }
+
+# ─── the old interpreter, found before anything depends on it ───
+#
+# Both the self-test and the run probe need it, and the self-test needs it FIRST:
+# it uses it to confirm that every construct in the table really is absent from a
+# bash older than 4. Discovering it after the self-test would leave that half of
+# the table unverified on the one machine able to verify it.
+old_bash=""
+for candidate in /bin/bash /usr/bin/bash; do
+  [ -x "$candidate" ] || continue
+  major="$("$candidate" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null || echo 0)"
+  if [ "${major:-0}" -gt 0 ] && [ "$major" -lt 4 ]; then
+    old_bash="$candidate"
+    break
+  fi
+done
+
+# The self-test reads this to decide whether it can verify the table by
+# execution. Empty is not a failure — it is a machine with no old bash — and the
+# gate says which of the two happened rather than reporting the same line for
+# both.
+SELF_TEST_OLD_BASH="$old_bash"
 
 self_test
 
@@ -200,16 +319,6 @@ fi
 # a bash exists — a macOS system bash, not a CI runner. Which one happened is
 # printed, because "portable" backed by a scan and "portable" backed by a run are
 # different claims and must not read alike.
-old_bash=""
-for candidate in /bin/bash /usr/bin/bash; do
-  [ -x "$candidate" ] || continue
-  major="$("$candidate" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null || echo 0)"
-  if [ "${major:-0}" -gt 0 ] && [ "$major" -lt 4 ]; then
-    old_bash="$candidate"
-    break
-  fi
-done
-
 if [ -n "$old_bash" ]; then
   probe_failures=0
   probed=0
