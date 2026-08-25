@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -96,7 +95,11 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	findings = filterPlatformBySeverity(findings, strings.ToUpper(platformSeverity))
+	minSeverity, err := resolveSeverity(platformSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	findings = filterPlatformBySeverity(findings, minSeverity)
 
 	// Warnings raised while reading tenant roles accumulate on the provider and
 	// are only a record if something reads them. The cluster side has no
@@ -136,8 +139,11 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func filterPlatformBySeverity(in []cloud.PlatformFinding, min string) []cloud.PlatformFinding {
-	minRank := cloud.SeverityRank(cloud.Severity(min))
+// The threshold arrives already validated. Casting a raw flag here instead
+// would rank an unrecognised level 0, and every real level outranks 0 — so a
+// typo widens this filter to everything rather than failing.
+func filterPlatformBySeverity(in []cloud.PlatformFinding, min cloud.Severity) []cloud.PlatformFinding {
+	minRank := cloud.SeverityRank(min)
 	out := in[:0]
 	for _, f := range in {
 		if cloud.SeverityRank(f.Severity) >= minRank {

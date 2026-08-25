@@ -129,7 +129,7 @@ type complianceInput struct {
 }
 
 type repoInput struct {
-	Org      string `json:"org,omitempty" jsonschema:"GitHub organization (default nanohype)"`
+	Org      string `json:"org" jsonschema:"GitHub organization to audit; required, and there is no default"`
 	Expected string `json:"expected,omitempty" jsonschema:"path to the expected-repo-settings YAML (default expected-repo-settings.yaml)"`
 	Severity string `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 }
@@ -373,7 +373,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings = filterK8sBySeverity(findings, string(minSeverity))
+			findings = filterK8sBySeverity(findings, minSeverity)
 			return jsonResult(func(w io.Writer) error { return output.WriteK8sFindings(w, findings, nil) })
 		})
 
@@ -406,9 +406,15 @@ func registerMCPTools(s *mcp.Server) {
 			if serr != nil {
 				return nil, nil, serr
 			}
+			// No default. A compiled-in organization makes a call with no
+			// argument sweep repositories the caller does not own and report
+			// findings about them — and over MCP the caller is a model that has
+			// no way to know a default was applied. The CLI flag carries the same
+			// rule; a tool schema is the surface where a default is hardest to
+			// see, not the one where it is safest.
 			org := in.Org
 			if org == "" {
-				org = "nanohype"
+				return nil, nil, fmt.Errorf("org is required: name the GitHub organization to audit")
 			}
 			expectedPath := in.Expected
 			if expectedPath == "" {
@@ -472,7 +478,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings = filterPlatformBySeverity(findings, string(minSeverity))
+			findings = filterPlatformBySeverity(findings, minSeverity)
 			incomplete := append(cloud.Incomplete(awsProviders), unread...)
 			if roles == nil {
 				incomplete = append(incomplete,

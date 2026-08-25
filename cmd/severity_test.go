@@ -91,6 +91,16 @@ func TestSeverityUsageNamesEveryAcceptedLevel(t *testing.T) {
 // validator that was written to close exactly this — the fix pass reported the
 // class closed while a third of the surface still did it. Enumerating the AST is
 // what makes a new one fail rather than join them.
+// severityCastExempt names files whose cast is of a value this program produced,
+// not of a string a caller supplied. Each carries the reason, and each is
+// asserted to still apply.
+var severityCastExempt = map[string]string{
+	"audit.go": "casts the keys of report.Summary.BySeverity, which this program " +
+		"filled from cloud.Severity values it produced; there is no caller string here.",
+}
+
+var exercisedSeverityExemptions map[string]string
+
 func TestNoCommandCastsAnUnvalidatedSeverity(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -101,6 +111,8 @@ func TestNoCommandCastsAnUnvalidatedSeverity(t *testing.T) {
 	// validating. Naming the file rather than the expression keeps the exemption
 	// narrow and visible.
 	const validator = "severity.go"
+
+	exercisedSeverityExemptions = map[string]string{}
 
 	files := 0
 	offenders := 0
@@ -128,20 +140,24 @@ func TestNoCommandCastsAnUnvalidatedSeverity(t *testing.T) {
 			if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "cloud" {
 				return true
 			}
-			// A conversion of a literal or of an already-resolved value is fine;
-			// what is not is converting a raw flag or input string.
-			inner, ok := call.Args[0].(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			innerSel, ok := inner.Fun.(*ast.SelectorExpr)
-			if !ok || innerSel.Sel == nil {
-				return true
-			}
-			if innerSel.Sel.Name != "ToUpper" && innerSel.Sel.Name != "ToLower" {
+			// PER FEATURE, NOT PER SPELLING. An earlier form of this check
+			// matched only `cloud.Severity(strings.ToUpper(x))` and therefore
+			// walked past `cloud.Severity(min)` in two commands — the same class,
+			// one spelling shorter. What matters is not how the string was
+			// prepared but that it is a string rather than a literal: any
+			// non-literal argument is a value whose membership in the vocabulary
+			// nothing has checked.
+			if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Kind == token.STRING {
 				return true
 			}
 			if name == validator {
+				return true
+			}
+			// The internally produced values, named with the reason each is not a
+			// caller-supplied string. An entry naming an expression that no longer
+			// appears fails below, so a stale exemption cannot sit here quietly.
+			if reason, exempt := severityCastExempt[name]; exempt {
+				exercisedSeverityExemptions[name] = reason
 				return true
 			}
 			offenders++
@@ -156,6 +172,15 @@ func TestNoCommandCastsAnUnvalidatedSeverity(t *testing.T) {
 		t.Fatal("no cmd source files found; this check would pass vacuously")
 	}
 	t.Logf("examined %d file(s) in cmd/, %d unvalidated cast(s)", files, offenders)
+
+	// An exemption that applies to nothing reads exactly like one that is
+	// load-bearing, and it is how a list of them grows past what it covers.
+	for name := range severityCastExempt {
+		if _, used := exercisedSeverityExemptions[name]; !used {
+			t.Errorf("%s is exempted from the severity-cast rule and contains no cast to exempt; "+
+				"remove the entry rather than leaving a rule that matches nothing", name)
+		}
+	}
 }
 
 // The detector must be able to find one, or the clean sweep above means nothing.

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -77,7 +76,11 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 	// are different claims, and this is the empty one.
 	k8sUnread := []string{}
 
-	findings = filterK8sBySeverity(findings, strings.ToUpper(k8sMinSeverity))
+	minSeverity, err := resolveSeverity(k8sMinSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	findings = filterK8sBySeverity(findings, minSeverity)
 
 	gate(findings, func(f cloud.K8sFinding) cloud.Severity { return f.Severity })
 
@@ -114,8 +117,11 @@ func openK8sOutput() (out *os.File, closer func(), err error) {
 	return f, func() { _ = f.Close() }, nil
 }
 
-func filterK8sBySeverity(in []cloud.K8sFinding, min string) []cloud.K8sFinding {
-	minRank := cloud.SeverityRank(cloud.Severity(min))
+// The threshold arrives already validated. Casting a raw flag here instead
+// would rank an unrecognised level 0, and every real level outranks 0 — so a
+// typo widens this filter to everything rather than failing.
+func filterK8sBySeverity(in []cloud.K8sFinding, min cloud.Severity) []cloud.K8sFinding {
+	minRank := cloud.SeverityRank(min)
 	out := in[:0]
 	for _, f := range in {
 		if cloud.SeverityRank(f.Severity) >= minRank {

@@ -43,9 +43,30 @@ cd "$repo_root"
 # and those files are checked. Narrowing the rule is the alternative to a rule
 # that produces false failures, which is worse — a gate that cries wolf gets its
 # exclusions widened until it matches nothing.
+# repo_extensions prints the alternation of every file extension present in this
+# tree, for the span test below.
+#
+# DERIVED, NOT LISTED. A hand-written set of extensions has the same shape as a
+# hand-written set of language constructs: right when written, silently missing
+# the next file type added, and prose naming that file then goes unchecked. The
+# list here named go, sh, md, yaml, json, awk, py, txt and html; this repo also
+# carries go.mod and go.sum, both named in prose and neither checked.
+repo_extensions() {
+  find . -type f -not -path './.git/*' |
+    sed -n 's/.*\.\([A-Za-z0-9][A-Za-z0-9]*\)$/\1/p' |
+    sort -u |
+    tr '\n' '|' |
+    sed 's/|$//'
+}
+
 extract_paths() {
-  local file="$1"
-  awk '
+  local file="$1" exts
+  exts="$(repo_extensions)"
+  if [ -z "$exts" ]; then
+    echo "extract_paths: no file extensions found in this tree; every code span would be out of scope" >&2
+    return 1
+  fi
+  awk -v exts="$exts" '
     {
       line = $0
 
@@ -81,7 +102,7 @@ extract_paths() {
         # because there a bare word is not distinguishable from prose.
         if (!is_link) {
           if (span !~ /\//) continue
-          if (span !~ /\.(go|sh|md|ya?ml|json|awk|py|txt|html)$/) continue
+          if (span !~ ("\\.(" exts ")$")) continue
         }
 
         if (span ~ /^https?:/) continue                  # a URL
@@ -186,6 +207,17 @@ MD
 ' >"$tmp/bareword.md"
   [ -z "$(extract_paths "$tmp/bareword.md")" ] ||
     self_test_die "a bare word in backticks was treated as a path claim"
+
+  # The extension set is derived from the tree, so the derivation needs its own
+  # control: an empty or wrong set silently puts every code span out of scope,
+  # and the gate then reports every document clean.
+  case "|$(repo_extensions)|" in
+    *"|sh|"*) ;;
+    *) self_test_die "the derived extension set omits sh, and this tree contains shell scripts; the derivation has stopped reading the tree" ;;
+  esac
+  case "|$(repo_extensions)|" in
+    *"|zzmadeup|"*) self_test_die "the derived extension set contains an extension no file in this tree uses" ;;
+  esac
 
   # A document naming no paths must extract nothing rather than something.
   printf 'Prose with no code spans at all.\n' >"$tmp/bare.md"
