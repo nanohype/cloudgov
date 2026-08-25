@@ -21,6 +21,7 @@ permissions:
 
 jobs:
   goreleaser:
+    name: goreleaser
     runs-on: ubuntu-latest
     # goreleaser creates the GitHub release and uploads the archives to it.
     # contents: write is the grant that upload needs and the only one this job

@@ -96,8 +96,38 @@ evaluate_floors() {
   while read -r line; do
     # Strip trailing comments so a floor may carry its justification inline.
     line="${line%%#*}"
-    read -r kind target floor <<<"$line"
+    read -r kind target floor extra <<<"$line"
     [ -n "${kind:-}" ] || continue
+
+    # ─── the floor VALUE, before anything is compared against it ───
+    #
+    # This gate READS .coverage-floors and interpolates the floor straight into
+    # an awk expression. An unvalidated value is not a typo that fails loudly:
+    # a non-numeric floor becomes an uninitialised awk variable worth 0, so the
+    # comparison is false and the entry prints a green `ok` line — while still
+    # incrementing the evaluated denominator, so the anti-vacuity check reads as
+    # satisfied too. A missing third field makes the awk a syntax error, whose
+    # non-zero exit is likewise read as "not below floor".
+    #
+    # Silent on both sides is exactly the shape this file's own kind check was
+    # written to catch, one field to the left.
+    case "$floor" in
+      "" )
+        echo "::error::${floors_file}: '${kind} ${target}' declares no floor; a floor line with no number enforces nothing"
+        fail=1
+        continue
+        ;;
+      *[!0-9.]* | *.*.* | . )
+        echo "::error::${floors_file}: '${kind} ${target}' declares floor '${floor}', which is not a number; it would compare as zero and pass anything"
+        fail=1
+        continue
+        ;;
+    esac
+    if [ -n "${extra:-}" ]; then
+      echo "::error::${floors_file}: '${kind} ${target} ${floor}' carries trailing content '${extra}'; a floor line is three fields and the rest is silently discarded"
+      fail=1
+      continue
+    fi
 
     case "$kind" in
     package)

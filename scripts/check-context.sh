@@ -65,7 +65,7 @@ lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
 # The trailing `|| true` on the pipeline is deliberate: grep exits 1 on "no
 # matches", which under `set -e` would abort the script on the *success* case.
 scan_tree() {
-  local root="$1" file stripped alias
+  local root="$1" file stripped alias decommented
   while IFS= read -r file; do
     case "$file" in *_test.go) continue ;; esac
     # The stripper's status is tested here rather than left to `set -e`. A
@@ -73,6 +73,10 @@ scan_tree() {
     # errexit suppressed throughout, so a failing command inside this loop would
     # not abort it and the file would simply contribute no lines. That turns a
     # stripper that cannot read a file into a file with nothing to report.
+    if ! decommented=$(awk -v style=go -f "${lib_dir}/strip-comments.awk" "$file"); then
+      echo "scan_tree: the comment stripper failed on ${file}; this file was not examined" >&2
+      return 1
+    fi
     if ! stripped=$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$file"); then
       echo "scan_tree: the comment stripper failed on ${file}; this file was not examined" >&2
       return 1
@@ -83,10 +87,17 @@ scan_tree() {
     # "context." does not match at all — an escape that needs no intent, just an
     # import line.
     #
-    # Read from the RAW file, not the stripped view: the import PATH is string
-    # content, and `strings=blank` empties it. This is the view-per-check rule in
-    # its other direction — the matcher below wants code, this wants the string,
-    # and taking both from one view gets one of them wrong.
+    # Read from the COMMENT-STRIPPED view with strings intact — a third view,
+    # distinct from both the raw file and the string-blanked one the matcher uses.
+    #
+    # The import PATH is string content, so `strings=blank` empties it and no
+    # alias is ever found. The raw file is wrong in the other direction, and
+    # worse: any indented line ending in `"context"` binds the alias, INCLUDING
+    # one inside a block comment. A file carrying such a comment resolves its
+    # alias to a name nothing calls, the matcher greps for a method on that name,
+    # and every detached context in that file goes unreported. Reading the raw
+    # file to avoid one blanking bug reintroduced the comment-reading bug this
+    # gate exists to prevent, one layer up from the exclusion that had it.
     # Four spellings bind the package, and only two of them carry an alias:
     #
     #   import "context"           -> context     (the `import` keyword is not a name)
@@ -100,12 +111,12 @@ scan_tree() {
     # floor caught it.
     alias=$(
       # `import ctxpkg "context"` — a single-line aliased import.
-      sed -nE 's/^[[:space:]]*import[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' "$file"
+      sed -nE 's/^[[:space:]]*import[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' <<<"$decommented"
       # `    ctxpkg "context"` — an aliased import inside a block. The `import`
       # keyword is excluded explicitly rather than by pattern shape, because an
       # optional-group spelling binds the alias to the keyword on the plain
       # `import "context"` line and matches nothing thereafter.
-      sed -nE 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' "$file" |
+      sed -nE 's/^[[:space:]]+([A-Za-z_][A-Za-z0-9_]*)[[:space:]]+"context"[[:space:]]*$/\1/p' <<<"$decommented" |
         grep -v '^import$' || true
     )
     alias=$(printf '%s\n' "$alias" | grep -v '^$' | head -1)
@@ -324,6 +335,30 @@ func quoteChar() byte {
 	return byte(q)
 }
 RUNECLEAN
+  # ── an alias must not be readable out of a COMMENT ──
+  #
+  # The alias resolver decides which name the matcher greps for. If a block
+  # comment can set it, one comment anywhere in a file silently disables the gate
+  # for that whole file — the escape needs no intent, only a doc comment showing
+  # an aliased import.
+  cat >"$tmp/internal/cloud/aws/commentalias.go" <<'ALIAS'
+package aws
+
+import "context"
+
+/*
+	ctxpkg "context"
+*/
+func commentAlias() context.Context {
+	return context.Background()
+}
+ALIAS
+  commentalias_scan="$(scan_or_die "$tmp")"
+  if ! reports "$commentalias_scan" 'commentalias.go'; then
+    die "a detached context went unreported because a block comment set the import alias; one such comment disables this gate for the file that carries it"
+  fi
+  rm -f "$tmp/internal/cloud/aws/commentalias.go"
+
   runeclean_scan="$(scan_or_die "$tmp")"
   if reports "$runeclean_scan" 'runeclean.go'; then
     die "a file whose only single quotes are a rune literal was flagged: $runeclean_scan"
@@ -417,7 +452,7 @@ MENTIONS
     die "tree still flagged after every plant was removed: $residue_scan"
   fi
 
-  echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal and past a masking comment, cites the right line, and stays silent on compliant code, tests and foreign packages."
+  echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal, past a masking comment and past an alias named only in a comment, cites the right line, and stays silent on compliant code, tests and foreign packages."
 }
 
 cd "$(dirname "$0")/.."

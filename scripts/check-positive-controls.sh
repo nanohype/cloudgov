@@ -148,15 +148,46 @@ CRASH_INDICATORS=(
 # Both halves are needed. Absence of a crash indicator does not prove the gate
 # got to its own conclusion, and a verdict line printed before a later crash does
 # not prove it finished — so the output must carry a verdict AND no crash.
+#
+# TWO RULES, AND THE NUMBER COMES FIRST.
+#
+# A status of 126 or 127 means the shell could not execute something: a missing
+# interpreter, a vanished binary. A gate that exits that way evaluated nothing.
+# The text rule cannot see the worst shape of this — a gate that exits 127 having
+# printed NOTHING carries no indicator to match, and a floor screening only text
+# records it as the strictest gate in the suite. The number is the only thing
+# left to read.
+#
+# The text rule stays for the shape the number cannot see: a gate that died
+# mid-run, said so, and exited 1 like an ordinary rejection.
+#
+# ORDER MATTERS BETWEEN THEM. A gate whose own verdict QUOTES a diagnostic — the
+# portability gate reports `mapfile: command not found` as its finding — reaches a
+# verdict and prints it. Letting a text indicator veto a printed verdict marks a
+# working gate as crashed, so the verdict is checked before the text and the text
+# only decides cases where no verdict was reached.
 controlled_rejection() {
-  local output="$1" indicator
+  local output="$1" status="${2:-1}" indicator
+
+  # The number, first, because a silent crash has nothing else to read.
+  case "$status" in
+    126 | 127)
+      return 1
+      ;;
+  esac
+
+  if printf '%s\n' "$output" | grep -qE '^(== .* NOT met ==|[a-z-]+ self-test FAILED: )'; then
+    return 0
+  fi
+
+  # No verdict. Whether it crashed or merely exited quietly, it is not a catch —
+  # the indicators below only sharpen the message.
   for indicator in "${CRASH_INDICATORS[@]}"; do
     if printf '%s\n' "$output" | grep -qF -- "$indicator"; then
       return 1
     fi
   done
-  printf '%s\n' "$output" | grep -qE '^(== .* NOT met ==|[a-z-]+ self-test FAILED: )' || return 1
-  return 0
+  return 1
 }
 
 # ── Why this script self-tests ────────────────────────────────────────────────
@@ -220,7 +251,37 @@ cat: /nonexistent/zzctl06path: No such file or directory'
   ! controlled_rejection 'something went wrong' ||
     self_test_die "accepted output carrying no verdict line as a rejection"
 
-  echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, and a non-zero exit with no verdict."
+  # ── the shape a text rule cannot see ──
+  #
+  # A gate whose interpreter or tool has vanished exits 127 having evaluated
+  # nothing, and it may print NOTHING on the way out. There is no indicator to
+  # match, so a floor screening only text scores it as the strictest gate in the
+  # suite. Only the number is left.
+  local silent_tmp silent_out silent_status
+  silent_tmp="$(mktemp -d)"
+  printf '#!/usr/bin/env bash\nexit 127\n' >"$silent_tmp/silent127.sh"
+  silent_status=0
+  silent_out="$(bash "$silent_tmp/silent127.sh" 2>&1)" || silent_status=$?
+
+  # The control must still be the case it exists for. A fixture that starts
+  # printing, or stops exiting 127, silently stops testing a silent 127.
+  [ "$silent_status" -eq 127 ] ||
+    self_test_die "the silent-crash control exited ${silent_status}, not 127; it no longer constructs the case it exists for"
+  [ -z "$silent_out" ] ||
+    self_test_die "the silent-crash control printed output, so it now tests the text rule rather than the numeric one: ${silent_out}"
+
+  ! controlled_rejection "$silent_out" "$silent_status" ||
+    self_test_die "scored a silent exit 127 as a rejection; a gate whose tool vanished evaluated nothing and read as the strictest gate in the suite"
+  ! controlled_rejection "cannot execute: No such file or directory" 127 ||
+    self_test_die "scored an exit 127 as a rejection even with a crash message present"
+  rm -rf "$silent_tmp"
+
+  # A gate whose own VERDICT quotes a diagnostic has reached a verdict. Letting a
+  # text indicator veto a printed verdict marks a working gate as crashed.
+  controlled_rejection "$(printf '::error::x uses mapfile: command not found\n== shell portability NOT met ==\n')" 1 ||
+    self_test_die "a printed verdict was vetoed because the finding it reports quotes a shell diagnostic"
+
+  echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, a non-zero exit with no verdict, a SILENT exit 127, and a real verdict that quotes a shell diagnostic."
 }
 
 self_test
@@ -249,7 +310,7 @@ controlled=()
 #   $6 a literal string the gate's REJECTION must contain
 run_control() {
   local gate="$1" description="$2" target="$3" writer="$4" marker="$5" names="$6"
-  local before after rejection mutated_before indicator
+  local before after rejection rejection_status mutated_before indicator
 
   # A writer may touch more than the primary target — a fixture that trips TWO
   # rules proves nothing about either, because the gate rejects for whichever it
@@ -302,7 +363,9 @@ run_control() {
     return
   fi
 
-  if rejection=$(bash "$gate" 2>&1); then
+  rejection_status=0
+  rejection=$(bash "$gate" 2>&1) || rejection_status=$?
+  if [ "$rejection_status" -eq 0 ]; then
     echo "::error::$(basename "$gate") passed with ${description} present in ${target}; the gate does not catch what it exists to catch" >&2
     fail=1
     unmutate_since "$mutated_before"
@@ -314,8 +377,8 @@ run_control() {
   # Checked before the naming rule, because a gate that crashes while processing
   # the planted file prints its name on the way down and satisfies that rule
   # while proving nothing.
-  if ! controlled_rejection "$rejection"; then
-    echo "::error::$(basename "$gate") exited non-zero without reaching a verdict — it crashed rather than rejecting, and a crash is not a catch" >&2
+  if ! controlled_rejection "$rejection" "$rejection_status"; then
+    echo "::error::$(basename "$gate") exited ${rejection_status} without reaching a verdict — it crashed rather than rejecting, and a crash is not a catch" >&2
     printf '%s\n' "$rejection" | sed 's/^/    /' >&2
     fail=1
     unmutate_since "$mutated_before"
@@ -514,7 +577,7 @@ dependency_controlled=()
 
 run_dependency_control() {
   local gate="$1" lib="$2" marker="$3"
-  local clean rejection mutated_before
+  local clean rejection rejection_status mutated_before
 
   if [ ! -f "$gate" ] || [ ! -f "$lib" ]; then
     echo "::error::a dependency control names ${gate} and ${lib}; one of them does not exist" >&2
@@ -562,15 +625,17 @@ PY
     return
   fi
 
-  if rejection=$(bash "$gate" 2>&1); then
+  rejection_status=0
+  rejection=$(bash "$gate" 2>&1) || rejection_status=$?
+  if [ "$rejection_status" -eq 0 ]; then
     echo "::error::$(basename "$gate") passed with ${lib} unable to run; it reported a clean tree it could not read" >&2
     fail=1
     unmutate_since "$mutated_before"
     return
   fi
 
-  if ! controlled_rejection "$rejection"; then
-    echo "::error::$(basename "$gate") exited non-zero against a broken ${lib} without reaching a verdict; a crash is not a catch" >&2
+  if ! controlled_rejection "$rejection" "$rejection_status"; then
+    echo "::error::$(basename "$gate") exited ${rejection_status} against a broken ${lib} without reaching a verdict; a crash is not a catch" >&2
     printf '%s\n' "$rejection" | sed 's/^/    /' >&2
     fail=1
     unmutate_since "$mutated_before"

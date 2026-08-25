@@ -135,16 +135,13 @@ jobs:
           # than a style checker: its lower tiers are advisory (documenting a
           # permissions block, per-job concurrency) and failing a merge on those
           # is how a gate gets bypassed.
-          # min-severity=low, not high. Every workflow here is this repo's own,
-          # so every tier is a tier this repo can act on — and a threshold set
-          # above what you can fix turns a bare "ok" into something
-          # indistinguishable from nothing-found. The findings sitting one level
-          # under a threshold are the ones nobody goes looking for.
-          #
-          # zizmor's own suppression count is printed for the same reason: it is
-          # the denominator behind "no findings", and a suppression that grows
-          # silently is how this output stops meaning anything.
-          zizmor --offline --persona=auditor --min-severity=low .github/workflows/
+          # NO severity filter. `--min-severity` narrows: zizmor already
+          # defaults to the most inclusive tier, so naming a level can only
+          # remove findings, and a threshold turns a bare "ok" into something
+          # indistinguishable from nothing-found. Every workflow here belongs to
+          # this repo, so every tier is one this repo can act on, and there is
+          # nothing to trade away.
+          zizmor --offline --persona=auditor .github/workflows/
 
   merge-gate-security:
     name: merge gate (security)

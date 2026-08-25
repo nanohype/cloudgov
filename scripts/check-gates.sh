@@ -26,15 +26,28 @@ cd "$repo_root"
 
 self="$(basename "${BASH_SOURCE[0]}")"
 
-# workflow_runs reports whether any workflow in $2 executes the script named $1.
+# workflow_runs reports whether any workflow in $2 EXECUTES the script named $1.
 #
-# Comments are stripped first. A workflow carrying `# run: bash scripts/x.sh`
-# documents an intention; it does not run anything.
+# The question is about run: steps, and only about them. Searching the whole
+# workflow answers a different question — it counts a step `name:`, an `env:`
+# value, an `echo`, and a step carrying `if: false`, so a gate can be named all
+# over a workflow and executed by none of it. Comments are stripped for the same
+# reason one layer down: `# run: bash scripts/x.sh` documents an intention and
+# runs nothing.
 workflow_runs() {
-  local name="$1" workflows="$2" file
+  local name="$1" workflows="$2" file decommented
   for file in "$workflows"/*.yml "$workflows"/*.yaml; do
     [ -f "$file" ] || continue
-    if awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file" | grep -qF "scripts/${name}"; then
+    if ! decommented="$(awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file")"; then
+      echo "workflow_runs: the comment stripper failed on ${file}; it was not examined" >&2
+      return 2
+    fi
+    # The extractor prefixes each line with its source line number so a caller
+    # can cite it; that prefix is cut here, because the matcher below anchors on
+    # command position and a citation would sit where the command belongs.
+    if awk -f "${lib_dir}/workflow-run-steps.awk" <<<"$decommented" |
+      cut -d: -f2- |
+      grep -qE "$(invocation_pattern "$name")"; then
       return 0
     fi
   done
@@ -184,6 +197,33 @@ check_merge_gate_coverage() {
 # Its one check is a grep over YAML, which is the shape that silently matches
 # nothing when a path convention changes — and reports that as every gate being
 # wired.
+# invocation_pattern builds the expression for "this line RUNS scripts/$1".
+#
+# COMMAND POSITION, not presence. The path appearing anywhere is satisfied by an
+# `echo` that prints it, an `env:` value, a step name, and a sentence telling
+# contributors not to run it — every position except the one that executes. Both
+# halves of this gate ask the same question, so they share the answer: a
+# divergence between them is a rule proven on one surface and assumed on the
+# other.
+#
+# The interpreter is REQUIRED rather than optional, which excludes a bare
+# `scripts/x.sh` invoked through its shebang. That form is legal and is read here
+# as unwired — a visible false failure the author resolves by writing the
+# interpreter, rather than a silent pass, which is the direction to be wrong in.
+invocation_pattern() {
+  printf '(^|`)[[:space:]]*(bash[[:space:]]+|sh[[:space:]]+|\./)scripts/%s([[:space:]]|`|$)' "$1"
+}
+
+# checklist_names reports whether $2 tells a contributor to RUN the gate $1.
+#
+# Named in command position, not merely mentioned. A sentence saying a gate was
+# deleted and must not be run contains its path and satisfies a plain search,
+# leaving the checklist missing the one line a contributor needs.
+checklist_names() {
+  local name="$1" doc="$2"
+  grep -qE "$(invocation_pattern "$name")" "$doc"
+}
+
 self_test_die() {
   echo "check-gates self-test FAILED: $*" >&2
   echo "The gate could not be shown to reject, so its pass is not evidence." >&2
@@ -213,13 +253,37 @@ WF
   ! workflow_runs "absent.sh" "$tmp/workflows" 2>/dev/null ||
     self_test_die "reported a gate no workflow mentions as wired"
 
+  # Present in every position except the one that executes it.
+  cat >"$tmp/workflows/mentioned.yml" <<'WF'
+jobs:
+  build:
+    env:
+      GATE: scripts/mentioned.sh
+    steps:
+      - name: skipped scripts/mentioned.sh
+        if: false
+        run: echo nothing
+      - run: echo "see scripts/mentioned.sh for details"
+WF
+  ! workflow_runs "mentioned.sh" "$tmp/workflows" 2>/dev/null ||
+    self_test_die "a gate named in a step name, an env value and a skipped step counted as CI running it"
+  rm -f "$tmp/workflows/mentioned.yml"
+
   # The contributor-checklist half uses the same matcher, so one control covers
   # both: a name present is found, a name absent is not.
+  # The PRODUCTION matcher, not a stand-in for it. A control exercising a
+  # different expression than the one that ships proves nothing about the one
+  # that ships.
   printf 'Run `bash scripts/wired.sh` before opening a PR.
 ' >"$tmp/CONTRIBUTING.md"
-  grep -qF "scripts/wired.sh" "$tmp/CONTRIBUTING.md" ||
+  checklist_names "wired.sh" "$tmp/CONTRIBUTING.md" ||
     self_test_die "a gate named in a checklist was not found in it"
-  if grep -qF "scripts/absent.sh" "$tmp/CONTRIBUTING.md"; then
+  printf 'We used to run `scripts/removed.sh`; it is gone, do not run it.
+' >>"$tmp/CONTRIBUTING.md"
+  if checklist_names "removed.sh" "$tmp/CONTRIBUTING.md"; then
+    self_test_die "a sentence telling contributors NOT to run a gate satisfied the checklist rule"
+  fi
+  if checklist_names "absent.sh" "$tmp/CONTRIBUTING.md"; then
     self_test_die "a gate the checklist does not name was found in it"
   fi
 
@@ -384,7 +448,7 @@ fi
 # named to the reader, and stripping comments from markdown would strip nothing.
 for script in scripts/*.sh; do
   name="$(basename "$script")"
-  if ! grep -qF "scripts/${name}" CONTRIBUTING.md; then
+  if ! checklist_names "$name" CONTRIBUTING.md; then
     echo "::error::${name} is run by CI and is not named in CONTRIBUTING.md; a contributor following the checklist would fail on it" >&2
     fail=1
   fi

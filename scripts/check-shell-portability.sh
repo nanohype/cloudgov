@@ -85,8 +85,20 @@ self_test_die() {
   exit 1
 }
 
+# scanned runs scan_constructs and dies with a VERDICT if it cannot run.
+#
+# Called bare in a substitution, a failure aborts the script through errexit
+# before any message is printed, and a gate that exits non-zero saying nothing
+# is indistinguishable from one that crashed.
+scanned() {
+  local out
+  out="$(scan_constructs "$1")" ||
+    self_test_die "the construct scanner could not run against $1, so nothing here is evidence"
+  printf '%s' "$out"
+}
+
 self_test() {
-  local tmp found
+  local tmp found clean_found
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
@@ -111,7 +123,7 @@ self_test() {
   # this file's code is concerned, and the gate would reject itself for carrying
   # its own fixtures.
   for probe in 'm:mapfile' 'r:readarray' 'd:associative' 'l:case-modifying'; do
-    found="$(scan_constructs "$tmp/${probe%%:*}.sh")"
+    found="$(scanned "$tmp/${probe%%:*}.sh")"
     printf '%s\n' "$found" | grep -qF "${probe#*:}" ||
       self_test_die "a ${probe#*:} construct was not detected (got: ${found})"
   done
@@ -119,8 +131,9 @@ self_test() {
   # A clean bash 4-free script must produce nothing — the same detector, the
   # other direction, so a rule matching everything fails here too.
   printf '#!/usr/bin/env bash\nx=()\nwhile IFS= read -r l; do x+=("$l"); done < /dev/null\necho "${#x[@]}"\n' >"$tmp/clean.sh"
-  [ -z "$(scan_constructs "$tmp/clean.sh")" ] ||
-    self_test_die "a portable script was reported as using a bash 4 construct: $(scan_constructs "$tmp/clean.sh")"
+  clean_found="$(scanned "$tmp/clean.sh")"
+  [ -z "$clean_found" ] ||
+    self_test_die "a portable script was reported as using a bash 4 construct: ${clean_found}"
 
   # A construct inside a heredoc belongs to the file being written, not to this
   # one — and the line after the delimiter is this file's code again.
@@ -128,19 +141,19 @@ self_test() {
     printf '#!/usr/bin/env bash\ncat >/tmp/x <<%s\n' "'FIX'"
     printf 'mapfile -t y < /dev/null\nFIX\ntrue\n'
   } >"$tmp/heredoc.sh"
-  [ -z "$(scan_constructs "$tmp/heredoc.sh")" ] ||
+  [ -z "$(scanned "$tmp/heredoc.sh")" ] ||
     self_test_die "a construct inside a heredoc body was counted as a use by the writing script"
   {
     printf '#!/usr/bin/env bash\ncat >/tmp/x <<%s\n' "'FIX'"
     printf 'harmless\nFIX\nmapfile -t y < /dev/null\n'
   } >"$tmp/afterdoc.sh"
-  printf '%s\n' "$(scan_constructs "$tmp/afterdoc.sh")" | grep -q 'mapfile' ||
+  printf '%s\n' "$(scanned "$tmp/afterdoc.sh")" | grep -q 'mapfile' ||
     self_test_die "the heredoc skip ran past its delimiter and hid real code beneath it"
 
   # A construct NAMED IN PROSE is not a use of it. Without this the only way to
   # explain the rule is to stop explaining it.
   printf '#!/usr/bin/env bash\n# mapfile is deliberately not used here.\ntrue\n' >"$tmp/prose.sh"
-  [ -z "$(scan_constructs "$tmp/prose.sh")" ] ||
+  [ -z "$(scanned "$tmp/prose.sh")" ] ||
     self_test_die "a construct named in a comment was counted as a use of it"
 
   echo "check-shell-portability self-test passed: it classifies shebangs, detects each bash 4 construct on its own fixture, stays silent on portable code, and does not read a comment as code."
