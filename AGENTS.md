@@ -123,6 +123,21 @@ and in the JSON without changing the exit code.
 Over MCP there is no exit code, so the `incomplete` array in the response is the
 only carrier. Every tool that reads a cloud account populates it.
 
+The key is always present, and a run that observed everything reports it as `[]`.
+An omitted key and a `null` are the same ambiguity — neither can be told apart
+from a tool that does not describe its own coverage — so an empty array is how a
+tool says "I looked at all of it", positively rather than by silence. The three
+tools that read no cloud account (`k8s_rbac`, `repo_audit`, `compliance`) are
+exempt by name, and `cmd/mcp_incomplete_test.go` pairs every registered tool with
+its own handler to enforce that: an exemption naming a tool that does not exist
+fails the build, as does a tool that reads an account and never reaches the
+record.
+
+The `severity` parameter is validated rather than coerced. An unrecognised value
+is refused, because severity ranking treats an unknown level as below every real
+one — so a filter argument with a typo would silently widen the request instead
+of narrowing it, and return every finding at every level.
+
 JSON report schemas are Go structs in `internal/output/<domain>.go` — one typed
 envelope per domain (`iamReport`, `storageReport`, …), sharing the writer in
 `internal/output/jsoncore.go`. SARIF is emitted by iam, storage, certs, secrets, audit, k8s, lambda,

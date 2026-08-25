@@ -45,10 +45,10 @@ type tagsReport struct {
 
 	// Incomplete is what this scan could not read. An empty findings list with a
 	// non-empty Incomplete is "could not tell", not "nothing to report".
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // WriteTags marshals tag findings as JSON to w.
 func WriteTags(w io.Writer, findings []cloud.TagFinding, incomplete []string) error {
-	return writeJSON(w, tagsReport{Findings: findings, Total: len(findings), Incomplete: incomplete})
+	return writeJSON(w, tagsReport{Findings: findings, Total: len(findings), Incomplete: observed(incomplete)})
 }

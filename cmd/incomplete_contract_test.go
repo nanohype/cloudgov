@@ -237,28 +237,9 @@ func TestIncompleteContractCoverageIsExact(t *testing.T) {
 	}
 }
 
-// TestMCPToolsCarryIncomplete covers the exemption above. The MCP server has no
-// exit code, so the payload is the only carrier — a tool that drops it leaves an
-// agent unable to tell a clean account from an unreadable one.
-func TestMCPToolsCarryIncomplete(t *testing.T) {
-	b, err := os.ReadFile("mcp.go")
-	if err != nil {
-		t.Fatalf("read mcp.go: %v", err)
-	}
-	src := string(b)
-
-	// Every tool that resolves a cloud provider must compute incompletions.
-	resolves := len(regexp.MustCompile(`resolve\w+Providers\(ctx\)`).FindAllString(src, -1))
-	computes := len(computesIncomplete.FindAllString(src, -1))
-
-	if resolves == 0 {
-		t.Fatal("no provider resolutions found in mcp.go; this check would pass vacuously")
-	}
-	if computes < resolves {
-		t.Errorf("mcp.go resolves providers %d times but computes incompletions only %d times: "+
-			"a tool that drops it reports an unreadable account as clean", resolves, computes)
-	}
-}
+// The MCP half of the exemption above is covered by
+// TestEveryMCPToolCarriesIncomplete in mcp_incomplete_test.go, which pairs each
+// registered tool with its own handler rather than comparing whole-file tallies.
 
 // TestAGENTSMCPTableMatchesRegisteredTools binds the agent-facing documentation
 // to the code it describes.

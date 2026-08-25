@@ -3,11 +3,12 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
-	"strings"
 )
 
 // roundTrip encodes via fn into a buffer, then decodes into T.
@@ -475,12 +476,96 @@ func TestReportsCarryIncompleteIndependentOfFlags(t *testing.T) {
 
 // A report with nothing unread must not carry an empty array — omitempty keeps
 // "saw everything" and "saw nothing" textually distinct for a consumer.
-func TestReportsOmitIncompleteWhenComplete(t *testing.T) {
+// A complete scan states that it was complete, rather than saying nothing.
+// Omitting the key made "I saw everything" indistinguishable from "I do not
+// report coverage", which is the distinction the record exists to carry — and
+// over MCP, where there is no exit code, it is the only thing carrying it.
+// TestEveryEnvelopeAlwaysCarriesIncomplete holds this across every writer.
+func TestCompleteScanReportsAnEmptyIncomplete(t *testing.T) {
 	var buf bytes.Buffer
 	if err := WriteCerts(&buf, nil, nil); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if strings.Contains(buf.String(), "incomplete") {
-		t.Errorf("a complete scan should omit the incomplete key entirely, got %s", buf.String())
+	var envelope struct {
+		Incomplete *[]string `json:"incomplete"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if envelope.Incomplete == nil {
+		t.Fatalf("a complete scan omitted the incomplete key or emitted null: %s", buf.String())
+	}
+	if len(*envelope.Incomplete) != 0 {
+		t.Errorf("a complete scan reported %d incompletions", len(*envelope.Incomplete))
+	}
+}
+
+// Every JSON envelope carries `incomplete`, and a run that saw everything carries
+// it as `[]`.
+//
+// Over MCP there is no exit code, so this array is the whole of what tells an
+// agent the scan could not see the account. An omitted key and a `null` are the
+// same ambiguity: neither can be told apart from a tool that does not report its
+// own coverage. Emitting `[]` makes "I looked at everything" a positive
+// statement.
+//
+// Enumerating the writers rather than spot-checking one is what makes this hold
+// for the next domain: a writer added without the normalizer fails here.
+func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
+	writers := map[string]func(io.Writer) error{
+		"certs":     func(w io.Writer) error { return WriteCerts(w, nil, nil) },
+		"storage":   func(w io.Writer) error { return WriteStorage(w, nil, nil) },
+		"network":   func(w io.Writer) error { return WriteNetwork(w, nil, nil) },
+		"tags":      func(w io.Writer) error { return WriteTags(w, nil, nil) },
+		"secrets":   func(w io.Writer) error { return WriteSecrets(w, nil, nil) },
+		"orphans":   func(w io.Writer) error { return WriteOrphans(w, nil, nil) },
+		"quota":     func(w io.Writer) error { return WriteQuotas(w, nil, nil) },
+		"inventory": func(w io.Writer) error { return WriteInventory(w, nil, nil) },
+		"cost":      func(w io.Writer) error { return WriteCost(w, nil, nil) },
+		"drift":     func(w io.Writer) error { return WriteDrift(w, nil, nil) },
+		"lambda":    func(w io.Writer) error { return WriteLambdaPolicy(w, nil, nil) },
+		"platform":  func(w io.Writer) error { return WritePlatform(w, nil, nil) },
+		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, nil, nil) },
+	}
+
+	for domain, write := range writers {
+		t.Run(domain, func(t *testing.T) {
+			var buf bytes.Buffer
+			if err := write(&buf); err != nil {
+				t.Fatalf("write %s report: %v", domain, err)
+			}
+			body := buf.String()
+			if !strings.Contains(body, `"incomplete"`) {
+				t.Fatalf("%s omits the incomplete key entirely:\n%s", domain, body)
+			}
+
+			var envelope map[string]json.RawMessage
+			if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
+				t.Fatalf("%s report is not valid JSON: %v", domain, err)
+			}
+			raw, ok := envelope["incomplete"]
+			if !ok {
+				t.Fatalf("%s decoded without an incomplete key", domain)
+			}
+			if string(raw) == "null" {
+				t.Errorf("%s emits incomplete as null; an agent cannot tell that from a tool "+
+					"that does not report coverage", domain)
+			}
+
+			var entries []string
+			if err := json.Unmarshal(raw, &entries); err != nil {
+				t.Fatalf("%s incomplete is not an array of strings: %v", domain, err)
+			}
+			if len(entries) != 0 {
+				t.Errorf("%s reported %d incompletions for a run given none", domain, len(entries))
+			}
+		})
+	}
+
+	// The list must cover every writer that takes an incomplete argument, or a
+	// domain could ship outside it and read as covered.
+	if len(writers) != 13 {
+		t.Errorf("this check covers %d writers; internal/output has a different number taking an "+
+			"incomplete argument, so one of them is unexercised", len(writers))
 	}
 }

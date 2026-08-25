@@ -60,7 +60,7 @@ type Report struct {
 	// consumed as merge-gate evidence where 0 affirmatively supports approval,
 	// so a partial view has to say so rather than argue that the part it never
 	// read was fine.
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // ReportSummary holds aggregated finding counts.
@@ -312,6 +312,13 @@ func collectIncomplete(providers Providers, opts Options, errs []error) []string
 
 	for _, err := range errs {
 		out = append(out, err.Error())
+	}
+	// A run that observed everything reports an empty list, never a nil one. The
+	// JSON envelope always carries the key, and `null` there is indistinguishable
+	// from a report that does not describe its own coverage — which is the
+	// distinction this record exists to make.
+	if out == nil {
+		return []string{}
 	}
 	return out
 }

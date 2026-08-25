@@ -52,10 +52,10 @@ type costReport struct {
 
 	// Incomplete is what this scan could not read. An empty findings list with a
 	// non-empty Incomplete is "could not tell", not "nothing to report".
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // WriteCost marshals cost diffs as JSON to w.
 func WriteCost(w io.Writer, diffs []cloud.CostDiff, incomplete []string) error {
-	return writeJSON(w, costReport{Diffs: diffs, Incomplete: incomplete})
+	return writeJSON(w, costReport{Diffs: diffs, Incomplete: observed(incomplete)})
 }

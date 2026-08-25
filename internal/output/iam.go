@@ -60,7 +60,7 @@ type iamReport struct {
 	// Incomplete is what the scan could not read. principals_scanned counts
 	// only principals actually analyzed, so a consumer comparing the two can
 	// tell a clean account from an account this run could not see.
-	Incomplete      []string                      `json:"incomplete,omitempty"`
+	Incomplete      []string                      `json:"incomplete"`
 	UsedPermissions map[string][]cloud.Permission `json:"used_permissions,omitempty"`
 }
 
@@ -70,7 +70,7 @@ func WriteIAM(w io.Writer, findings []cloud.Finding, principalsScanned int, used
 		Findings:        findings,
 		Total:           len(findings),
 		Principals:      principalsScanned,
-		Incomplete:      incomplete,
+		Incomplete:      observed(incomplete),
 		UsedPermissions: usedPerms,
 	})
 }

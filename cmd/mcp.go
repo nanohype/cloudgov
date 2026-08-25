@@ -140,13 +140,17 @@ type repoInput struct {
 func registerMCPTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{Name: "iam_scan", Description: "Scan AWS IAM principals for unused, admin, wildcard-resource, and cross-account risk."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in iamInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveIAMProviders(ctx, in.Profile)
 			if err != nil {
 				return nil, nil, err
 			}
 			res, err := iam.Scan(ctx, providers[0], iam.ScanOptions{
 				Days:        orDefault(in.Days, 90),
-				MinSeverity: mcpSeverity(in.Severity),
+				MinSeverity: minSeverity,
 				Concurrency: 10,
 			})
 			if err != nil {
@@ -160,11 +164,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "storage_audit", Description: "Audit S3 buckets for public access, missing encryption, versioning, and logging."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveStorageProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := storage.Scan(ctx, providers, storage.ScanOptions{MinSeverity: mcpSeverity(in.Severity)})
+			findings, err := storage.Scan(ctx, providers, storage.ScanOptions{MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -174,11 +182,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "network_audit", Description: "Audit security groups for overly permissive ingress/egress rules."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveNetworkProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := network.Scan(ctx, providers, network.ScanOptions{MinSeverity: mcpSeverity(in.Severity)})
+			findings, err := network.Scan(ctx, providers, network.ScanOptions{MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -188,11 +200,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "certs", Description: "List TLS certificates (ACM) expiring within a threshold."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in certsInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveCertProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := certs.Scan(ctx, providers, certs.ScanOptions{MinSeverity: mcpSeverity(in.Severity), Days: orDefault(in.Days, 90)})
+			findings, err := certs.Scan(ctx, providers, certs.ScanOptions{MinSeverity: minSeverity, Days: orDefault(in.Days, 90)})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -202,11 +218,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "tags", Description: "Find AWS resources missing required tags."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in tagsInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveTagProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := tags.Scan(ctx, providers, tags.ScanOptions{MinSeverity: mcpSeverity(in.Severity), Required: in.Required})
+			findings, err := tags.Scan(ctx, providers, tags.ScanOptions{MinSeverity: minSeverity, Required: in.Required})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -216,11 +236,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "secrets_scan", Description: "Scan AWS runtime config (Lambda env, ECS task defs, EC2 user data) for embedded secrets, including leaked third-party cloud credentials."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveSecretsProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := secrets.ScanProviders(ctx, providers, secrets.ScanOptions{MinSeverity: mcpSeverity(in.Severity)})
+			findings, err := secrets.ScanProviders(ctx, providers, secrets.ScanOptions{MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -272,11 +296,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "cost_diff", Description: "Compare AWS spend between two time windows and surface per-service deltas."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in costInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveCostProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			diffs, err := cost.Scan(ctx, providers, cost.ScanOptions{Days: orDefault(in.Days, 30), Threshold: in.Threshold, MinSeverity: mcpSeverity(in.Severity)})
+			diffs, err := cost.Scan(ctx, providers, cost.ScanOptions{Days: orDefault(in.Days, 30), Threshold: in.Threshold, MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -304,6 +332,10 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "audit", Description: "Run the full security + cost audit (IAM, storage, network, orphans, certs, tags, secrets) in one shot."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in auditInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := buildAuditProviders(ctx)
 			if err != nil {
 				return nil, nil, err
@@ -314,7 +346,7 @@ func registerMCPTools(s *mcp.Server) {
 			}
 			report, err := audit.Run(ctx, providers, audit.Options{
 				Skip:         skip,
-				MinSeverity:  mcpSeverity(in.Severity),
+				MinSeverity:  minSeverity,
 				IAMDays:      orDefault(in.IAMDays, 90),
 				CertDays:     orDefault(in.CertDays, 90),
 				RequiredTags: in.RequiredTags,
@@ -343,6 +375,10 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "lambda_audit", Description: "Audit AWS Lambda resource-based policies for public-invoke and confused-deputy risk."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveLambdaPolicyProviders(ctx)
 			if err != nil {
 				return nil, nil, err
@@ -355,13 +391,17 @@ func registerMCPTools(s *mcp.Server) {
 				}
 				findings = append(findings, found...)
 			}
-			findings = filterLambdaBySeverity(findings, mcpSeverity(in.Severity))
+			findings = filterLambdaBySeverity(findings, minSeverity)
 			incomplete := cloud.Incomplete(providers)
 			return jsonResult(func(w io.Writer) error { return output.WriteLambdaPolicy(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "repo_audit", Description: "Audit GitHub branch protection, required checks and Dependabot state against the committed expected shape."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in repoInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			org := in.Org
 			if org == "" {
 				org = "nanohype"
@@ -382,7 +422,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			minRank := cloud.SeverityRank(mcpSeverity(in.Severity))
+			minRank := cloud.SeverityRank(minSeverity)
 			var kept []cloud.RepoFinding
 			for _, f := range findings {
 				if cloud.SeverityRank(f.Severity) >= minRank {
@@ -498,11 +538,32 @@ func mcpClusterOptions(kubeconfig string) []cloudk8s.Option {
 	return []cloudk8s.Option{cloudk8s.WithoutExecCredentials()}
 }
 
-func mcpSeverity(s string) cloud.Severity {
-	if s == "" {
-		return cloud.SeverityLow
+// resolveMCPSeverity converts a tool's `severity` argument into a level, or
+// refuses it.
+//
+// The conversion used to be a bare string cast. cloud.SeverityRank returns 0 for
+// anything it does not recognise, and 0 is below LOW, so a caller asking for
+// HIGH-and-above with a typo silently received every finding at every level —
+// and an agent has no way to tell that apart from the account genuinely being
+// that bad. Failing open on a filter argument turns a narrowing request into a
+// widening one.
+//
+// An empty argument is not a typo: it means the caller expressed no preference,
+// and LOW is the documented default.
+func resolveMCPSeverity(s string) (cloud.Severity, error) {
+	if strings.TrimSpace(s) == "" {
+		return cloud.SeverityLow, nil
 	}
-	return cloud.Severity(strings.ToUpper(s))
+	normalized := cloud.Severity(strings.ToUpper(strings.TrimSpace(s)))
+	for _, accepted := range []cloud.Severity{
+		cloud.SeverityCritical, cloud.SeverityHigh, cloud.SeverityMedium,
+		cloud.SeverityLow, cloud.SeverityInfo,
+	} {
+		if normalized == accepted {
+			return normalized, nil
+		}
+	}
+	return "", fmt.Errorf("unknown severity %q; want one of: CRITICAL, HIGH, MEDIUM, LOW, INFO", s)
 }
 
 func orDefault(v, def int) int {
