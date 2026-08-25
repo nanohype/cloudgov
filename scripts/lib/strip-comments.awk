@@ -11,8 +11,10 @@
 # swallow code sharing the line with a comment.
 #
 # Quote-aware: a comment marker inside a string literal is not a comment. Go raw
-# strings (backticks) and both quote styles are honoured. Escapes are respected
-# inside double quotes.
+# strings (backticks) and both quote styles are honoured. Which delimiters honour
+# a backslash escape is per style — Go escapes inside both quote kinds because a
+# rune literal shares the string escape set; shell and YAML escape only inside
+# double quotes, because a single-quoted string there is literal.
 #
 # Usage: awk -v style=go|hash|css [-v strings=blank] -f strip-comments.awk <file>
 #
@@ -52,7 +54,20 @@ BEGIN {
 
     # Inside a string literal, copy through until it closes.
     if (instr) {
-      if (quote == "\"" && c == "\\" && i < n) {
+      # Which delimiters honour a backslash escape is a property of the LANGUAGE,
+      # not of the delimiter. Go's rune literal uses the same escape set as its
+      # string literal, so `'\''` is one rune — but a stripper that escapes only
+      # inside double quotes reads it as a closed string followed by an opening
+      # quote, and then blanks the rest of the line as if it were string body.
+      # Under strings=blank that silently deletes real code from the view every
+      # go-style gate matches against: a `context.Background()` call after a rune
+      # literal on the same line disappears, and the gate goes green.
+      #
+      # In shell and YAML the opposite holds: a single-quoted string is literal
+      # and a backslash inside it is a backslash. Getting this wrong in the other
+      # direction would desynchronise on `'it'\''s'`, so the rule is per style.
+      escapes = (style == "go") || (quote == "\"")
+      if (escapes && c == "\\" && i < n) {
         out = out (strings == "blank" ? "  " : c substr(line, i + 1, 1))
         i += 2
         continue

@@ -37,40 +37,56 @@ cd "$repo_root"
 # ─── the classification ───
 #
 # Files that carry versions. Each must have every pin watched.
-WATCHED_GLOBS=(".github/workflows/*.yml" "go.mod")
+WATCHED_GLOBS=(".github/workflows/*.yml" ".github/workflows/*.yaml" "go.mod")
 
 # Files asserted to carry no version at all. This is a claim about their content
 # that this gate enforces, not a description of it.
 NO_VERSION_FILES=(".goreleaser.yaml" "Taskfile.yml" ".golangci.yml" ".coverage-floors")
 
-# ─── the rules, read from renovate.json rather than restated ───
+# ─── the rules, applied from renovate.json rather than restated ───
 #
 # A gate carrying its own copy of the rule is a second source of truth. Deleting
-# a customManager from renovate.json would leave this gate asserting coverage
-# that no longer exists — reporting every pin as watched at the moment nothing
-# watches them. So what a covered pin looks like is derived from the config, and
-# a config with no usable customManager fails rather than passing everything.
-renovate_annotation_pattern() {
-  python3 "${lib_dir}/renovate-annotation.py" "$1"
+# or breaking a customManager would leave this gate asserting coverage that no
+# longer exists — reporting every pin as watched at the moment nothing watches
+# them.
+#
+# renovate-annotation.py does not describe the rule, it RUNS it: each configured
+# matchString is compiled and applied to the watched files, and the line carrying
+# each matched `currentValue` comes back as covered. A manager matching nothing is
+# an error rather than an empty answer, because "no coverage" and "total
+# coverage" are the same silence otherwise.
+#
+# It reads the files raw. Renovate reads whole files, and these annotations LIVE
+# in comments — asking "would Renovate match here" against a stripped view would
+# declare a live manager dead.
+renovate_covered_lines() {
+  python3 "${lib_dir}/renovate-annotation.py" "$1" "${@:2}"
 }
 
 # scan_unwatched prints one line per version-like pin in $1 that nothing watches.
 #
-# A pin is watched when it is either an action reference carrying a version
-# comment (Renovate's built-in github-actions manager reads those) or annotated
-# for a customManager in renovate.json. Anything else version-shaped is unwatched.
+# Two ways a pin is watched, and both are answered by the thing that would do the
+# watching rather than by a pattern resembling it:
 #
-# The scan runs over two views of each line, and the split is the whole point.
-# Comments are where the ANNOTATIONS live, so the raw line is read for coverage —
-# but a version inside a comment is a mention rather than a pin, so the
-# comment-stripped line is what is scanned for pins. Reading one view for both is
-# how a gate accepts a pin whose trailing comment merely mentions renovate.
+#   - an action reference pinned to a sha with a trailing version comment, which
+#     Renovate's built-in github-actions manager reads;
+#   - a line the configured customManagers actually matched, per $2.
+#
+# Pins are detected on the comment-STRIPPED view: a version inside a comment is a
+# mention, not a pin. Coverage is decided on the raw view, upstream. Reading one
+# view for both is how a gate accepts a pin whose trailing comment merely
+# mentions renovate.
 scan_unwatched() {
-  local file="$1" annotation="$2"
-  # The stripped view is read first and keyed by line number, so the two views of
-  # a line are compared without inventing a field separator that could occur in
-  # the source.
-  awk -v annotation="$annotation" -v fname="$file" '
+  local file="$1" covered_file="$2"
+  awk -v fname="$file" -v covered_file="$covered_file" '
+    BEGIN {
+      # "path:line" per covered pin, from the coverage reporter.
+      while ((getline entry < covered_file) > 0) {
+        n = split(entry, parts, ":")
+        if (n >= 2 && parts[1] == fname) covered[parts[n] + 0] = 1
+      }
+      close(covered_file)
+    }
     NR == FNR { code[FNR] = $0; next }
     {
       raw  = $0
@@ -79,31 +95,17 @@ scan_unwatched() {
       # An action pinned to a sha with a version comment is read by the built-in
       # github-actions manager. That version lives in the comment, so this one is
       # matched against the raw line by design.
-      if (raw ~ /uses:[[:space:]]*[^[:space:]]+@[0-9a-f]{40}[[:space:]]*#[[:space:]]*v?[0-9]/) { pending = 0; next }
+      if (raw ~ /uses:[[:space:]]*[^[:space:]]+@[0-9a-f]{40}[[:space:]]*#[[:space:]]*v?[0-9]/) next
 
-      # A floating action tag is not a pin at all; the supply-chain gate rejects
-      # it separately, so it is not this gate to report.
-      if (raw ~ /uses:[[:space:]]*[^[:space:]]+@v?[0-9]+[[:space:]]*$/) { next }
+      # A floating action tag names a moving target rather than a version, so
+      # there is no pin here for anything to watch. It is a supply-chain defect
+      # and the zizmor job rejects it; reporting it here as an unwatched PIN
+      # would name the wrong problem to whoever reads this gate.
+      if (raw ~ /uses:[[:space:]]*[^[:space:]]+@v?[0-9]+[[:space:]]*$/) next
 
-      has_pin = (line ~ /[^0-9A-Za-z.]v?[0-9]+\.[0-9]+\.[0-9]+/)
-      is_annotation = (raw ~ annotation)
-
-      # An annotation covers exactly one pin. Sharing a line with its pin covers
-      # that pin and nothing further; alone, it covers the next pin within a short
-      # window. Covering a window rather than a pin would let one comment vouch
-      # for every version beneath it.
-      if (is_annotation) {
-        if (has_pin) { pending = 0; next }
-        pending = 1; window = 3; next
-      }
-
-      if (has_pin) {
-        if (pending) { pending = 0; next }
+      if (line ~ /[^0-9A-Za-z.]v?[0-9]+\.[0-9]+\.[0-9]+/ && !(FNR in covered)) {
         print fname ":" FNR ": " raw
-        next
       }
-
-      if (pending && --window <= 0) pending = 0
     }
   ' <(awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file") "$file"
 }
@@ -131,52 +133,69 @@ self_test_die() {
 }
 
 self_test() {
-  local tmp ann
+  local tmp covered out
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
-  ann="$ANNOTATION"
+  covered="$tmp/covered"
 
-  # A sha-pinned action with a version comment is watched.
+  # A live config for the fixtures below, so the coverage reporter is exercised
+  # rather than stubbed.
+  cat >"$tmp/renovate.json" <<'CFG'
+{
+  "customManagers": [
+    {
+      "customType": "regex",
+      "matchStrings": ["#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)[^\\n]*\\n[^\\n]*?(?<currentValue>v?[0-9]+\\.[0-9]+\\.[0-9]+[^\\s\"']*)"]
+    }
+  ]
+}
+CFG
+
+  # A sha-pinned action with a version comment is watched by the built-in
+  # github-actions manager, so no customManager needs to cover it.
   printf '      - uses: actions/checkout@%040d # v7.0.1\n' 0 >"$tmp/watched-action.yml"
-  [ -z "$(scan_unwatched "$tmp/watched-action.yml" "$ann")" ] ||
+  : >"$covered"
+  [ -z "$(scan_unwatched "$tmp/watched-action.yml" "$covered")" ] ||
     self_test_die "reported a sha-pinned action with a version comment as unwatched"
 
-  # A value pin behind a renovate annotation is watched.
+  # A value pin the configured manager actually matches is watched — and the
+  # coverage comes from running the manager, not from a pattern resembling it.
   printf '          # renovate: datasource=github-releases depName=golangci/golangci-lint\n          version: v2.13.1\n' >"$tmp/watched-value.yml"
-  [ -z "$(scan_unwatched "$tmp/watched-value.yml" "$ann")" ] ||
-    self_test_die "reported an annotated value pin as unwatched"
+  renovate_covered_lines "$tmp/renovate.json" "$tmp/watched-value.yml" >"$covered" ||
+    self_test_die "the coverage reporter refused a config and a file that plainly match"
+  grep -q ':2$' "$covered" ||
+    self_test_die "the manager covers the pin on line 2 and the reporter said otherwise: $(cat "$covered")"
+  [ -z "$(scan_unwatched "$tmp/watched-value.yml" "$covered")" ] ||
+    self_test_die "reported a pin the configured manager matches as unwatched"
 
-  # The same pin without the annotation is not.
+  # The same pin with nothing covering it is not.
   printf '          version: v2.13.1\n' >"$tmp/unwatched.yml"
-  [ -n "$(scan_unwatched "$tmp/unwatched.yml" "$ann")" ] ||
+  : >"$covered"
+  [ -n "$(scan_unwatched "$tmp/unwatched.yml" "$covered")" ] ||
     self_test_die "accepted a value pin that nothing watches"
 
   printf '        run: |\n          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4\n' >"$tmp/unwatched-install.yml"
-  [ -n "$(scan_unwatched "$tmp/unwatched-install.yml" "$ann")" ] ||
+  [ -n "$(scan_unwatched "$tmp/unwatched-install.yml" "$covered")" ] ||
     self_test_die "accepted an unannotated go install pin"
 
-  # An annotation covers one pin, not the file beneath it.
-  printf '          # renovate: datasource=pypi depName=zizmor\n          pipx install zizmor==1.16.3\n          version: v9.9.9\n          version: v8.8.8\n' >"$tmp/annotation-scope.yml"
-  [ -n "$(scan_unwatched "$tmp/annotation-scope.yml" "$ann")" ] ||
-    self_test_die "a renovate annotation was treated as covering the rest of the file"
-
-  # An annotation sharing a line with its pin covers that pin and stops there.
-  # Before comments and code were read as separate views, the whole line was
-  # skipped: the pin was neither reported nor genuinely covered, and the next pin
-  # inherited the annotation.
-  printf '          version: v1.2.3 # renovate: datasource=go depName=example/one\n          version: v4.5.6\n' >"$tmp/inline-annotation.yml"
-  out="$(scan_unwatched "$tmp/inline-annotation.yml" "$ann")"
+  # Coverage is per pin, not per file. The manager matches the annotated pin and
+  # nothing beneath it, so the two loose versions below stay unwatched.
+  printf '          # renovate: datasource=pypi depName=zizmor\n          pipx install zizmor==1.16.3\n          version: v9.9.9\n          version: v8.8.8\n' >"$tmp/scope.yml"
+  renovate_covered_lines "$tmp/renovate.json" "$tmp/scope.yml" >"$covered" ||
+    self_test_die "the coverage reporter refused a file the manager matches"
+  out="$(scan_unwatched "$tmp/scope.yml" "$covered")"
   case "$out" in
-    *v4.5.6*) ;;
-    *) self_test_die "an inline annotation covered the pin on the following line as well" ;;
+    *v9.9.9*) ;;
+    *) self_test_die "one covered pin vouched for every version beneath it: $out" ;;
   esac
   case "$out" in
-    *v1.2.3*) self_test_die "an inline annotation did not cover the pin on its own line" ;;
+    *zizmor* | *1.16.3*) self_test_die "the pin the manager actually matched was reported as unwatched: $out" ;;
   esac
 
   # A version appearing only inside a comment is a mention, not a pin.
   printf '          # bumped past v9.9.9 in the changelog\n          image: alpine\n' >"$tmp/mention.yml"
-  [ -z "$(scan_unwatched "$tmp/mention.yml" "$ann")" ] ||
+  : >"$covered"
+  [ -z "$(scan_unwatched "$tmp/mention.yml" "$covered")" ] ||
     self_test_die "a version mentioned in a comment was reported as an unwatched pin"
 
   # The no-version assertion detects a version appearing in an exempted file.
@@ -188,28 +207,55 @@ self_test() {
   [ -n "$(scan_versions "$tmp/dirty.yml")" ] ||
     self_test_die "a version appearing in a no-version file went undetected"
 
-  # The rules come from renovate.json. A config that cannot support the gate is an
-  # error, never an empty pattern that would match nothing.
+  # ── the coverage reporter's own failure modes ──
+  #
+  # These are the ones that matter most, because each of them previously produced
+  # a full "everything is covered" answer.
   printf '{"customManagers": []}\n' >"$tmp/empty-renovate.json"
-  ! renovate_annotation_pattern "$tmp/empty-renovate.json" >/dev/null 2>&1 ||
-    self_test_die "derived an annotation pattern from a config declaring no customManagers"
+  ! renovate_covered_lines "$tmp/empty-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "reported coverage from a config declaring no customManagers"
 
-  printf '{"customManagers": [{"matchStrings": ["version: (?<currentValue>.*)"]}]}\n' >"$tmp/opaque-renovate.json"
-  ! renovate_annotation_pattern "$tmp/opaque-renovate.json" >/dev/null 2>&1 ||
-    self_test_die "accepted a customManager whose coverage this gate cannot determine"
+  printf '{"customManagers": [{"matchStrings": ["renovate: NOTHING-MATCHES-THIS (?<currentValue>zzz)"]}]}\n' >"$tmp/dead-renovate.json"
+  ! renovate_covered_lines "$tmp/dead-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "a customManager matching nothing reported coverage; a dead rule reads the same as a live one"
 
-  echo "check-version-pins self-test passed: it rejects unwatched pins, annotation over-reach, comment-only mentions, a version in an exempt file, and a renovate.json it cannot read."
+  printf '{"customManagers": [{"matchStrings": ["(?<currentValue>"]}]}\n' >"$tmp/broken-renovate.json"
+  ! renovate_covered_lines "$tmp/broken-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "reported coverage from a matchString that does not compile"
+
+  echo "check-version-pins self-test passed: it rejects unwatched pins, per-file over-reach, comment-only mentions, a version in an exempt file, and a renovate.json that is empty, dead or uncompilable."
 }
-
-# The pattern is derived before the self-test so a config the gate cannot read
-# stops the run rather than being reported as a clean tree.
-ANNOTATION="$(renovate_annotation_pattern renovate.json)"
 
 self_test
 
 fail=0
 watched_files=0
 watched_pins=0
+
+# Coverage is computed once, over every watched file, by running the configured
+# managers. A config the reporter cannot use stops the run rather than being
+# reported as a clean tree.
+covered_lines_file="$(mktemp)"
+trap 'rm -f "$covered_lines_file"' EXIT
+
+watched_paths=()
+for glob in "${WATCHED_GLOBS[@]}"; do
+  for file in $glob; do
+    [ -f "$file" ] || continue
+    [ "$file" = "go.mod" ] && continue
+    watched_paths+=("$file")
+  done
+done
+
+if [ "${#watched_paths[@]}" -eq 0 ]; then
+  echo "error: the watched globs matched no files — the enumeration is broken, not the tree." >&2
+  exit 2
+fi
+
+if ! renovate_covered_lines renovate.json "${watched_paths[@]}" >"$covered_lines_file"; then
+  echo "::error::renovate.json cannot be applied to the watched files, so nothing can be said about which pins are watched" >&2
+  exit 2
+fi
 
 for glob in "${WATCHED_GLOBS[@]}"; do
   for file in $glob; do
@@ -221,7 +267,7 @@ for glob in "${WATCHED_GLOBS[@]}"; do
     # The denominator, per pin rather than per file: a file with every pin
     # watched and a file the scanner could not read produce the same silence.
     watched_pins=$((watched_pins + $(grep -cE '(^|[^0-9A-Za-z.])v?[0-9]+\.[0-9]+\.[0-9]+' "$file" || true)))
-    unwatched=$(scan_unwatched "$file" "$ANNOTATION")
+    unwatched=$(scan_unwatched "$file" "$covered_lines_file")
     if [ -n "$unwatched" ]; then
       echo "::error::${file}: version pin(s) nothing can bump — add a '# renovate: datasource=... depName=...' comment above each:" >&2
       printf '%s\n' "$unwatched" >&2
@@ -230,8 +276,6 @@ for glob in "${WATCHED_GLOBS[@]}"; do
   done
 done
 
-# A verdict over nothing is not a pass: a glob that stopped matching would
-# otherwise report every pin as watched.
 if [ "$watched_files" -eq 0 ]; then
   echo "error: the watched globs matched no files — the enumeration is broken, not the tree." >&2
   exit 2
@@ -251,37 +295,11 @@ for file in "${NO_VERSION_FILES[@]}"; do
   fi
 done
 
-# ─── the rule must match something ───
-#
-# A customManager that matches nothing in the tree is dead: it is a rule that has
-# stopped applying, and it reports the same as a rule that applies everywhere.
-# Same failure shape as an empty enumeration, one level up. So the annotation the
-# config keys on has to appear in the tree, or the config is stale.
-annotated_pins=0
-for glob in "${WATCHED_GLOBS[@]}"; do
-  for file in $glob; do
-    [ -f "$file" ] || continue
-    if grep -qE "$ANNOTATION" "$file"; then
-      annotated_pins=$((annotated_pins + 1))
-    fi
-  done
-done
-if [ "$annotated_pins" -eq 0 ]; then
-  echo "::error::renovate.json declares a customManager keyed on a '# renovate:' annotation, and no file in the watched set carries one. The rule matches nothing, so it protects nothing." >&2
-  fail=1
-fi
-
 # ─── the exemptions must be asserted, not described ───
 #
 # The no-version classification is already an assertion: a listed file that
 # acquires a version fails above. The other half is the one that rots toward
-# permissive — a listed file that has nothing to say. If a file never had a
-# version and never could, listing it here is a description of the world rather
-# than a constraint on it, and it dilutes the list until nobody reads it.
-#
-# So every entry must be a file that the pin scanner would actually have an
-# opinion about: one this repo writes and CI reads. A path that no longer exists
-# already fails above.
+# permissive — a listed file that has nothing to say.
 for file in "${NO_VERSION_FILES[@]}"; do
   [ -f "$file" ] || continue
   if [ ! -s "$file" ]; then
@@ -290,13 +308,14 @@ for file in "${NO_VERSION_FILES[@]}"; do
   fi
 done
 
-if [ "$fail" -ne 0 ]; then
-  echo "== version-pin coverage NOT met =="
-  exit 1
-fi
 if [ "$watched_pins" -eq 0 ]; then
   echo "::error::${watched_files} watched file(s) read and not one version-shaped token found — the scanner is broken, not the tree." >&2
   exit 2
 fi
-printf 'ok: %s version-shaped token(s) across %s watched file(s), every pin watched; %s file(s) asserted to carry no version\n' \
+
+if [ "$fail" -ne 0 ]; then
+  echo "== version-pin coverage NOT met =="
+  exit 1
+fi
+printf 'ok: %s version-shaped token(s) across %s watched file(s), every pin watched by a manager that was RUN; %s file(s) asserted to carry no version\n' \
   "$watched_pins" "$watched_files" "${#NO_VERSION_FILES[@]}"

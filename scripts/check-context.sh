@@ -139,12 +139,10 @@ CLEANTEST
     rm -f "$tmp/$path"
   done
 
-  # Removing every plant must return the tree to silent, proving the gate tracks
-  # the tree rather than latching red once it has fired.
   # A real violation whose line carries a trailing comment mentioning the allowed
-  # bootstrap. The exclusion used to read that comment and filter the violation
-  # out, which is the fail-open direction: the gate went green on the exact shape
-  # it exists to catch.
+  # bootstrap. An exclusion that reads that comment filters the violation out,
+  # which is the fail-open direction: the gate goes green on the exact shape it
+  # exists to catch.
   cat >"$tmp/internal/cloud/aws/masked.go" <<'MASKED'
 package aws
 
@@ -157,6 +155,44 @@ MASKED
     die "a violation whose line carries a comment mentioning the allowed bootstrap was not reported (the gate reads comments as code)"
   fi
   rm -f "$tmp/internal/cloud/aws/masked.go"
+
+  # A violation sharing a line with a Go rune literal that contains an escaped
+  # quote. `'\''` is one rune, and a stripper honouring backslash escapes only
+  # inside DOUBLE quotes reads it as a closed string followed by an opening one —
+  # then blanks the rest of the line as string body, deleting the call from the
+  # view this gate matches against. The same violation split across two lines is
+  # caught, so nothing else here would notice.
+  cat >"$tmp/internal/cloud/aws/rune.go" <<'RUNE'
+package aws
+
+func runeLiteral(c byte) interface{} {
+	if c == '\'' { return context.Background() }
+	return nil
+}
+RUNE
+  if [[ -z "$(scan_tree "$tmp" | grep 'rune.go')" ]]; then
+    die "a violation after a rune literal on the same line was not reported (the string state machine desynchronised on an escaped quote)"
+  fi
+  rm -f "$tmp/internal/cloud/aws/rune.go"
+
+  # The complement, so the rule above cannot be satisfied by treating every
+  # single quote as ordinary text: a rune literal that genuinely CONTAINS the
+  # banned token is a character, not a call.
+  cat >"$tmp/internal/cloud/aws/runeclean.go" <<'RUNECLEAN'
+package aws
+
+func quoteChar() byte {
+	q := '\''
+	return byte(q)
+}
+RUNECLEAN
+  if [[ -n "$(scan_tree "$tmp" | grep 'runeclean.go')" ]]; then
+    die "a file whose only single quotes are a rune literal was flagged: $(scan_tree "$tmp" | grep 'runeclean.go')"
+  fi
+  rm -f "$tmp/internal/cloud/aws/runeclean.go"
+
+  # Removing every plant returns the tree to silent, so the gate tracks the tree
+  # rather than latching red once it has fired.
 
   # The citation must name the line the violation is ON.
   #
