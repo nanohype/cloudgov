@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # single-quoted $ here belongs to awk and printf, not the shell
 #
 # check-positive-controls.sh — mutate the real tree, one violation per gate, and
 # require the gate to reject it.
@@ -42,6 +43,8 @@
 # Usage: scripts/check-positive-controls.sh
 
 set -euo pipefail
+
+
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"

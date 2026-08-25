@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # single-quoted $ here belongs to awk, not the shell
 #
 # check-gates.sh — assert that every gate in scripts/ is actually run by CI.
 #
@@ -19,6 +20,8 @@
 # Usage: scripts/check-gates.sh
 
 set -euo pipefail
+
+
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 lib_dir="${repo_root}/scripts/lib"

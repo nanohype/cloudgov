@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # single-quoted $ here belongs to awk, not the shell
 #
 # check-doc-paths.sh — every repo-relative path named in markdown must exist.
 #
@@ -20,6 +21,8 @@
 # Usage: scripts/check-doc-paths.sh
 
 set -euo pipefail
+
+
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"

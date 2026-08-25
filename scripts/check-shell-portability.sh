@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016  # single-quoted $ here belongs to awk and printf, not the shell
 #
 # check-shell-portability.sh — a gate script must run on the oldest bash a
 # contributor is likely to have.
@@ -22,6 +23,8 @@
 # Usage: scripts/check-shell-portability.sh
 
 set -euo pipefail
+
+
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
@@ -209,8 +212,12 @@ self_test() {
     if [ -n "${SELF_TEST_OLD_BASH:-}" ]; then
       old_rc=0
       old_probe="$("$SELF_TEST_OLD_BASH" "$probe_file" 2>&1)" || old_rc=$?
+      # The captured output is reported, not discarded. When this assertion
+      # fires, what the old shell actually said is the whole diagnosis — an entry
+      # that ran clean and one that failed for an unrelated reason look identical
+      # from the status alone.
       [ "$old_rc" -ne 0 ] ||
-        self_test_die "'${label}' is listed as unavailable before bash 4, and $("$SELF_TEST_OLD_BASH" --version | head -1 | sed 's/ (.*//') ran it without error; the entry describes an absence that is not there"
+        self_test_die "'${label}' is listed as unavailable before bash 4, and $("$SELF_TEST_OLD_BASH" --version | head -1 | sed 's/ (.*//') ran its fixture without error (output: ${old_probe:-<none>}); the entry describes an absence that is not there"
       verified=$((verified + 1))
     fi
   done
