@@ -32,7 +32,11 @@ compare_urls() {
   local archive_tpl checksum_tpl archive_versioned checksum_versioned url asset
 
   # ─── what goreleaser will produce ───
-  archive_tpl=$(grep -E '^\s*name_template:' "$goreleaser" | head -1 | sed 's/.*name_template: *//; s/^"//; s/"$//')
+  # [[:space:]] rather than \s: \s is a GNU extension that BSD grep does not
+  # implement, so on macOS this pattern would match nothing and the comparison
+  # would exit 2 rather than silently passing — but only because of the guard
+  # below. Portability failures in a matcher are the kind that no-op quietly.
+  archive_tpl=$(grep -E '^[[:space:]]*name_template:' "$goreleaser" | head -1 | sed 's/.*name_template: *//; s/^"//; s/"$//')
   checksum_tpl=$(awk '/^checksum:/{f=1} f && /name_template:/{print; exit}' "$goreleaser" |
     sed 's/.*name_template: *//; s/^"//; s/"$//')
 

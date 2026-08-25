@@ -90,6 +90,7 @@ evaluate_floors() {
   local out="$1" file_cov="$2"
   local fail=0
   local floored_pkgs=" "
+  local evaluated=0
   local line kind target floor cov ign label pkg covered
 
   while read -r line; do
@@ -123,6 +124,7 @@ evaluate_floors() {
       fail=1
       continue
     fi
+    evaluated=$((evaluated + 1))
     if awk "BEGIN{exit !($cov < $floor)}"; then
       echo "::error::${label} coverage ${cov}% is below its ${floor}% floor"
       fail=1
@@ -143,6 +145,14 @@ evaluate_floors() {
       ;;
     esac
   done
+
+  # The denominator. A floors file that stopped being read, or a glob that stopped
+  # matching, produces the same silence as a tree that meets every floor.
+  if [ "$evaluated" -eq 0 ]; then
+    echo "::error::no floors were evaluated — ${floors_file} was not read, which is not the same as every floor being met" >&2
+    return 1
+  fi
+  printf '  --  %s floor(s) evaluated\n' "$evaluated"
 
   return "$fail"
 }
@@ -222,6 +232,11 @@ self_test() {
 	EOF
   then
     self_test_die "accepted a file below its floor"
+  fi
+
+  # A floors file that yields no entries is not a tree that meets every floor.
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null </dev/null; then
+    self_test_die "reported a pass having evaluated no floors at all"
   fi
 
   # An unknown floor kind is a malformed declaration, not an entry to skip.

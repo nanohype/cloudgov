@@ -191,6 +191,35 @@ CITED
   fi
   rm -f "$tmp/internal/cloud/aws/cited.go"
 
+  # The stripper must preserve the shape of the file exactly: same number of
+  # lines, and every line the same length. Line count is what keeps citations
+  # pointing at the right line; line length is what keeps a column-sensitive
+  # matcher — an anchor, a fixed-width field — reading the same position it would
+  # have read in the source. Deleting comments instead of blanking them would
+  # satisfy neither.
+  cat >"$tmp/internal/cloud/aws/shape.go" <<'SHAPE'
+package aws
+
+/* a block comment
+   over several lines */
+func shape() string {
+	s := "text // with a marker" // and a trailing comment
+	return s
+}
+SHAPE
+  shape_in="$(wc -l <"$tmp/internal/cloud/aws/shape.go" | tr -d ' ')"
+  shape_out="$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$tmp/internal/cloud/aws/shape.go" | wc -l | tr -d ' ')"
+  if [[ "$shape_in" != "$shape_out" ]]; then
+    die "stripping changed the line count ($shape_in -> $shape_out); every citation would be off by the difference"
+  fi
+  if ! diff -q \
+    <(awk '{print length}' "$tmp/internal/cloud/aws/shape.go") \
+    <(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$tmp/internal/cloud/aws/shape.go" | awk '{print length}') \
+    >/dev/null; then
+    die "stripping changed a line's length; a column-sensitive matcher would read a different position than the source has"
+  fi
+  rm -f "$tmp/internal/cloud/aws/shape.go"
+
   # A mention inside a comment or a string literal is not a call.
   cat >"$tmp/internal/cloud/aws/mentions.go" <<'MENTIONS'
 package aws
@@ -217,6 +246,16 @@ cd "$(dirname "$0")/.."
 
 self_test
 
+# The denominator. A gate that passes over zero files reads exactly like a gate
+# that passed over all of them, and an --include glob or a find predicate that
+# stops matching is the usual way that happens. Reporting the count makes an
+# empty sweep visible rather than merely non-failing.
+scanned=$(find . -name '*.go' -type f -not -path './.git/*' -not -name '*_test.go' | wc -l | tr -d ' ')
+if [[ "$scanned" -eq 0 ]]; then
+  echo "context-awareness check: no Go files found — the enumeration is broken, not the tree." >&2
+  exit 2
+fi
+
 offenders="$(scan_tree .)"
 
 if [[ -n "$offenders" ]]; then
@@ -229,4 +268,4 @@ if [[ -n "$offenders" ]]; then
   exit 1
 fi
 
-echo "context-awareness check passed: no detached contexts outside tests and the signal bootstrap."
+printf 'context-awareness check passed: %s non-test Go file(s) read, no detached contexts outside the signal bootstrap.\n' "$scanned"

@@ -209,6 +209,7 @@ self_test
 
 fail=0
 watched_files=0
+watched_pins=0
 
 for glob in "${WATCHED_GLOBS[@]}"; do
   for file in $glob; do
@@ -217,6 +218,9 @@ for glob in "${WATCHED_GLOBS[@]}"; do
     # go.mod is read wholesale by Renovate's gomod manager, so every version in
     # it is watched by construction.
     [ "$file" = "go.mod" ] && continue
+    # The denominator, per pin rather than per file: a file with every pin
+    # watched and a file the scanner could not read produce the same silence.
+    watched_pins=$((watched_pins + $(grep -cE '(^|[^0-9A-Za-z.])v?[0-9]+\.[0-9]+\.[0-9]+' "$file" || true)))
     unwatched=$(scan_unwatched "$file" "$ANNOTATION")
     if [ -n "$unwatched" ]; then
       echo "::error::${file}: version pin(s) nothing can bump — add a '# renovate: datasource=... depName=...' comment above each:" >&2
@@ -290,5 +294,9 @@ if [ "$fail" -ne 0 ]; then
   echo "== version-pin coverage NOT met =="
   exit 1
 fi
-printf 'ok: %s file(s) with every pin watched; %s file(s) asserted to carry no version\n' \
-  "$watched_files" "${#NO_VERSION_FILES[@]}"
+if [ "$watched_pins" -eq 0 ]; then
+  echo "::error::${watched_files} watched file(s) read and not one version-shaped token found — the scanner is broken, not the tree." >&2
+  exit 2
+fi
+printf 'ok: %s version-shaped token(s) across %s watched file(s), every pin watched; %s file(s) asserted to carry no version\n' \
+  "$watched_pins" "$watched_files" "${#NO_VERSION_FILES[@]}"
