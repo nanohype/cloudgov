@@ -27,6 +27,36 @@ change is most likely to trip.
 
 ---
 
+## Proving a gate can reject
+
+Every gate in `scripts/` proves this on each run: it self-tests against fixtures,
+and `scripts/check-positive-controls.sh` introduces the violation it exists to
+catch into this working tree and requires a non-zero exit. A gate with no control
+fails that run, so the suite cannot shrink to the gates someone remembered.
+
+The three third-party scanners in `.github/workflows/security.yml` are outside
+that harness — feeding CI a deliberately vulnerable module to watch a scanner
+fire is not a thing to leave in a repository. Being wired into a workflow is not
+evidence a scanner rejects, so demonstrate each one by hand rather than assuming:
+
+```sh
+# zizmor: a workflow with pull_request_target, write-all, a floating action tag
+# and an interpolated PR title
+zizmor --offline --persona=regular /path/to/a/deliberately-bad/workflows/
+
+# gosec: a package using crypto/md5 and exec.Command("sh", "-c", ...)
+gosec -severity medium -exclude=G304 ./...
+
+# govulncheck: a throwaway module requiring a version with a known advisory
+govulncheck ./...
+```
+
+Each must exit non-zero on the bad input and zero on this repository. Run it when
+you change a scanner's version, its flags, or the shape of what it scans — those
+are the changes that turn a gate into a step that always passes.
+
+---
+
 ## How to add a new provider
 
 A provider is a struct that implements the cloud interfaces for a specific target.
