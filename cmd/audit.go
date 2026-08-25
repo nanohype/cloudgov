@@ -42,7 +42,7 @@ var (
 func init() {
 	auditCmd.Flags().StringSliceVar(&auditSkip, "skip", []string{}, "domains to skip (iam,storage,network,orphans,certs,tags,secrets)")
 	auditCmd.Flags().StringVar(&auditSeverity, "severity", "LOW", "minimum severity to report")
-	auditCmd.Flags().StringVar(&auditOutputFmt, "output", "table", "output format: table, json, sarif")
+	auditCmd.Flags().StringVar(&auditOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	auditCmd.Flags().StringVar(&auditOutputFile, "output-file", "", "write output to file")
 	auditCmd.Flags().IntVar(&auditIAMDays, "iam-days", 90, "IAM audit log lookback period in days")
 	auditCmd.Flags().IntVar(&auditCertDays, "cert-days", 90, "certificate expiry warning threshold in days")
@@ -55,6 +55,12 @@ func init() {
 }
 
 func runAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	auditFormat, err := tableJSONSARIF.resolve(auditOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	skip := make(map[string]bool)
@@ -102,7 +108,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(auditOutputFmt) {
+	switch auditFormat {
 	case "json":
 		if err := output.WriteAudit(w, report); err != nil {
 			return err

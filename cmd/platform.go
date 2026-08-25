@@ -59,7 +59,7 @@ var (
 func init() {
 	platformCmd.PersistentFlags().StringVar(&platformKubeconfig, "kubeconfig", "",
 		"path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config, falls back to in-cluster)")
-	platformCmd.PersistentFlags().StringVar(&platformOutputFmt, "output", "table", "output format: table, json, sarif")
+	platformCmd.PersistentFlags().StringVar(&platformOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	platformCmd.PersistentFlags().StringVar(&platformOutputFile, "output-file", "", "write output to file instead of stdout")
 	platformCmd.PersistentFlags().StringVar(&platformSeverity, "severity", "LOW", "minimum severity to report")
 
@@ -67,6 +67,12 @@ func init() {
 }
 
 func runPlatformAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	platformFormat, err := tableJSONSARIF.resolve(platformOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	clients, err := cloudk8s.NewClients(ctx, platformKubeconfig)
 	if err != nil {
@@ -115,7 +121,7 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 		w = file
 	}
 
-	switch strings.ToLower(platformOutputFmt) {
+	switch platformFormat {
 	case "json":
 		return output.WritePlatform(w, findings, incomplete)
 	case "sarif":

@@ -46,13 +46,19 @@ var (
 
 func init() {
 	lambdaAuditCmd.Flags().StringVar(&lambdaSeverity, "severity", "LOW", "minimum severity to report")
-	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFmt, "output", "table", "output format: table, json, sarif")
+	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFile, "output-file", "", "write output to file")
 
 	lambdaCmd.AddCommand(lambdaAuditCmd)
 }
 
 func runLambdaAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	lambdaFormat, err := tableJSONSARIF.resolve(lambdaOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	providers, err := resolveLambdaPolicyProviders(ctx)
@@ -85,7 +91,7 @@ func runLambdaAudit(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(lambdaOutputFmt) {
+	switch lambdaFormat {
 	case "json":
 		return output.WriteLambdaPolicy(w, allFindings, incomplete)
 	case "sarif":

@@ -31,11 +31,17 @@ func init() {
 	tagsCmd.Flags().StringSliceVar(&tagsRequired, "require", []string{}, "required tag/label keys (comma-separated, e.g. owner,env,cost-center)")
 	tagsCmd.Flags().StringVar(&tagsStandardFile, "standard-file", "", "path to a nanohype resource-tagging standard JSON; gates on its required AWS keys (content.required_by_surface.aws)")
 	tagsCmd.Flags().StringVar(&tagsSeverity, "severity", "MEDIUM", "minimum severity to report")
-	tagsCmd.Flags().StringVar(&tagsOutputFmt, "output", "table", "output format: table, json")
+	tagsCmd.Flags().StringVar(&tagsOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	tagsCmd.Flags().StringVar(&tagsOutputFile, "output-file", "", "write output to file")
 }
 
 func runTags(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	tagsFormat, err := tableJSON.resolve(tagsOutputFmt)
+	if err != nil {
+		return err
+	}
 	// Precedence: explicit --require wins (ad-hoc override); else the required
 	// AWS keys from --standard-file; else error. Keeps --require working for
 	// one-off checks while --standard-file is the CI gate's source of truth.
@@ -79,7 +85,7 @@ func runTags(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.TagFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(tagsOutputFmt) {
+	switch tagsFormat {
 	case "json":
 		return output.WriteTags(w, findings, incomplete)
 	default:

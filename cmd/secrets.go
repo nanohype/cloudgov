@@ -32,13 +32,19 @@ var (
 
 func init() {
 	secretsScanCmd.Flags().StringVar(&secretsSeverity, "severity", "LOW", "minimum severity to report")
-	secretsScanCmd.Flags().StringVar(&secretsOutputFmt, "output", "table", "output format: table, json, sarif")
+	secretsScanCmd.Flags().StringVar(&secretsOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	secretsScanCmd.Flags().StringVar(&secretsOutputFile, "output-file", "", "write output to file")
 
 	secretsCmd.AddCommand(secretsScanCmd)
 }
 
 func runSecretsScan(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	secretsFormat, err := tableJSONSARIF.resolve(secretsOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveSecretsProviders(ctx)
 	if err != nil {
@@ -66,7 +72,7 @@ func runSecretsScan(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.SecretFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(secretsOutputFmt) {
+	switch secretsFormat {
 	case "json":
 		return output.WriteSecrets(w, findings, incomplete)
 	case "sarif":

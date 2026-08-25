@@ -39,11 +39,17 @@ func init() {
 	complianceCmd.Flags().StringVar(&complianceNetworkReport, "network-report", "", "path to network audit JSON report")
 	complianceCmd.Flags().StringVar(&complianceCertsReport, "certs-report", "", "path to certs audit JSON report")
 	complianceCmd.Flags().StringVar(&complianceTagsReport, "tags-report", "", "path to tags audit JSON report")
-	complianceCmd.Flags().StringVar(&complianceOutputFmt, "output", "table", "output format: table, json, sarif")
+	complianceCmd.Flags().StringVar(&complianceOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	complianceCmd.Flags().StringVar(&complianceOutputFile, "output-file", "", "write output to file")
 }
 
 func runCompliance(_ *cobra.Command, args []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	complianceFormat, err := tableJSONSARIF.resolve(complianceOutputFmt)
+	if err != nil {
+		return err
+	}
 	benchmarkID := strings.ToLower(args[0])
 	benchmark := compliance.GetBenchmark(benchmarkID)
 	if benchmark == nil {
@@ -125,7 +131,7 @@ func runCompliance(_ *cobra.Command, args []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(complianceOutputFmt) {
+	switch complianceFormat {
 	case "json":
 		return output.WriteCompliance(w, report)
 	case "sarif":

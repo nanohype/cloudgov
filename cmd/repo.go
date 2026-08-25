@@ -60,7 +60,7 @@ func init() {
 	repoCmd.PersistentFlags().StringVar(&repoOrg, "org", "", "GitHub organization to audit")
 	repoCmd.PersistentFlags().StringVar(&repoExpectedFile, "expected", "expected-repo-settings.yaml",
 		"path to the committed expected settings")
-	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", "table", "output format: table, json")
+	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", "minimum severity to report")
 
 	// Marked required so cobra rejects the omission by name. Without this an
@@ -72,6 +72,12 @@ func init() {
 }
 
 func runRepoAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	repoFormat, err := tableJSON.resolve(repoOutputFmt)
+	if err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(repoExpectedFile)
 	if err != nil {
 		return fmt.Errorf("read expected settings: %w", err)
@@ -101,7 +107,7 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 	})
 
 	w := cmd.OutOrStdout()
-	if repoOutputFmt == "json" {
+	if repoFormat == "json" {
 		return output.WriteRepo(w, kept)
 	}
 	output.RepoFindings(w, kept)

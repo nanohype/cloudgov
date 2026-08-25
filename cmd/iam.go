@@ -52,7 +52,7 @@ func init() {
 	iamScanCmd.Flags().IntVar(&iamDays, "days", 90, "audit log lookback period in days")
 	iamScanCmd.Flags().StringVar(&iamPrincipal, "principal", "", "scan a specific principal by name or ID")
 	iamScanCmd.Flags().StringVar(&iamSeverity, "severity", "LOW", "minimum severity to report (CRITICAL,HIGH,MEDIUM,LOW,INFO)")
-	iamScanCmd.Flags().StringVar(&iamOutputFmt, "output", "table", "output format: table, json, sarif")
+	iamScanCmd.Flags().StringVar(&iamOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	iamScanCmd.Flags().StringVar(&iamOutputFile, "output-file", "", "write output to file instead of stdout")
 	iamScanCmd.Flags().IntVar(&iamConcurrency, "concurrency", 10, "max parallel goroutines for scanning principals")
 	iamScanCmd.Flags().StringVar(&iamProfile, "profile", "", "AWS named profile to use for credentials")
@@ -68,6 +68,12 @@ func init() {
 }
 
 func runIAMScan(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	iamFormat, err := tableJSONSARIF.resolve(iamOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveIAMProviders(ctx, iamProfile)
 	if err != nil {
@@ -125,7 +131,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	gate(allFindings, func(f cloud.Finding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(iamOutputFmt) {
+	switch iamFormat {
 	case "json":
 		return output.WriteIAM(w, allFindings, totalPrincipals, allUsedPerms, incomplete)
 	case "sarif":

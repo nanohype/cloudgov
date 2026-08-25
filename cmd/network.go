@@ -34,7 +34,7 @@ var (
 
 func init() {
 	networkAuditCmd.Flags().StringVar(&networkSeverity, "severity", "LOW", "minimum severity to report (CRITICAL, HIGH, MEDIUM, LOW)")
-	networkAuditCmd.Flags().StringVar(&networkOutputFmt, "output", "table", "output format: table, json")
+	networkAuditCmd.Flags().StringVar(&networkOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	networkAuditCmd.Flags().StringVar(&networkOutputFile, "output-file", "", "write output to file")
 	networkAuditCmd.Flags().BoolVar(&networkFix, "fix", false, "generate shell remediation scripts for each finding")
 	networkAuditCmd.Flags().StringVar(&networkOutDir, "out", ".", "directory to write fix scripts (used with --fix)")
@@ -43,6 +43,12 @@ func init() {
 }
 
 func runNetworkAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	networkFormat, err := tableJSON.resolve(networkOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveNetworkProviders(ctx)
 	if err != nil {
@@ -70,7 +76,7 @@ func runNetworkAudit(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.NetworkFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(networkOutputFmt) {
+	switch networkFormat {
 	case "json":
 		if err := output.WriteNetwork(w, findings, incomplete); err != nil {
 			return err

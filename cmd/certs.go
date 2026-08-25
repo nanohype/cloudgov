@@ -29,11 +29,17 @@ var (
 func init() {
 	certsCmd.Flags().IntVar(&certsDays, "days", 90, "warn threshold in days (include certs expiring within this many days)")
 	certsCmd.Flags().StringVar(&certsSeverity, "severity", "LOW", "minimum severity to report (CRITICAL, HIGH, MEDIUM, LOW)")
-	certsCmd.Flags().StringVar(&certsOutputFmt, "output", "table", "output format: table, json, sarif")
+	certsCmd.Flags().StringVar(&certsOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	certsCmd.Flags().StringVar(&certsOutputFile, "output-file", "", "write output to file")
 }
 
 func runCerts(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	certsFormat, err := tableJSONSARIF.resolve(certsOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveCertProviders(ctx)
 	if err != nil {
@@ -62,7 +68,7 @@ func runCerts(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.CertFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(certsOutputFmt) {
+	switch certsFormat {
 	case "json":
 		return output.WriteCerts(w, findings, incomplete)
 	case "sarif":

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/baseline"
 	"github.com/nanohype/cloudgov/internal/compare"
@@ -31,13 +30,18 @@ func init() {
 	compareCmd.Flags().StringVar(&compareCurrent, "current", "", "path to current report JSON file")
 	compareCmd.Flags().StringVar(&compareFrom, "from", "", "path to older report JSON file")
 	compareCmd.Flags().StringVar(&compareTo, "to", "", "path to newer report JSON file")
-	compareCmd.Flags().StringVar(&compareOutputFmt, "output", "table", "output format: table, json")
+	compareCmd.Flags().StringVar(&compareOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	compareCmd.Flags().StringVar(&compareOutputFile, "output-file", "", "write output to file")
 }
 
 func runCompare(_ *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	compareFormat, err := tableJSON.resolve(compareOutputFmt)
+	if err != nil {
+		return err
+	}
 	var baselineData, currentData []byte
-	var err error
 
 	if compareBaseline != "" && compareCurrent != "" {
 		// baseline name + current file
@@ -89,7 +93,7 @@ func runCompare(_ *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(compareOutputFmt) {
+	switch compareFormat {
 	case "json":
 		return writeCompareJSON(w, result)
 	default:

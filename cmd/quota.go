@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/output"
@@ -27,11 +26,17 @@ var (
 
 func init() {
 	quotaCmd.Flags().Float64Var(&quotaThreshold, "threshold", 0, "minimum utilization percentage to report")
-	quotaCmd.Flags().StringVar(&quotaOutputFmt, "output", "table", "output format: table, json")
+	quotaCmd.Flags().StringVar(&quotaOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	quotaCmd.Flags().StringVar(&quotaOutputFile, "output-file", "", "write output to file")
 }
 
 func runQuota(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	quotaFormat, err := tableJSON.resolve(quotaOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveQuotaProviders(ctx)
 	if err != nil {
@@ -62,7 +67,7 @@ func runQuota(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(quotaOutputFmt) {
+	switch quotaFormat {
 	case "json":
 		return output.WriteQuotas(w, quotas, incomplete)
 	default:

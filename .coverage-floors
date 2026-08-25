@@ -67,4 +67,4 @@ package internal/providers          85    # registry + Detect wiring, exercised 
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports
 package internal/fix                39    # Terraform/shell emitters — golden-compared; the policy writer is covered directly
-package cmd                         16    # handlers resolve providers and render; the logic they call is floored above
+package cmd                         17    # handlers resolve providers and render; the logic they call is floored above

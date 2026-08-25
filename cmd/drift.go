@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/drift"
@@ -34,11 +33,17 @@ var (
 func init() {
 	driftCmd.Flags().StringVar(&driftResourceType, "resource-type", "", "filter to a single resource type")
 	driftCmd.Flags().IntVar(&driftConcurrency, "concurrency", 10, "max concurrent API calls")
-	driftCmd.Flags().StringVar(&driftOutputFmt, "output", "table", "output format: table, json, sarif")
+	driftCmd.Flags().StringVar(&driftOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	driftCmd.Flags().StringVar(&driftOutputFile, "output-file", "", "write output to file")
 }
 
 func runDrift(cmd *cobra.Command, args []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	driftFormat, err := tableJSONSARIF.resolve(driftOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	resources, err := drift.ParseTFState(args[0])
@@ -84,7 +89,7 @@ func runDrift(cmd *cobra.Command, args []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(driftOutputFmt) {
+	switch driftFormat {
 	case "json":
 		return output.WriteDrift(w, results, incomplete)
 	case "sarif":

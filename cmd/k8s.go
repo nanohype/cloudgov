@@ -45,7 +45,7 @@ var (
 func init() {
 	k8sCmd.PersistentFlags().StringVar(&k8sKubeconfig, "kubeconfig", "",
 		"path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config, falls back to in-cluster)")
-	k8sCmd.PersistentFlags().StringVar(&k8sOutputFmt, "output", "table", "output format: table, json, sarif")
+	k8sCmd.PersistentFlags().StringVar(&k8sOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	k8sCmd.PersistentFlags().StringVar(&k8sOutputFile, "output-file", "", "write output to file instead of stdout")
 	k8sCmd.PersistentFlags().StringVar(&k8sMinSeverity, "severity", "LOW", "minimum severity to report")
 
@@ -53,6 +53,12 @@ func init() {
 }
 
 func runK8sRBAC(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	k8sFormat, err := tableJSONSARIF.resolve(k8sOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	p, err := cloudk8s.New(ctx, k8sKubeconfig)
 	if err != nil {
@@ -76,7 +82,7 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 		defer closer()
 	}
 
-	switch strings.ToLower(k8sOutputFmt) {
+	switch k8sFormat {
 	case "json":
 		return output.WriteK8sFindings(w, findings)
 	case "sarif":

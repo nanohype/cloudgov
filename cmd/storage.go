@@ -34,7 +34,7 @@ var (
 
 func init() {
 	storageAuditCmd.Flags().StringVar(&storageSeverity, "severity", "LOW", "minimum severity to report")
-	storageAuditCmd.Flags().StringVar(&storageOutputFmt, "output", "table", "output format: table, json, sarif")
+	storageAuditCmd.Flags().StringVar(&storageOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	storageAuditCmd.Flags().StringVar(&storageOutputFile, "output-file", "", "write output to file")
 	storageAuditCmd.Flags().BoolVar(&storageFix, "fix", false, "generate shell remediation scripts for each finding")
 	storageAuditCmd.Flags().StringVar(&storageOutDir, "out", ".", "directory to write fix scripts (used with --fix)")
@@ -43,6 +43,12 @@ func init() {
 }
 
 func runStorageAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	storageFormat, err := tableJSONSARIF.resolve(storageOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveStorageProviders(ctx)
 	if err != nil {
@@ -70,7 +76,7 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.BucketFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(storageOutputFmt) {
+	switch storageFormat {
 	case "json":
 		return output.WriteStorage(w, findings, incomplete)
 	case "sarif":
