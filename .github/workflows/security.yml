@@ -24,8 +24,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Gate what the commit controls; schedule what the world controls.
+  #
+  # gosec and zizmor read this tree: their verdict is a function of the commit
+  # under test, so they block a merge. govulncheck's is not — a PR that changes
+  # nothing goes red the morning an advisory is published against a dependency it
+  # did not introduce. Blocking a merge on the world changing is how a gate
+  # teaches people to bypass it, so this one runs on every PR for the signal and
+  # on the weekly schedule as the thing that has to stay green, and it is not a
+  # merge-gate dependency.
+  #
+  # A scheduled run here CAN be red without any commit being at fault. That is
+  # the point of the split, not a defect in it.
   govulncheck:
-    name: govulncheck (known-vuln reachability)
+    name: govulncheck (known-vuln reachability — advisory on PRs, gating on schedule)
     runs-on: ubuntu-latest
     steps:
       - name: checkout
@@ -117,7 +129,6 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       [
-        govulncheck,
         gosec,
         zizmor,
       ]

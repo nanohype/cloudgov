@@ -113,6 +113,69 @@ func TestEveryDeclaredAWSCallIsARead(t *testing.T) {
 	}
 }
 
+// A negative result is worth nothing until the looking is shown to work.
+//
+// TestEveryDeclaredAWSCallIsARead reports an absence — no mutating call in the
+// package — and an absence is exactly what a broken walk also reports. So the
+// walk is driven over a synthetic package containing a mutating method and
+// required to find it. Without this, a parser that silently stopped recognising
+// interface declarations would report the same clean sweep as a clean tree.
+func TestInterfaceWalkFindsAMutatingMethod(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "probe.go", `package probe
+
+// DeleteBucket is named in this comment and must not be found by a walk that
+// reads comments as declarations.
+type readerAPI interface {
+	DescribeInstances(ctx context.Context) error
+}
+
+type writerAPI interface {
+	DeleteBucket(ctx context.Context) error
+}
+`, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse probe: %v", err)
+	}
+
+	declared := map[string]string{}
+	interfaces := 0
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.TypeSpec)
+		if !ok {
+			return true
+		}
+		iface, ok := spec.Type.(*ast.InterfaceType)
+		if !ok {
+			return true
+		}
+		interfaces++
+		for _, method := range iface.Methods.List {
+			for _, ident := range method.Names {
+				declared[ident.Name] = spec.Name.Name
+			}
+		}
+		return true
+	})
+
+	if interfaces != 2 {
+		t.Fatalf("walk found %d interfaces, want 2", interfaces)
+	}
+	if _, ok := declared["DeleteBucket"]; !ok {
+		t.Fatal("the walk did not find a mutating method that is plainly declared; " +
+			"a clean sweep from this walk would mean nothing")
+	}
+	if isReadMethod("DeleteBucket") {
+		t.Fatal("the verb detector accepted DeleteBucket as a read")
+	}
+	if _, ok := declared["DescribeInstances"]; !ok {
+		t.Error("the walk did not find the read method either; it is finding nothing at all")
+	}
+	if len(declared) != 2 {
+		t.Errorf("walk found %d methods, want 2 — a name appearing only in a comment was counted", len(declared))
+	}
+}
+
 // The detector has to be able to say no, or the check above passes whatever the
 // package declares.
 func TestIsReadMethodRejectsMutations(t *testing.T) {
