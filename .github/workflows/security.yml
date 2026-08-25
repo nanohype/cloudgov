@@ -13,6 +13,11 @@ on:
     # Weekly Tuesday 06:00 UTC — catches newly published CVEs even when no PRs land.
     - cron: '0 6 * * 2'
 
+# Every job here gates a merge. A check whose verdict depends on the advisory
+# database rather than on the tree lives in advisory.yml: the merge gate requires
+# every job in this workflow to be one of its dependencies, so a job that must
+# not block a merge cannot sit here.
+#
 # Read-only at the workflow level. Only the job that uploads a SARIF report
 # needs security-events: write, and granting it here would hand it to every job
 # including the ones that run third-party scanners.
@@ -24,44 +29,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Gate what the commit controls; schedule what the world controls.
-  #
-  # gosec and zizmor read this tree: their verdict is a function of the commit
-  # under test, so they block a merge. govulncheck's is not — a PR that changes
-  # nothing goes red the morning an advisory is published against a dependency it
-  # did not introduce. Blocking a merge on the world changing is how a gate
-  # teaches people to bypass it, so this one runs on every PR for the signal and
-  # on the weekly schedule as the thing that has to stay green, and it is not a
-  # merge-gate dependency.
-  #
-  # A scheduled run here can therefore be red with no commit at fault.
-  govulncheck:
-    name: govulncheck (known-vuln reachability — advisory on PRs, gating on schedule)
-    runs-on: ubuntu-latest
-    steps:
-      - name: checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: setup go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: govulncheck
-        # Hard gate: exits non-zero when any known vulnerability is reachable
-        # from this module's code (symbol-level analysis, not just go.sum).
-        # Pinned so the verdict is a function of the commit under test rather
-        # than of whatever was published when the job ran; Renovate tracks the
-        # pin through the govulncheck customManager in renovate.json. The
-        # vulnerability database is fetched at run time and stays current.
-        run: |
-          # renovate: datasource=go depName=golang.org/x/vuln
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-          govulncheck ./...
-
   gosec:
     name: gosec (static security analysis)
     runs-on: ubuntu-latest

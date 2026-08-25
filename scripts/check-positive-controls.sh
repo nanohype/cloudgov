@@ -49,6 +49,9 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
+# shellcheck disable=SC1091  # resolved at run time from repo_root
+. "${repo_root}/scripts/lib/tracked-files.sh"
+
 backup_dir="$(mktemp -d)"
 # ── an abort must not read as a pass ────────────────────────────────────────
 #
@@ -104,6 +107,32 @@ mutate() {
   fi
 }
 
+# track_planted registers a file this run created with git, so the gates that
+# enumerate the TRACKED set can see it.
+#
+# Those gates read `git ls-files` rather than walking the filesystem, because CI
+# puts a sibling checkout and a vendored dependency tree beside the checkout and
+# a filesystem walk grades them. The consequence here is that a control planting
+# a brand-new file plants something the gate correctly ignores — the control
+# then reports the gate as broken when it is behaving exactly as intended.
+#
+# A real violation arrives tracked, in a commit. `git add -N` records the path
+# without staging content, which is the smallest thing that makes the fixture
+# resemble the case.
+track_planted() {
+  local relative="$1" out
+  [ -f "$relative" ] || return 0
+  # Not swallowed. The first version of this passed `--quiet`, which git add does
+  # not accept, and `|| true` hid the error — so nothing was ever tracked and the
+  # control reported the gate as broken. A control that cannot set up its own
+  # fixture must say so.
+  if ! out=$(git add --intent-to-add -- "$relative" 2>&1); then
+    echo "::error::could not register the planted ${relative} with git, so a gate reading the tracked set cannot see it: ${out}" >&2
+    fail=1
+    return 1
+  fi
+}
+
 # unmutate_since restores every file mutated after index $1 and forgets them.
 unmutate_since() {
   local from="$1" i
@@ -126,6 +155,9 @@ unmutate() {
   if [ -f "$saved" ]; then
     cp "$saved" "$relative"
   else
+    # A file this run created was also added to the index (see mutate), so the
+    # gates that enumerate the tracked set could see it. Both halves are undone.
+    git rm --cached --quiet --ignore-unmatch -- "$relative" 2>/dev/null || true
     rm -f "$relative"
   fi
 }
@@ -408,6 +440,7 @@ run_control() {
 
   mutate "$target"
   "$writer"
+  track_planted "$target"
 
   after=""
   [ -f "$target" ] && after="$(cat "$target")"
@@ -729,7 +762,7 @@ run_dependency_control scripts/check-shell-portability.sh \
 # Every gate that reads a shared library must be controlled against that library
 # failing. A gate added with a new `${lib_dir}` reference and no control here is
 # a gate whose helper can break silently.
-for script in scripts/*.sh; do
+while IFS= read -r script; do
   name="$(basename "$script")"
   [ "$name" = "$self" ] && continue
   [ "$name" = "$(basename "$GATES_TARGET")" ] && continue
@@ -744,14 +777,14 @@ for script in scripts/*.sh; do
     echo "::error::${name} reads a shared library and has no dependency control; nothing proves it rejects when that library cannot run" >&2
     fail=1
   fi
-done
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
 
 # ─── the anti-vacuity floor ───
 #
 # Every gate carries a control and every control names a live gate. Without this
 # the suite shrinks silently: a gate added without a control is a gate nothing
 # proves, and it reads identically to one that is proven.
-for script in scripts/*.sh; do
+while IFS= read -r script; do
   name="$(basename "$script")"
   [ "$name" = "$self" ] && continue
   # The planted gate is a fixture of this run, not a gate of the repo.
@@ -766,17 +799,20 @@ for script in scripts/*.sh; do
     echo "::error::${name} is a gate with no positive control; nothing proves it can reject" >&2
     fail=1
   fi
-done
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
 
 if [ "${#controlled[@]}" -eq 0 ]; then
   echo "error: no controls ran — the suite is empty, which is not a pass." >&2
   exit 2
 fi
 
+# The suite reached its end. Set BEFORE the verdict, because a legitimate
+# rejection is a completed run: leaving it until after made every real failure
+# report as "did not run to completion", which is a different and wrong claim.
+suite_completed=1
+
 if [ "$fail" -ne 0 ]; then
   echo "== positive controls NOT met =="
   exit 1
 fi
 printf 'ok: %s gate(s) each accepted the clean tree and rejected its own violation, every mutation verified by inspection\n' "${#controlled[@]}"
-
-suite_completed=1

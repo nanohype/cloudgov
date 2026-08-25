@@ -28,6 +28,9 @@ set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
+
+# shellcheck disable=SC1091  # resolved at run time from repo_root
+. "${repo_root}/scripts/lib/tracked-files.sh"
 lib_dir="${repo_root}/scripts/lib"
 
 # THREE PARALLEL ARRAYS, indexed together: label, pattern, fixture.
@@ -308,7 +311,7 @@ self_test
 fail=0
 checked=0
 sh_scripts=0
-for script in scripts/*.sh; do
+while IFS= read -r script; do
   [ -f "$script" ] || continue
   case "$(declared_shell "$script")" in
     sh)
@@ -330,7 +333,7 @@ for script in scripts/*.sh; do
     printf '%s\n' "$found" | sed 's/^/    /' >&2
     fail=1
   fi
-done
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
 
 if [ "$checked" -eq 0 ]; then
   echo "error: no bash scripts found in scripts/ — the enumeration is broken, not the tree." >&2
@@ -347,10 +350,10 @@ fi
 if [ -n "$old_bash" ]; then
   probe_failures=0
   probed=0
-  for script in scripts/*.sh; do
+  while IFS= read -r script; do
     [ "$(declared_shell "$script")" = bash ] || continue
-    # Two exclusions, each because RUNNING the script is the wrong thing to do
-    # rather than because its portability does not matter.
+    # Three exclusions, each because RUNNING the script is the wrong thing to do
+    # here — not because its portability does not matter.
     #
     #   this file        — running it from inside itself recurses.
     #   coverage.sh      — it runs the Go test suite. Probing whether its first
@@ -362,9 +365,12 @@ if [ -n "$old_bash" ]; then
     #                      one of its own members and leaves the tree mid-mutation
     #                      if the probe is interrupted.
     #
-    # Both are still covered by the construct scan above, which is the gate; what
-    # they lose is the stronger run evidence, and this says so rather than
-    # counting them among the scripts that were run.
+    # All three are still covered by the construct scan above, which is the gate.
+    # That is not a consolation: the scan is what caught the floor aborting under
+    # bash 3.2, once the `set -u` empty-array expansion was added to the table as
+    # a feature rather than left out because it is not a builtin. What they lose
+    # is the stronger run evidence, and the count printed below says how many
+    # were actually run rather than implying all of them were.
     case "$(basename "$script")" in
       "$(basename "${BASH_SOURCE[0]}")" | check-positive-controls.sh | coverage.sh) continue ;;
     esac
@@ -376,7 +382,7 @@ if [ -n "$old_bash" ]; then
       fail=1
       probe_failures=$((probe_failures + 1))
     fi
-  done
+  done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
   printf 'ok: %s bash script(s) carry no bash 4 construct; %s of them were also RUN under %s\n' \
     "$checked" "$probed" "$("$old_bash" --version | head -1 | sed 's/ (.*//')"
 else

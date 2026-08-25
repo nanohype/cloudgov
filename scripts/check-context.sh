@@ -34,6 +34,7 @@
 set -euo pipefail
 
 lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # scan_tree prints one "path:line:content" per offending occurrence under $1, or
 # nothing. Both detached-context spellings are matched; _test.go files and the
@@ -145,7 +146,7 @@ scan_tree() {
       | grep -v "signal\\.NotifyContext(${alias}\\.Background()" \
       | sed "s|^|${file}:|" \
       || true
-  done < <(find "$root" -name '*.go' -type f 2>/dev/null | sort)
+  done < <(tracked_files "$root" -name '*.go' -type f | sort)
 }
 
 # ── observing the scanner, rather than only its output ────────────────────────
@@ -495,10 +496,28 @@ MENTIONS
     die "tree still flagged after every plant was removed: $residue_scan"
   fi
 
+  # ── the workspace is not the tree ──
+  #
+  # CI puts things beside the checkout that a seat does not have: a sibling
+  # repository, a vendored dependency tree, a downloaded tool. A gate that walks
+  # the filesystem grades them, passes on the seat, and reports on someone else's
+  # code in CI. The enumeration is the tracked set for that reason, and this is
+  # the assertion — an untracked file under the repo root is not examined.
+  local untracked="internal/cloud/aws/zzuntracked_probe.go"
+  printf 'package aws\n\nfunc zzUntrackedProbe() {}\n' >"${repo_root}/${untracked}"
+  local listed
+  listed="$(cd "$repo_root" && tracked_files . -name '*.go' -type f | grep -c 'zzuntracked_probe' || true)"
+  rm -f "${repo_root}/${untracked}"
+  [ "$listed" -eq 0 ] ||
+    self_test_die "an untracked file under the repo root was enumerated; this gate would grade whatever CI places beside the checkout"
+
   echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal, past a masking comment and past an alias named only in a comment or a raw string, cites the right line, and stays silent on compliant code, tests and foreign packages."
 }
 
 cd "$(dirname "$0")/.."
+
+# shellcheck disable=SC1091  # resolved at run time from lib_dir, not at parse time
+. "${lib_dir}/tracked-files.sh"
 
 self_test
 
@@ -506,7 +525,7 @@ self_test
 # that passed over all of them, and an --include glob or a find predicate that
 # stops matching is the usual way that happens. Reporting the count makes an
 # empty sweep visible rather than merely non-failing.
-scanned=$(find . -name '*.go' -type f -not -path './.git/*' -not -name '*_test.go' | wc -l | tr -d ' ')
+scanned=$(tracked_files . -name '*.go' -type f | grep -cv '_test\.go$')
 if [[ "$scanned" -eq 0 ]]; then
   echo "context-awareness check: no Go files found — the enumeration is broken, not the tree." >&2
   exit 2

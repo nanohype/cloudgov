@@ -27,6 +27,9 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$repo_root"
 
+# shellcheck disable=SC1091  # resolved at run time from repo_root, not at parse time
+. "${repo_root}/scripts/lib/tracked-files.sh"
+
 # extract_paths prints one repo-relative FILE path per line from the markdown file
 # $1, as "line:path".
 #
@@ -55,7 +58,7 @@ cd "$repo_root"
 # list here named go, sh, md, yaml, json, awk, py, txt and html; this repo also
 # carries go.mod and go.sum, both named in prose and neither checked.
 repo_extensions() {
-  find . -type f -not -path './.git/*' |
+  tracked_files . |
     sed -n 's/.*\.\([A-Za-z0-9][A-Za-z0-9]*\)$/\1/p' |
     sort -u |
     tr '\n' '|' |
@@ -248,7 +251,7 @@ while IFS= read -r doc; do
       fail=1
     fi
   done < <(extract_paths "$doc")
-done < <(find . -name '*.md' -not -path './.git/*' -type f | sort)
+done < <(tracked_files . -name '*.md' -type f | sort)
 
 # A verdict over nothing is not a pass. Both counts matter: no documents means
 # the enumeration broke, and no claims means the extractor stopped matching —
