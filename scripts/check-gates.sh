@@ -41,6 +41,144 @@ workflow_runs() {
   return 1
 }
 
+
+# ── every job must be reachable from the merge gate ──────────────────────────
+#
+# Branch protection watches ONE check per workflow: the merge gate. A job the
+# gate does not list in `needs:` still runs and still goes red, and at the point
+# of decision that red job is indistinguishable from a green one — the merge is
+# allowed either way. The failure is invisible in exactly the change that causes
+# it, because adding a job looks complete without touching the gate.
+#
+# describe_workflow prints one record per line for $1:
+#   JOB <id>    a top-level job
+#   GATE <id>   the job that runs the merge-gate action
+#   NEED <id>   an entry in the gate's needs list
+describe_workflow() {
+  local file="$1"
+  awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file" | awk '
+    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
+    /^[a-zA-Z]/ { in_jobs = 0 }
+    !in_jobs { next }
+
+    # A top-level job id: exactly two spaces of indent, then "id:".
+    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
+      job = $0
+      sub(/^  /, "", job); sub(/:[[:space:]]*$/, "", job)
+      print "JOB " job
+      collecting = 0
+      next
+    }
+
+    # The gate job is the one whose steps run the merge-gate action. Identified
+    # by what it DOES rather than by its name, so renaming it does not quietly
+    # remove the check.
+    /merge-gate@/ { print "GATE " job }
+
+    /^    needs:/ {
+      rest = $0
+      sub(/^    needs:[[:space:]]*/, "", rest)
+      gate_needs_job = job
+      # A one-line `needs: [a, b]` is complete on its own line; a bracket left
+      # open continues onto the lines below.
+      collecting = (job != "" && rest !~ /\]/)
+      emit(rest)
+      next
+    }
+    # Any other key at job level ends the list. Without this the collector runs
+    # to the end of the job and every token in it — `steps:`, an action ref, an
+    # `if:` expression — is recorded as a dependency, so the gate reads as
+    # covering jobs it has never heard of.
+    collecting && /^    [A-Za-z0-9_-]+:/ { collecting = 0 }
+    collecting { emit($0) }
+
+    function emit(text,   n, i, parts, closed) {
+      if (text ~ /^[[:space:]]*$/) return
+      # Tested before the brackets are turned into separators, not after.
+      closed = (text ~ /\]/)
+      gsub(/[][,]/, " ", text)
+      n = split(text, parts, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        if (parts[i] == "" || parts[i] == "-") continue
+        print "NEED " gate_needs_job " " parts[i]
+      }
+      if (closed) collecting = 0
+    }
+  '
+}
+
+# A job named here runs without gating a merge, and the reason is the whole
+# justification. An entry naming a job that does not exist, or one the gate
+# already covers, is an exemption that applies to nothing — checked below,
+# because a dead exemption reads exactly like a live one.
+declare_exemption() {
+  MERGE_GATE_EXEMPT+=("$1|$2|$3")
+}
+MERGE_GATE_EXEMPT=()
+declare_exemption security.yml govulncheck \
+  "Its verdict is a function of the advisory database, not of the commit: a PR that changes nothing goes red the morning an advisory lands against a dependency it did not introduce. It runs on every PR for the signal and on a schedule as the thing that must stay green."
+
+check_merge_gate_coverage() {
+  local workflows="$1" file base records gate needs job entry ex_file ex_job ex_reason found rc=0 gates_seen=0
+  for file in "$workflows"/*.yml; do
+    [ -f "$file" ] || continue
+    base="$(basename "$file")"
+    if ! records="$(describe_workflow "$file")"; then
+      echo "::error::${base} could not be read; its jobs were not compared against any merge gate" >&2
+      return 1
+    fi
+    gate="$(printf '%s\n' "$records" | awk '$1 == "GATE" { print $2; exit }')"
+    # A workflow with no merge gate gates nothing by construction — a release
+    # workflow on a tag, for instance. That is a different question from a gate
+    # that misses a job, and conflating them would report every such workflow.
+    [ -n "$gate" ] || continue
+    gates_seen=$((gates_seen + 1))
+    needs="$(printf '%s\n' "$records" | awk -v g="$gate" '$1 == "NEED" && $2 == g { print $3 }')"
+    if [ -z "$needs" ]; then
+      echo "::error::${base}: ${gate} runs the merge-gate action and lists no needs; it reports on nothing" >&2
+      rc=1
+      continue
+    fi
+    while IFS= read -r job; do
+      [ -n "$job" ] || continue
+      [ "$job" = "$gate" ] && continue
+      printf '%s\n' "$needs" | grep -qx -- "$job" && continue
+      found=0
+      for entry in "${MERGE_GATE_EXEMPT[@]:-}"; do
+        IFS='|' read -r ex_file ex_job ex_reason <<<"$entry"
+        if [ "$ex_file" = "$base" ] && [ "$ex_job" = "$job" ]; then
+          found=1
+          printf '  note %s: %s is not gated — %s\n' "$base" "$job" "$ex_reason"
+        fi
+      done
+      if [ "$found" -eq 0 ]; then
+        echo "::error::${base}: job '${job}' is not in ${gate}'s needs; it runs, it can go red, and it does not block a merge" >&2
+        rc=1
+      fi
+    done < <(printf '%s\n' "$records" | awk '$1 == "JOB" { print $2 }')
+
+    # An exemption naming a job this workflow does not have, or one the gate
+    # covers anyway, is a rule that matches nothing.
+    for entry in "${MERGE_GATE_EXEMPT[@]:-}"; do
+      IFS='|' read -r ex_file ex_job ex_reason <<<"$entry"
+      [ "$ex_file" = "$base" ] || continue
+      if ! printf '%s\n' "$records" | awk '$1 == "JOB" { print $2 }' | grep -qx -- "$ex_job"; then
+        echo "::error::${base}: exemption names job '${ex_job}', which this workflow does not define" >&2
+        rc=1
+      elif printf '%s\n' "$needs" | grep -qx -- "$ex_job"; then
+        echo "::error::${base}: exemption names job '${ex_job}', which ${gate} already gates; the exemption applies to nothing" >&2
+        rc=1
+      fi
+    done
+  done
+  if [ "$gates_seen" -eq 0 ]; then
+    echo "error: no merge gate was found in any workflow — the detector is broken, or nothing gates a merge." >&2
+    return 2
+  fi
+  printf 'ok: %s merge gate(s), every job either gated or exempt with a reason\n' "$gates_seen"
+  return "$rc"
+}
+
 # ── Why this script self-tests ────────────────────────────────────────────────
 #
 # Its one check is a grep over YAML, which is the shape that silently matches
@@ -90,6 +228,123 @@ WF
   ! workflow_runs "wired.sh" "$tmp/empty" 2>/dev/null ||
     self_test_die "reported a gate as wired against a directory with no workflows"
 
+  # ── the merge-gate reachability check, both directions on one tree ──
+  local wf saved_exempt
+  wf="$tmp/wf/.github/workflows"
+  mkdir -p "$wf"
+  cat >"$wf/covered.yml" <<'YML'
+name: covered
+on: pull_request
+jobs:
+  alpha:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo alpha
+  merge-gate:
+    runs-on: ubuntu-latest
+    needs:
+      [
+        alpha,
+      ]
+    if: always()
+    steps:
+      - uses: nanohype/.github/actions/merge-gate@0000000000000000000000000000000000000000 # main
+YML
+  saved_exempt=("${MERGE_GATE_EXEMPT[@]}")
+  MERGE_GATE_EXEMPT=()
+  check_merge_gate_coverage "$wf" >/dev/null ||
+    self_test_die "rejected a workflow whose gate lists every job"
+
+  # ONE violation: the same tree gains a single ungated job.
+  cat >"$wf/covered.yml" <<'YML'
+name: covered
+on: pull_request
+jobs:
+  alpha:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo alpha
+  beta:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo beta
+  merge-gate:
+    runs-on: ubuntu-latest
+    needs:
+      [
+        alpha,
+      ]
+    if: always()
+    steps:
+      - uses: nanohype/.github/actions/merge-gate@0000000000000000000000000000000000000000 # main
+YML
+  if check_merge_gate_coverage "$wf" >/dev/null 2>&1; then
+    self_test_die "accepted a job the merge gate does not list; it would run, go red, and block no merge"
+  fi
+  # Captured before it is searched. Reading the status of `check | grep` gives
+  # the pipeline's, which under pipefail is the checker's non-zero — so the
+  # answer grep found is discarded and the assertion tests the wrong thing.
+  local rejection
+  rejection="$(check_merge_gate_coverage "$wf" 2>&1 >/dev/null || true)"
+  printf '%s\n' "$rejection" | grep -qF "'beta'" ||
+    self_test_die "rejected without naming the ungated job, so the rejection does not say what is wrong: ${rejection}"
+
+  # An exemption must name a job that exists and is genuinely ungated.
+  MERGE_GATE_EXEMPT=("covered.yml|beta|a stated reason")
+  check_merge_gate_coverage "$wf" >/dev/null ||
+    self_test_die "rejected a job exempted by name with a reason"
+  MERGE_GATE_EXEMPT=("covered.yml|gamma|a stated reason")
+  if check_merge_gate_coverage "$wf" >/dev/null 2>&1; then
+    self_test_die "accepted an exemption naming a job the workflow does not define; a dead exemption reads as a live one"
+  fi
+  MERGE_GATE_EXEMPT=("covered.yml|alpha|a stated reason")
+  if check_merge_gate_coverage "$wf" >/dev/null 2>&1; then
+    self_test_die "accepted an exemption for a job the gate already covers; it applies to nothing"
+  fi
+
+  # A gate that depends on nothing reports on nothing.
+  MERGE_GATE_EXEMPT=()
+  cat >"$wf/covered.yml" <<'YML'
+name: covered
+on: pull_request
+jobs:
+  alpha:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo alpha
+  merge-gate:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - uses: nanohype/.github/actions/merge-gate@0000000000000000000000000000000000000000 # main
+YML
+  if check_merge_gate_coverage "$wf" >/dev/null 2>&1; then
+    self_test_die "accepted a merge gate with no needs at all"
+  fi
+
+  # A workflow with no gate gates nothing by construction and is a different
+  # question; reporting it would fire on every release workflow.
+  rm -f "$wf/covered.yml"
+  cat >"$wf/tagonly.yml" <<'YML'
+name: tagonly
+on:
+  push:
+    tags:
+      - 'v*'
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo publish
+YML
+  # `cmd; [ $? -eq N ]` cannot be used here: under errexit the non-zero status
+  # aborts before the test runs, so the branch that reads it is unreachable.
+  local vacuous_rc=0
+  check_merge_gate_coverage "$wf" >/dev/null 2>&1 || vacuous_rc=$?
+  [ "$vacuous_rc" -eq 2 ] ||
+    self_test_die "a directory whose workflows carry no merge gate must be an unanswerable question, not a pass (got ${vacuous_rc})"
+  MERGE_GATE_EXEMPT=("${saved_exempt[@]}")
+
   echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, an empty workflow directory, and a gate missing from the contributor checklist."
 }
 
@@ -110,6 +365,11 @@ done
 # This script is a gate too, and a gate nothing runs is the case it exists for.
 if ! workflow_runs "$self" ".github/workflows"; then
   echo "::error::${self} is not run by any workflow; the wiring check itself is unwired" >&2
+  fail=1
+fi
+
+# ─── every CI job must be reachable from the merge gate ───
+if ! check_merge_gate_coverage ".github/workflows"; then
   fail=1
 fi
 

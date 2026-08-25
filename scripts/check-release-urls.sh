@@ -57,7 +57,8 @@ compare_urls() {
 
   # ─── what goreleaser will publish ───
   if ! rendered=$(python3 "${lib_dir}/goreleaser-assets.py" "$goreleaser"); then
-    echo "error: could not render the asset set from $goreleaser" >&2
+    echo "== release URLs NOT met ==" >&2
+    echo "error: could not render the asset set from $goreleaser; the README's URLs were compared against nothing" >&2
     return 2
   fi
   if [ -z "$rendered" ]; then
@@ -66,8 +67,14 @@ compare_urls() {
   fi
 
   # ─── what the README claims ───
-  local urls
-  mapfile -t urls < <(grep -oE 'https://github\.com/nanohype/cloudgov/releases/[^"'"'"' )]*' "$readme" || true)
+  # A read loop rather than mapfile: mapfile is a bash 4 builtin, and the bash
+  # on a macOS system path is 3.2. There it is not a syntax error — it is a
+  # command that does not exist, which `bash -n` accepts and only running finds.
+  local urls=() url_line
+  while IFS= read -r url_line; do
+    [ -n "$url_line" ] || continue
+    urls+=("$url_line")
+  done < <(grep -oE 'https://github\.com/nanohype/cloudgov/releases/[^"'"'"' )]*' "$readme" || true)
 
   if [ "${#urls[@]}" -eq 0 ]; then
     echo "error: $readme documents no release download URLs — did the install section move?" >&2

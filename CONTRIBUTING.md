@@ -19,6 +19,7 @@ bash scripts/check-release-urls.sh  # documented download URLs match .goreleaser
 bash scripts/check-gates.sh         # every gate above is run by a workflow
 bash scripts/check-version-pins.sh  # every pinned version is watched by Renovate
 bash scripts/check-doc-paths.sh     # every file named in markdown exists
+bash scripts/check-shell-portability.sh  # no gate needs a bash newer than a macOS system bash
 bash scripts/check-positive-controls.sh  # every gate rejects the violation it exists to catch
 ```
 
@@ -478,6 +479,7 @@ tool hides it.
    floor.
 8. Run every gate script: `bash scripts/check-context.sh`,
    `bash scripts/check-release-urls.sh`, `bash scripts/check-gates.sh`,
-   `bash scripts/check-version-pins.sh`, `bash scripts/check-doc-paths.sh` and
+   `bash scripts/check-version-pins.sh`, `bash scripts/check-doc-paths.sh`,
+   `bash scripts/check-shell-portability.sh` and
    `bash scripts/check-positive-controls.sh`. CI runs all of them.
 9. Open a pull request with a clear description of what changes and why.

@@ -77,7 +77,17 @@ renovate_covered_lines() {
 # view for both is how a gate accepts a pin whose trailing comment merely
 # mentions renovate.
 scan_unwatched() {
-  local file="$1" covered_file="$2"
+  local file="$1" covered_file="$2" stripped rc
+  # The stripped view is materialised, and its status read, before anything is
+  # derived from it. As a process substitution its failure is unreachable: the
+  # reader sees an empty stream, every line reads as carrying no pin, and the
+  # file reports as fully watched precisely when it could not be read.
+  stripped="$(mktemp)"
+  if ! awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file" >"$stripped"; then
+    rm -f "$stripped"
+    echo "scan_unwatched: the comment stripper failed on ${file}; its pins were not examined" >&2
+    return 1
+  fi
   awk -v fname="$file" -v covered_file="$covered_file" '
     BEGIN {
       # "path:line" per covered pin, from the coverage reporter.
@@ -107,7 +117,10 @@ scan_unwatched() {
         print fname ":" FNR ": " raw
       }
     }
-  ' <(awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file") "$file"
+  ' "$stripped" "$file"
+  rc=$?
+  rm -f "$stripped"
+  return "$rc"
 }
 
 # A two-component number counts as a version only with a `v` — `v2.12` is the
@@ -119,9 +132,21 @@ scan_unwatched() {
 # in prose is a mention, and failing on one would push the next author to delete
 # the sentence rather than the pin.
 scan_versions() {
-  local file="$1"
-  awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file" |
-    grep -nE '(^|[^0-9A-Za-z.])(v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+)' || true
+  local file="$1" stripped hits rc
+  if ! stripped="$(awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$file")"; then
+    echo "scan_versions: the comment stripper failed on ${file}; it cannot report whether that file carries a version" >&2
+    return 1
+  fi
+  # A herestring rather than a pipe, so the status belongs to grep. Status 1 is
+  # "no match" and is the answer; anything above it is grep failing, which must
+  # not be reported as an absence of versions.
+  hits="$(grep -nE '(^|[^0-9A-Za-z.])(v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+)' <<<"$stripped")" || rc=$?
+  rc="${rc:-0}"
+  if [ "$rc" -gt 1 ]; then
+    echo "scan_versions: grep failed on ${file} (status ${rc}); an empty result here would be a failure reported as a clean file" >&2
+    return 1
+  fi
+  printf '%s' "$hits"
 }
 
 # ── Why this script self-tests ────────────────────────────────────────────────
@@ -296,7 +321,11 @@ for glob in "${WATCHED_GLOBS[@]}"; do
     # on one line raise the denominator by one and a gate reporting "20 tokens"
     # would be describing 19. -o prints each match.
     watched_pins=$((watched_pins + $(grep -oE '(^|[^0-9A-Za-z.])(v[0-9]+\.[0-9]+|[0-9]+\.[0-9]+\.[0-9]+)' "$file" | wc -l | tr -d ' ')))
-    unwatched=$(scan_unwatched "$file" "$covered_lines_file")
+    if ! unwatched=$(scan_unwatched "$file" "$covered_lines_file"); then
+      echo "== version pins NOT met ==" >&2
+      echo "::error::${file} could not be examined; every pin in it is unclassified, which is not the same as watched" >&2
+      exit 1
+    fi
     if [ -n "$unwatched" ]; then
       echo "::error::${file}: version pin(s) nothing can bump — add a '# renovate: datasource=... depName=...' comment above each:" >&2
       printf '%s\n' "$unwatched" >&2
@@ -316,7 +345,11 @@ for file in "${NO_VERSION_FILES[@]}"; do
     fail=1
     continue
   fi
-  found=$(scan_versions "$file")
+  if ! found=$(scan_versions "$file"); then
+    echo "== version pins NOT met ==" >&2
+    echo "::error::${file} is classified as carrying no version and could not be read to confirm it" >&2
+    exit 1
+  fi
   if [ -n "$found" ]; then
     echo "::error::${file} is classified as carrying no version, and now carries one. Either move it to the watched set with a renovate annotation, or remove the version:" >&2
     printf '%s\n' "$found" >&2

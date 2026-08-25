@@ -68,7 +68,15 @@ scan_tree() {
   local root="$1" file stripped alias
   while IFS= read -r file; do
     case "$file" in *_test.go) continue ;; esac
-    stripped=$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$file")
+    # The stripper's status is tested here rather than left to `set -e`. A
+    # function whose own status is read — `out=$(scan_tree x) || die` — runs with
+    # errexit suppressed throughout, so a failing command inside this loop would
+    # not abort it and the file would simply contribute no lines. That turns a
+    # stripper that cannot read a file into a file with nothing to report.
+    if ! stripped=$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$file"); then
+      echo "scan_tree: the comment stripper failed on ${file}; this file was not examined" >&2
+      return 1
+    fi
 
     # The name the context package is bound to IN THIS FILE. A file importing it
     # under an alias calls `ctxpkg.Background()`, which a pattern hardcoding
@@ -109,6 +117,29 @@ scan_tree() {
       | sed "s|^|${file}:|" \
       || true
   done < <(find "$root" -name '*.go' -type f 2>/dev/null | sort)
+}
+
+# ── observing the scanner, rather than only its output ────────────────────────
+#
+# A command substitution discards the status of what ran inside it. That is
+# harmless for a control expecting output and silently wrong for one expecting
+# none: `[[ -n "$(scan_tree "$tmp")" ]]` is false when the scanner FOUND NOTHING
+# and equally false when the scanner DIED before printing, so a negative control
+# written that way reports success for a scanner that cannot look at all.
+#
+# The status has to be read where it can still be acted on. Inside a
+# substitution even an exit only leaves the subshell, so the assignment is the
+# last place the failure is visible.
+scan_or_die() {
+  local root="$1" out
+  out=$(scan_tree "$root") ||
+    die "the scanner failed on ${root}; its output cannot answer whether anything is reported there"
+  printf '%s' "$out"
+}
+
+# reports_nothing / reports succeed on the captured text, never on a pipeline.
+reports() {
+  printf '%s\n' "$1" | grep -qF -- "$2"
 }
 
 die() {
@@ -153,8 +184,9 @@ func TestThing(t *testing.T) {
 }
 CLEANTEST
 
-  if [[ -n "$(scan_tree "$tmp")" ]]; then
-    die "a compliant tree was flagged (false positive): $(scan_tree "$tmp")"
+  clean_scan="$(scan_or_die "$tmp")"
+  if [[ -n "$clean_scan" ]]; then
+    die "a compliant tree was flagged (false positive): $clean_scan"
   fi
 
   # Now plant one violation per shape. Each entry is "relative/path.go|needle".
@@ -199,7 +231,8 @@ func masked() {
 	_ = ctx
 }
 MASKED
-  if [[ -z "$(scan_tree "$tmp")" ]]; then
+  masked_scan="$(scan_or_die "$tmp")"
+  if [[ -z "$masked_scan" ]]; then
     die "a violation whose line carries a comment mentioning the allowed bootstrap was not reported (the gate reads comments as code)"
   fi
   rm -f "$tmp/internal/cloud/aws/masked.go"
@@ -218,7 +251,8 @@ func runeLiteral(c byte) interface{} {
 	return nil
 }
 RUNE
-  if [[ -z "$(scan_tree "$tmp" | grep 'rune.go')" ]]; then
+  rune_scan="$(scan_or_die "$tmp")"
+  if ! reports "$rune_scan" 'rune.go'; then
     die "a violation after a rune literal on the same line was not reported (the string state machine desynchronised on an escaped quote)"
   fi
   rm -f "$tmp/internal/cloud/aws/rune.go"
@@ -237,7 +271,8 @@ func aliased() ctxpkg.Context {
 	return ctxpkg.Background()
 }
 ALIASED
-  if [[ -z "$(scan_tree "$tmp" | grep 'aliased.go')" ]]; then
+  aliased_scan="$(scan_or_die "$tmp")"
+  if ! reports "$aliased_scan" 'aliased.go'; then
     die "a detached context reached through an aliased import was not reported"
   fi
   rm -f "$tmp/internal/cloud/aws/aliased.go"
@@ -255,7 +290,8 @@ func plainImport() context.Context {
 	return context.Background()
 }
 PLAIN
-  if [[ -z "$(scan_tree "$tmp" | grep 'plainimport.go')" ]]; then
+  plain_scan="$(scan_or_die "$tmp")"
+  if ! reports "$plain_scan" 'plainimport.go'; then
     die "a detached context under a single-line 'import \"context\"' was not reported"
   fi
   rm -f "$tmp/internal/cloud/aws/plainimport.go"
@@ -271,8 +307,9 @@ import (
 
 func other() { _ = ctxpkg.Background() }
 OTHER
-  if [[ -n "$(scan_tree "$tmp" | grep 'otherpkg.go')" ]]; then
-    die "a Background() call on a package that is not context was flagged: $(scan_tree "$tmp" | grep 'otherpkg.go')"
+  other_scan="$(scan_or_die "$tmp")"
+  if reports "$other_scan" 'otherpkg.go'; then
+    die "a Background() call on a package that is not context was flagged: $other_scan"
   fi
   rm -f "$tmp/internal/cloud/aws/otherpkg.go"
 
@@ -287,8 +324,9 @@ func quoteChar() byte {
 	return byte(q)
 }
 RUNECLEAN
-  if [[ -n "$(scan_tree "$tmp" | grep 'runeclean.go')" ]]; then
-    die "a file whose only single quotes are a rune literal was flagged: $(scan_tree "$tmp" | grep 'runeclean.go')"
+  runeclean_scan="$(scan_or_die "$tmp")"
+  if reports "$runeclean_scan" 'runeclean.go'; then
+    die "a file whose only single quotes are a rune literal was flagged: $runeclean_scan"
   fi
   rm -f "$tmp/internal/cloud/aws/runeclean.go"
 
@@ -318,7 +356,8 @@ func cited() {
 	_ = ctx
 }
 CITED
-  citation="$(scan_tree "$tmp" | grep 'cited.go')"
+  cited_scan="$(scan_or_die "$tmp")"
+  citation="$(printf '%s\n' "$cited_scan" | grep -F 'cited.go' || true)"
   if [[ -z "$citation" ]]; then
     die "the violation in cited.go was not reported at all"
   fi
@@ -367,13 +406,15 @@ func mentions() string {
 	return "context.Background()"
 }
 MENTIONS
-  if [[ -n "$(scan_tree "$tmp")" ]]; then
-    die "a mention in a comment or string literal was reported as a call: $(scan_tree "$tmp")"
+  mention_scan="$(scan_or_die "$tmp")"
+  if [[ -n "$mention_scan" ]]; then
+    die "a mention in a comment or string literal was reported as a call: $mention_scan"
   fi
   rm -f "$tmp/internal/cloud/aws/mentions.go"
 
-  if [[ -n "$(scan_tree "$tmp")" ]]; then
-    die "tree still flagged after every plant was removed: $(scan_tree "$tmp")"
+  residue_scan="$(scan_or_die "$tmp")"
+  if [[ -n "$residue_scan" ]]; then
+    die "tree still flagged after every plant was removed: $residue_scan"
   fi
 
   echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal and past a masking comment, cites the right line, and stays silent on compliant code, tests and foreign packages."

@@ -5,12 +5,32 @@ on:
     tags:
       - 'v*'
 
+# Never cancelled. A release that is half-published — archives uploaded, the tap
+# formula not yet written — is worse than one that runs twice, so a second tag
+# queues behind the first rather than replacing it.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# No job inherits a write. A workflow-level grant is invisible in the diff that
+# adds the next job: that job silently gains whatever was declared here, and
+# nothing in the change reads as a permission change. The one job that publishes
+# asks for the write itself, so adding a second job grants it nothing.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    # goreleaser creates the GitHub release and uploads the archives to it.
+    # contents: write is the grant that upload needs and the only one this job
+    # has; nothing here reads or writes packages, pull requests or issues.
+    permissions:
+      contents: write # create the release and upload its archives
+    # The tokens below are scoped to this environment rather than to the
+    # repository, so a workflow added on any other path cannot read them even
+    # with the same permissions block.
+    environment: release
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

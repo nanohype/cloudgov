@@ -22,7 +22,6 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-lib_dir="${repo_root}/scripts/lib"
 cd "$repo_root"
 
 # extract_paths prints one repo-relative FILE path per line from the markdown file

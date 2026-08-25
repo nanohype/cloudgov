@@ -44,7 +44,6 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-lib_dir="${repo_root}/scripts/lib"
 cd "$repo_root"
 
 backup_dir="$(mktemp -d)"
@@ -466,24 +465,178 @@ run_control scripts/check-gates.sh \
   "zzctl05gate" \
   "is not run by any workflow"
 
+PORT_TARGET="scripts/positive-control-bash4.sh"
+plant_bash4_construct() {
+  # A bash 4 builtin. Under a macOS system bash this is not a parse error — it is
+  # a command that does not exist, so the script starts, runs, and aborts at this
+  # line having reported on nothing.
+  cat >"$PORT_TARGET" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+zzctl08port=()
+mapfile -t zzctl08port < /dev/null
+echo "${#zzctl08port[@]}"
+SH
+  chmod +x "$PORT_TARGET"
+}
+
+run_control scripts/check-shell-portability.sh \
+  "a gate needing a bash newer than a macOS system bash" \
+  "$PORT_TARGET" plant_bash4_construct \
+  "zzctl08port" \
+  "positive-control-bash4.sh"
+
 run_control scripts/check-gates.sh \
   "a gate script the contributor checklist omits" \
   "$CHECKLIST_TARGET" plant_unlisted_gate \
   "zzctl07list" \
   "not named in CONTRIBUTING.md"
 
+
+self="$(basename "${BASH_SOURCE[0]}")"
+
+# ─── the controls: a gate's own dependencies ───
+#
+# The controls above plant a violation in the TREE. They cannot reach a different
+# failure entirely: the gate's helper breaking, rather than the tree being wrong.
+#
+# That failure is silent by construction. A helper's status is read by its caller
+# — `out=$(scan x) || die` — and bash suppresses errexit through the whole left
+# side of that test, so a command failing inside the helper does not abort it.
+# The helper returns nothing, and nothing is what a clean file also produces. A
+# stripper that cannot read a file yields a file with no findings in it.
+#
+# So each gate is run once more against a deliberately broken dependency, and is
+# required to REJECT rather than to report a clean tree. The stub names itself on
+# stderr, so the rejection can be required to name what was broken — a gate that
+# happens to fail for its own unrelated reason does not count as catching this.
+dependency_controlled=()
+
+run_dependency_control() {
+  local gate="$1" lib="$2" marker="$3"
+  local clean rejection mutated_before
+
+  if [ ! -f "$gate" ] || [ ! -f "$lib" ]; then
+    echo "::error::a dependency control names ${gate} and ${lib}; one of them does not exist" >&2
+    fail=1
+    return
+  fi
+
+  if ! clean=$(bash "$gate" 2>&1); then
+    echo "::error::$(basename "$gate") rejects the unmodified tree; its behaviour against a broken ${lib} would prove nothing" >&2
+    fail=1
+    return
+  fi
+
+  mutated_before=${#mutated[@]}
+  mutate "$lib"
+  # A helper that refuses to run, written in the language its callers invoke it
+  # as: an awk program replaced by python is a syntax error rather than a clean
+  # refusal, and the two fail differently. Exit 3 rather than 1, because 1 is
+  # what several of these tools return for "no match" — an answer, not a failure.
+  case "$lib" in
+    *.awk)
+      cat >"$lib" <<AWK
+BEGIN { print "${marker}" > "/dev/stderr"; exit 3 }
+AWK
+      ;;
+    *.py)
+      cat >"$lib" <<PY
+import sys
+sys.stderr.write("${marker}\n")
+raise SystemExit(3)
+PY
+      ;;
+    *)
+      echo "::error::a dependency control names ${lib}, whose language this control cannot stub" >&2
+      fail=1
+      unmutate_since "$mutated_before"
+      return
+      ;;
+  esac
+
+  if ! grep -qF -- "$marker" "$lib"; then
+    echo "::error::the dependency control did not land its stub in ${lib}; whatever the gate says next is about the real library" >&2
+    fail=1
+    unmutate_since "$mutated_before"
+    return
+  fi
+
+  if rejection=$(bash "$gate" 2>&1); then
+    echo "::error::$(basename "$gate") passed with ${lib} unable to run; it reported a clean tree it could not read" >&2
+    fail=1
+    unmutate_since "$mutated_before"
+    return
+  fi
+
+  if ! controlled_rejection "$rejection"; then
+    echo "::error::$(basename "$gate") exited non-zero against a broken ${lib} without reaching a verdict; a crash is not a catch" >&2
+    printf '%s\n' "$rejection" | sed 's/^/    /' >&2
+    fail=1
+    unmutate_since "$mutated_before"
+    return
+  fi
+
+  if ! printf '%s\n' "$rejection" | grep -qF -- "$marker"; then
+    echo "::error::$(basename "$gate") rejected without the broken ${lib} naming itself in the output; it failed for some other reason and this control proves nothing" >&2
+    printf '%s\n' "$rejection" | sed 's/^/    /' >&2
+    fail=1
+    unmutate_since "$mutated_before"
+    return
+  fi
+
+  dependency_controlled+=("$(basename "$gate")")
+  printf '  ok  %-30s rejects rather than passing when %s cannot run\n' "$(basename "$gate")" "$(basename "$lib")"
+  unmutate_since "$mutated_before"
+}
+
+run_dependency_control scripts/check-context.sh \
+  scripts/lib/strip-comments.awk zzdep01strip
+
+run_dependency_control scripts/check-version-pins.sh \
+  scripts/lib/strip-comments.awk zzdep02strip
+
+run_dependency_control scripts/check-gates.sh \
+  scripts/lib/strip-comments.awk zzdep03strip
+
+run_dependency_control scripts/check-release-urls.sh \
+  scripts/lib/goreleaser-assets.py zzdep04assets
+
+run_dependency_control scripts/check-shell-portability.sh \
+  scripts/lib/strip-comments.awk zzdep05strip
+
+# Every gate that reads a shared library must be controlled against that library
+# failing. A gate added with a new `${lib_dir}` reference and no control here is
+# a gate whose helper can break silently.
+for script in scripts/*.sh; do
+  name="$(basename "$script")"
+  [ "$name" = "$self" ] && continue
+  [ "$name" = "$(basename "$GATES_TARGET")" ] && continue
+  [ "$name" = "$(basename "$CHECKLIST_TARGET")" ] && continue
+  [ "$name" = "$(basename "$PORT_TARGET")" ] && continue
+  grep -q 'lib_dir' "$script" || continue
+  covered=0
+  for controlled_name in "${dependency_controlled[@]:-}"; do
+    [ "$controlled_name" = "$name" ] && covered=1
+  done
+  if [ "$covered" -eq 0 ]; then
+    echo "::error::${name} reads a shared library and has no dependency control; nothing proves it rejects when that library cannot run" >&2
+    fail=1
+  fi
+done
+
 # ─── the anti-vacuity floor ───
 #
 # Every gate carries a control and every control names a live gate. Without this
 # the suite shrinks silently: a gate added without a control is a gate nothing
 # proves, and it reads identically to one that is proven.
-self="$(basename "${BASH_SOURCE[0]}")"
 for script in scripts/*.sh; do
   name="$(basename "$script")"
   [ "$name" = "$self" ] && continue
   # The planted gate is a fixture of this run, not a gate of the repo.
   [ "$name" = "$(basename "$GATES_TARGET")" ] && continue
   [ "$name" = "$(basename "$CHECKLIST_TARGET")" ] && continue
+  [ "$name" = "$(basename "$PORT_TARGET")" ] && continue
   covered=0
   for controlled_name in "${controlled[@]:-}"; do
     [ "$controlled_name" = "$name" ] && covered=1

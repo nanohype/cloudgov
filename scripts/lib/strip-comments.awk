@@ -16,7 +16,7 @@
 # rune literal shares the string escape set; shell and YAML escape only inside
 # double quotes, because a single-quoted string there is literal.
 #
-# Usage: awk -v style=go|hash|css [-v strings=blank] -f strip-comments.awk <file>
+# Usage: awk -v style=go|hash|css [-v strings=blank|blank-single] -f strip-comments.awk <file>
 #
 #   go    // and /* */, respecting "..." '...' `...`
 #   hash  #, respecting "..." '...'      (YAML, shell, JSON-with-comments)
@@ -24,6 +24,10 @@
 #
 # The styles differ only in which markers open a comment; the quoting machinery
 # is shared, because that is the half a hand-rolled stripper gets wrong.
+#
+# strings=blank-single empties only single-quoted bodies, for shell checks about
+# what the interpreter executes: a parameter expansion is performed inside double
+# quotes and is literal text inside single ones.
 #
 # strings=blank additionally empties string bodies, keeping the delimiters. Use
 # it where the gate looks for a CALL or a DECLARATION: a token inside a string
@@ -67,13 +71,18 @@ BEGIN {
       # and a backslash inside it is a backslash. Getting this wrong in the other
       # direction would desynchronise on `'it'\''s'`, so the rule is per style.
       escapes = (style == "go") || (quote == "\"")
+      # blank-single empties SINGLE-quoted bodies and keeps double-quoted ones.
+      # In shell the two are not interchangeable views: a parameter expansion in
+      # double quotes is performed and one in single quotes is literal text, so a
+      # check about what the shell EXECUTES must see the first and not the second.
+      blanking = (strings == "blank") || (strings == "blank-single" && quote == "'")
       if (escapes && c == "\\" && i < n) {
-        out = out (strings == "blank" ? "  " : c substr(line, i + 1, 1))
+        out = out (blanking ? "  " : c substr(line, i + 1, 1))
         i += 2
         continue
       }
       if (c == quote) { instr = 0; out = out c; i++; continue }
-      out = out (strings == "blank" ? " " : c)
+      out = out (blanking ? " " : c)
       i++
       continue
     }

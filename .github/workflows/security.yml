@@ -65,9 +65,12 @@ jobs:
   gosec:
     name: gosec (static security analysis)
     runs-on: ubuntu-latest
+    # security-events: write is what uploads the SARIF to the Security tab; it
+    # grants nothing over the repository's contents, and the read is the
+    # checkout.
     permissions:
-      contents: read
-      security-events: write
+      contents: read # read the tree gosec analyses
+      security-events: write # upload the SARIF report to the Security tab
     steps:
       - name: checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,8 +123,28 @@ jobs:
         # explains, and a network failure becomes a build failure.
         run: |
           # renovate: datasource=pypi depName=zizmor
-          pipx install zizmor==1.16.3
-          zizmor --offline --persona=regular .github/workflows/
+          pipx install zizmor==1.29.0
+          # The persona selects which audits RUN, and it is a different axis from
+          # severity: the excessive-permissions audit is not executed under the
+          # default persona at all, so a workflow-level `contents: write` — a
+          # grant every job added later inherits, in a diff that reads as adding
+          # a job — is reported by nothing. The default reports "No findings"
+          # while suppressing that whole class.
+          #
+          # min-severity=high is what keeps the auditor persona a gate rather
+          # than a style checker: its lower tiers are advisory (documenting a
+          # permissions block, per-job concurrency) and failing a merge on those
+          # is how a gate gets bypassed.
+          # min-severity=low, not high. Every workflow here is this repo's own,
+          # so every tier is a tier this repo can act on — and a threshold set
+          # above what you can fix turns a bare "ok" into something
+          # indistinguishable from nothing-found. The findings sitting one level
+          # under a threshold are the ones nobody goes looking for.
+          #
+          # zizmor's own suppression count is printed for the same reason: it is
+          # the denominator behind "no findings", and a suppression that grows
+          # silently is how this output stops meaning anything.
+          zizmor --offline --persona=auditor --min-severity=low .github/workflows/
 
   merge-gate-security:
     name: merge gate (security)

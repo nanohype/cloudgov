@@ -13,6 +13,12 @@ on:
 permissions:
   contents: read
 
+# One run per ref. A superseded push has nothing to say about the commit that
+# replaced it, and letting it finish only delays the run that matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -77,6 +83,24 @@ jobs:
         # Prose that names a file is a claim about this repository, and nothing
         # keeps it true across a rename. Checked rather than trusted.
         run: bash scripts/check-doc-paths.sh
+
+      - name: shell portability
+        # A gate script that aborts partway through has read some of the tree and
+        # reported on none of it. `bash -n` cannot find the cause: a bash 4
+        # builtin under bash 3.2 is a missing command, not a parse error, so it
+        # parses clean everywhere and fails only when run.
+        run: bash scripts/check-shell-portability.sh
+
+      - name: shellcheck
+        # shellcheck PARSES rather than runs, so it answers a question none of
+        # the gates above ask: quoting, word splitting and the tests that read a
+        # command's output where they mean its status. Default severity, because
+        # everything it reports here is at note or warning level — a gate set to
+        # fail on errors alone would exit 0 over all of them.
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck --version
+          shellcheck scripts/*.sh
 
       - name: positive controls
         # Introduces, into this working tree, the exact violation each gate above
