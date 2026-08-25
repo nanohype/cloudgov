@@ -13,9 +13,11 @@ on:
     # Weekly Tuesday 06:00 UTC — catches newly published CVEs even when no PRs land.
     - cron: '0 6 * * 2'
 
+# Read-only at the workflow level. Only the job that uploads a SARIF report
+# needs security-events: write, and granting it here would hand it to every job
+# including the ones that run third-party scanners.
 permissions:
   contents: read
-  security-events: write
 
 concurrency:
   group: security-${{ github.workflow }}-${{ github.ref }}
@@ -27,10 +29,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: setup go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -38,20 +42,29 @@ jobs:
       - name: govulncheck
         # Hard gate: exits non-zero when any known vulnerability is reachable
         # from this module's code (symbol-level analysis, not just go.sum).
-        # @latest keeps the scanner current against the vuln DB schema.
+        # Pinned so the verdict is a function of the commit under test rather
+        # than of whatever was published when the job ran; Renovate tracks the
+        # pin through the govulncheck customManager in renovate.json. The
+        # vulnerability database is fetched at run time and stays current.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          # renovate: datasource=go depName=golang.org/x/vuln
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
   gosec:
     name: gosec (static security analysis)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: setup go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
@@ -65,16 +78,39 @@ jobs:
         # fixed (G301/G306 permissions) or carries an inline, justified
         # `#nosec` at the site (G101 finding-type labels, G204 fixed per-OS
         # report opener).
-        uses: securego/gosec@9e6a9843d7a4a6e3e9a8539b02612c8a4aa3f889 # v2.27.1
+        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3 # v2.28.0
         with:
           args: -severity medium -exclude=G304 -fmt sarif -out gosec.sarif ./...
 
       - name: upload sarif
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.32.2
         with:
           sarif_file: gosec.sarif
           category: gosec
+
+  zizmor:
+    name: zizmor (workflow supply-chain analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: zizmor
+        # Hard gate over this repo's own workflows, which are a dependency
+        # surface the Go module manifest does not describe: every third-party
+        # action runs with access to the job token and the workspace.
+        #
+        # --offline is what makes the verdict a function of the commit under
+        # test. Without it zizmor resolves action metadata over the network, so
+        # the same commit can pass today and fail tomorrow for reasons no diff
+        # explains, and a network failure becomes a build failure.
+        run: |
+          # renovate: datasource=pypi depName=zizmor
+          pipx install zizmor==1.16.3
+          zizmor --offline --persona=regular .github/workflows/
 
   merge-gate-security:
     name: merge gate (security)
@@ -83,6 +119,7 @@ jobs:
       [
         govulncheck,
         gosec,
+        zizmor,
       ]
     # always() is load-bearing: without it a failed dependency SKIPS this job,
     # and GitHub counts a skipped check as passing for branch protection, so the

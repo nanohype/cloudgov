@@ -79,62 +79,166 @@ file_cov=$(awk -v m="${module}/" -v root="$PWD" '
   }
 ' "$profile")
 
-fail=0
-floored_pkgs=" "
+# evaluate_floors compares declared floors against measured coverage, printing one
+# line per floor. Floors arrive on stdin and both measurements as arguments, so
+# the self-test can drive it with synthetic data rather than needing a tree that
+# is genuinely below its floor.
+#
+# Returns 1 when any floor is unmet, a floored target produced no data, or a
+# covered package carries no floor.
+evaluate_floors() {
+  local out="$1" file_cov="$2"
+  local fail=0
+  local floored_pkgs=" "
+  local line kind target floor cov ign label pkg covered
 
-while read -r line; do
-  # Strip trailing comments so a floor may carry its justification inline.
-  line="${line%%#*}"
-  read -r kind target floor <<<"$line"
-  [ -n "${kind:-}" ] || continue
+  while read -r line; do
+    # Strip trailing comments so a floor may carry its justification inline.
+    line="${line%%#*}"
+    read -r kind target floor <<<"$line"
+    [ -n "${kind:-}" ] || continue
 
-  case "$kind" in
-  package)
-    floored_pkgs="${floored_pkgs}${target} "
-    line=$(printf '%s\n' "$out" | grep -E "[[:space:]]${module}/${target}[[:space:]]" || true)
-    cov=$(printf '%s\n' "$line" | grep -oE "coverage: [0-9.]+%" | grep -oE "[0-9.]+" | head -1 || true)
-    label="package ${target}"
-    ;;
-  file)
-    cov=$(printf '%s\n' "$file_cov" | awk -v f="$target" '$1 == f {print $2}')
-    ign=$(printf '%s\n' "$file_cov" | awk -v f="$target" '$1 == f {print $3}')
-    label="file    ${target}"
-    [ "${ign:-0}" -gt 0 ] 2>/dev/null && label="${label} (${ign} stmt ignored)"
-    ;;
-  *)
-    echo "::error::${floors_file}: unknown floor kind '${kind}' (want 'package' or 'file')"
-    fail=1
-    continue
-    ;;
-  esac
+    case "$kind" in
+    package)
+      floored_pkgs="${floored_pkgs}${target} "
+      line=$(printf '%s\n' "$out" | grep -E "[[:space:]]${module}/${target}[[:space:]]" || true)
+      cov=$(printf '%s\n' "$line" | grep -oE "coverage: [0-9.]+%" | grep -oE "[0-9.]+" | head -1 || true)
+      label="package ${target}"
+      ;;
+    file)
+      cov=$(printf '%s\n' "$file_cov" | awk -v f="$target" '$1 == f {print $2}')
+      ign=$(printf '%s\n' "$file_cov" | awk -v f="$target" '$1 == f {print $3}')
+      label="file    ${target}"
+      [ "${ign:-0}" -gt 0 ] 2>/dev/null && label="${label} (${ign} stmt ignored)"
+      ;;
+    *)
+      echo "::error::${floors_file}: unknown floor kind '${kind}' (want 'package' or 'file')"
+      fail=1
+      continue
+      ;;
+    esac
 
-  if [ -z "$cov" ]; then
-    echo "::error::floored ${kind} ${target} produced no coverage data (stale path, or no test files?)"
-    fail=1
-    continue
+    if [ -z "$cov" ]; then
+      echo "::error::floored ${kind} ${target} produced no coverage data (stale path, or no test files?)"
+      fail=1
+      continue
+    fi
+    if awk "BEGIN{exit !($cov < $floor)}"; then
+      echo "::error::${label} coverage ${cov}% is below its ${floor}% floor"
+      fail=1
+    else
+      printf '  ok  %-52s %5s%% >= %s%%\n' "$label" "$cov" "$floor"
+    fi
+  done
+
+  # Any package that reports coverage but isn't floored is ungated — fail so new
+  # tested code can't land without a floor.
+  covered=$(printf '%s\n' "$out" | awk -v m="${module}/" '/coverage: [0-9]/ {for (i=1;i<=NF;i++) if (index($i,m)==1) {sub(m,"",$i); print $i}}' | sort -u)
+  for pkg in $covered; do
+    case "$floored_pkgs" in
+    *" $pkg "*) ;;
+    *)
+      echo "::error::package ${pkg} reports coverage but has no floor in ${floors_file}"
+      fail=1
+      ;;
+    esac
+  done
+
+  return "$fail"
+}
+
+# ── Why this script self-tests ────────────────────────────────────────────────
+#
+# This gate is cited as evidence that a package's coverage has not regressed, so
+# a reader who sees it pass stops looking. A check that cannot fail reports
+# success just as loudly as one that can, and the shapes it is supposed to catch
+# — a below-floor package, a floor naming a path that no longer exists, a new
+# package with no floor at all — are exactly the shapes that produce no other
+# signal.
+#
+# So it proves it can reject before it is allowed to report a pass: each rejection
+# is driven against synthetic measurements, and a clean set is required to come
+# back silent so the gate is not simply always-red.
+self_test_die() {
+  echo "coverage self-test FAILED: $*" >&2
+  echo "The gate could not be shown to reject, so its pass is not evidence." >&2
+  exit 1
+}
+
+self_test() {
+  local clean_out clean_files
+  clean_out='ok  	'"${module}"'/internal/alpha	0.1s	coverage: 90.0% of statements'
+  clean_files='internal/alpha/a.go 100.0 0'
+
+  # A floor that is met, and a file floor that is met, must pass.
+  if ! evaluate_floors "$clean_out" "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  85
+	file    internal/alpha/a.go  100
+	EOF
+  then
+    self_test_die "rejected a tree that meets every floor"
   fi
-  if awk "BEGIN{exit !($cov < $floor)}"; then
-    echo "::error::${label} coverage ${cov}% is below its ${floor}% floor"
-    fail=1
-  else
-    printf '  ok  %-52s %5s%% >= %s%%\n' "$label" "$cov" "$floor"
+
+  # Below its floor.
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  95
+	EOF
+  then
+    self_test_die "accepted a package below its floor"
   fi
-done <"$floors_file"
 
-# Any package that reports coverage but isn't floored is ungated — fail so new
-# tested code can't land without a floor.
-covered=$(printf '%s\n' "$out" | awk -v m="${module}/" '/coverage: [0-9]/ {for (i=1;i<=NF;i++) if (index($i,m)==1) {sub(m,"",$i); print $i}}' | sort -u)
-for pkg in $covered; do
-  case "$floored_pkgs" in
-  *" $pkg "*) ;;
-  *)
-    echo "::error::package ${pkg} reports coverage but has no floor in ${floors_file}"
-    fail=1
-    ;;
-  esac
-done
+  # A floor naming a package with no coverage data — a stale or typo'd path,
+  # whose floor would otherwise be silently unenforced.
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  85
+	package internal/renamed  85
+	EOF
+  then
+    self_test_die "accepted a floor naming a package that produced no coverage"
+  fi
 
-if [ "$fail" -ne 0 ]; then
+  # A file floor naming a path the profile does not carry.
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  85
+	file    internal/alpha/gone.go  100
+	EOF
+  then
+    self_test_die "accepted a file floor naming a path with no coverage data"
+  fi
+
+  # A covered package with no floor: new code landing ungated.
+  if evaluate_floors "${clean_out}"$'\n''ok  	'"${module}"'/internal/beta	0.1s	coverage: 90.0% of statements' \
+    "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  85
+	EOF
+  then
+    self_test_die "accepted a covered package carrying no floor"
+  fi
+
+  # A file floor below its measured coverage.
+  if evaluate_floors "$clean_out" 'internal/alpha/a.go 40.0 0' >/dev/null <<-'EOF'
+	package internal/alpha  85
+	file    internal/alpha/a.go  100
+	EOF
+  then
+    self_test_die "accepted a file below its floor"
+  fi
+
+  # An unknown floor kind is a malformed declaration, not an entry to skip.
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  85
+	module  internal/alpha  85
+	EOF
+  then
+    self_test_die "accepted an unknown floor kind"
+  fi
+
+  echo "coverage self-test passed: the gate rejects below-floor, stale-path, unfloored and malformed entries."
+}
+
+self_test
+
+if ! evaluate_floors "$out" "$file_cov" <"$floors_file"; then
   echo "== coverage floors NOT met =="
   exit 1
 fi
