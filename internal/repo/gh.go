@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -41,12 +42,28 @@ type GHReader struct {
 	Run func(ctx context.Context, args ...string) ([]byte, error)
 }
 
+// ghCallTimeout bounds one gh invocation.
+//
+// The caller's context carries cancellation on SIGINT/SIGTERM but no deadline,
+// and cancellation needs a human to press something. An unattended run — a CI
+// gate, an MCP tool call — has nobody to press it, so a gh process that hangs on
+// a stalled connection would hang the sweep with no ceiling. This is the same
+// two-layer reasoning the AWS provider states: the context is for the human, the
+// timeout is for the machine.
+//
+// A deadline exceeded here surfaces as the HIGH finding the audit already emits
+// for an unreadable repository, which is the right reading — an unreadable
+// repository is itself the governance gap.
+const ghCallTimeout = 30 * time.Second
+
 // NewGHReader returns a reader backed by the gh CLI on PATH.
 func NewGHReader() *GHReader {
 	return &GHReader{Run: func(ctx context.Context, args ...string) ([]byte, error) {
+		cctx, cancel := context.WithTimeout(ctx, ghCallTimeout)
+		defer cancel()
 		// The command is the constant "gh"; every argument is either a literal
 		// here or a name checkName has already accepted. No shell is involved.
-		out, err := exec.CommandContext(ctx, "gh", args...).Output() // #nosec G204 -- constant command; args are literals plus ghName-validated tokens
+		out, err := exec.CommandContext(cctx, "gh", args...).Output() // #nosec G204 -- constant command; args are literals plus ghName-validated tokens
 		if err != nil {
 			var ee *exec.ExitError
 			if ok := asExitError(err, &ee); ok && len(ee.Stderr) > 0 {

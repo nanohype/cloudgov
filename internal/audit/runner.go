@@ -30,13 +30,13 @@ type Providers struct {
 
 // Options controls which scans to run and how.
 type Options struct {
-	Skip         map[string]bool // domain names to skip (e.g. "iam", "certs")
-	MinSeverity  cloud.Severity
-	IAMDays      int
-	CertDays     int
-	RequiredTags []string
-	Concurrency  int
-	Quiet        bool
+	Skip        map[string]bool // domain names to skip (e.g. "iam", "certs")
+	MinSeverity cloud.Severity
+	IAMDays     int
+	CertDays    int
+	TagRules    cloud.TagRules
+	Concurrency int
+	Quiet       bool
 }
 
 // Report contains all findings from a full audit.
@@ -218,14 +218,14 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 	}
 
 	// Tags
-	if !opts.Skip["tags"] && len(providers.Tags) > 0 && len(opts.RequiredTags) > 0 {
+	if !opts.Skip["tags"] && len(providers.Tags) > 0 && !opts.TagRules.Empty() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			progress("tags", "scanning...")
 			findings, err := tags.Scan(ctx, providers.Tags, tags.ScanOptions{
 				MinSeverity: opts.MinSeverity,
-				Required:    opts.RequiredTags,
+				Rules:       opts.TagRules,
 			})
 			if err != nil {
 				mu.Lock()

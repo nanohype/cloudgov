@@ -235,7 +235,7 @@ self_test() {
   fi
 
   # A floors file that yields no entries is not a tree that meets every floor.
-  if evaluate_floors "$clean_out" "$clean_files" >/dev/null </dev/null; then
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null 2>&1 </dev/null; then
     self_test_die "reported a pass having evaluated no floors at all"
   fi
 

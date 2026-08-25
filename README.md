@@ -472,14 +472,21 @@ cloudgov tags --standard-file resource-tagging.json --fail-on medium
 cloudgov tags --require owner,env --output json --output-file tags.json
 ```
 
-The required tag set comes from `--require` (ad-hoc) or `--standard-file` (the required AWS keys of a [nanohype resource-tagging standard](https://github.com/nanohype/nanohype/blob/main/standards/resource-tagging.json) JSON — `content.required_by_surface.aws`). `--require` wins when both are set. Pair with the global `--fail-on medium` to gate CI (all findings are MEDIUM, so `--fail-on medium` exits non-zero on any missing required tag).
+The tag policy comes from `--require` (ad-hoc) or `--standard-file` (a [nanohype resource-tagging standard](https://github.com/nanohype/nanohype/blob/main/standards/resource-tagging.json) JSON). `--require` wins when both are set. Pair with the global `--fail-on medium` to gate CI (all findings are MEDIUM, so `--fail-on medium` exits non-zero on any missing required tag).
+
+`--standard-file` reads both tiers the standard declares, and only it can: a rule that applies to some resource kinds and not others is not expressible as a list of keys.
+
+- **Required** (`content.required_by_surface.aws`) — the keys every resource carries.
+- **Conditional** (`content.conditional_requirements`) — keys required only on certain kinds. The standard declares one: `BackupPolicy`, required on backup-eligible resources. A resource carrying all ten required keys and no `BackupPolicy` is never selected by the tag-matching backup plan, and nothing errors until a restore is attempted — so it is flagged here.
+
+A conditional rule naming a kind cloudgov does not enumerate is reported as an incomplete observation rather than dropped. Two of the standard's five backup-eligible kinds are in that position: there is no EFS auditor, and the RDS auditor paginates `DescribeDBInstances`, which does not return Aurora clusters. Those two are therefore *not* gated, and the run says so rather than reporting a coverage it does not have.
 
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--require` | | Comma-separated tag keys that must be present |
-| `--standard-file` | | Path to a resource-tagging standard JSON; gates on its required AWS keys |
+| `--standard-file` | | Path to a resource-tagging standard JSON; gates on its required keys and conditional rules |
 | `--severity` | `MEDIUM` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |

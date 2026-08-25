@@ -226,7 +226,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := tags.Scan(ctx, providers, tags.ScanOptions{MinSeverity: minSeverity, Required: in.Required})
+			findings, err := tags.Scan(ctx, providers, tags.ScanOptions{MinSeverity: minSeverity, Rules: cloud.RequiredOnly(in.Required...)})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -345,13 +345,13 @@ func registerMCPTools(s *mcp.Server) {
 				skip[strings.ToLower(d)] = true
 			}
 			report, err := audit.Run(ctx, providers, audit.Options{
-				Skip:         skip,
-				MinSeverity:  minSeverity,
-				IAMDays:      orDefault(in.IAMDays, 90),
-				CertDays:     orDefault(in.CertDays, 90),
-				RequiredTags: in.RequiredTags,
-				Concurrency:  10,
-				Quiet:        true,
+				Skip:        skip,
+				MinSeverity: minSeverity,
+				IAMDays:     orDefault(in.IAMDays, 90),
+				CertDays:    orDefault(in.CertDays, 90),
+				TagRules:    cloud.RequiredOnly(in.RequiredTags...),
+				Concurrency: 10,
+				Quiet:       true,
 			})
 			if err != nil {
 				return nil, nil, err

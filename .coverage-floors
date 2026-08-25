@@ -39,6 +39,7 @@ file    internal/compliance/loader.go    100
 
 # ── packages at or above the org floor ────────────────────────────────────────
 package internal/certs              90
+package internal/cloud              78    # capability interfaces, shared types and the tag policy
 package internal/compliance         97
 package internal/cloud/aws          82
 package internal/cost               95
@@ -49,7 +50,7 @@ package internal/network            94
 package internal/orphans            95
 package internal/output/sinks       84
 package internal/platform           86
-package internal/repo               80
+package internal/repo               82
 package internal/quota              95
 package internal/secrets            93
 package internal/storage            90    # was 28 against 93.8 measured — same stale-ratchet problem
@@ -60,9 +61,8 @@ package internal/tags               94
 # not permission to stay there.
 package internal/baseline           72    # baseline store + comparison
 package internal/output             70    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
-package internal/cloud              65    # capability interfaces + shared types; mostly declarations
 package internal/compare            64    # report normalization
-package internal/audit              69    # the orchestrator; each domain it calls is floored on its own
+package internal/audit              73    # the orchestrator; each domain it calls is floored on its own
 package internal/providers          85    # registry + Detect wiring, exercised through the resolvers
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports

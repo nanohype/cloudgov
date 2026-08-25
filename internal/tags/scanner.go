@@ -11,14 +11,14 @@ import (
 // ScanOptions controls tag audit behavior.
 type ScanOptions struct {
 	MinSeverity cloud.Severity
-	Required    []string
+	Rules       cloud.TagRules
 }
 
 // Scan audits resource tags across all provided TagProviders.
 func Scan(ctx context.Context, providers []cloud.TagProvider, opts ScanOptions) ([]cloud.TagFinding, error) {
 	var all []cloud.TagFinding
 	for _, p := range providers {
-		findings, err := p.AuditTags(ctx, opts.Required)
+		findings, err := p.AuditTags(ctx, opts.Rules)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", p.Name(), err)
 		}

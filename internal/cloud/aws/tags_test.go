@@ -128,7 +128,7 @@ func (m *tagsMockS3) HeadBucket(_ context.Context, _ *s3.HeadBucketInput, _ ...f
 
 func TestAuditTags_NoRequiredReturnsEmpty(t *testing.T) {
 	p := &Provider{}
-	got, err := p.AuditTags(context.Background(), nil)
+	got, err := p.AuditTags(context.Background(), cloud.TagRules{})
 	if err != nil || got != nil {
 		t.Errorf("expected (nil, nil), got (%v, %v)", got, err)
 	}
@@ -139,7 +139,7 @@ func TestAuditTags_NoRequiredReturnsEmpty(t *testing.T) {
 // tags set this exercises the dispatch path past the no-required early return.
 func TestAuditTags_NilClientsNoPanic(t *testing.T) {
 	p := &Provider{}
-	got, err := p.AuditTags(context.Background(), []string{"Owner"})
+	got, err := p.AuditTags(context.Background(), cloud.RequiredOnly("Owner"))
 	if err != nil {
 		t.Fatalf("expected no error with nil clients, got %v", err)
 	}
@@ -174,7 +174,7 @@ func TestAuditTags_EC2(t *testing.T) {
 		rds:         &mockRDS{},
 		lambda:      &mockLambda{},
 	}
-	got, err := p.AuditTags(context.Background(), []string{"owner", "env"})
+	got, err := p.AuditTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestAuditTags_S3(t *testing.T) {
 		rds:         &mockRDS{},
 		lambda:      &mockLambda{},
 	}
-	got, err := p.AuditTags(context.Background(), []string{"owner", "env"})
+	got, err := p.AuditTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestAuditTags_RDS(t *testing.T) {
 		}},
 		lambda: &mockLambda{},
 	}
-	got, err := p.AuditTags(context.Background(), []string{"owner", "env"})
+	got, err := p.AuditTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestAuditTags_Lambda(t *testing.T) {
 			},
 		},
 	}
-	got, err := p.AuditTags(context.Background(), []string{"owner", "env"})
+	got, err := p.AuditTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestAuditTags_ErrorBubblesUp(t *testing.T) {
 		s3:  &tagsMockS3{}, s3ForRegion: func(_ string) s3API { return &tagsMockS3{} },
 		rds: &mockRDS{}, lambda: &mockLambda{},
 	}
-	_, err := p.AuditTags(context.Background(), []string{"owner"})
+	_, err := p.AuditTags(context.Background(), cloud.RequiredOnly("owner"))
 	if err == nil {
 		t.Fatal("expected error")
 	}

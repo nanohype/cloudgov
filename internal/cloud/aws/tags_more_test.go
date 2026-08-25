@@ -12,6 +12,8 @@ import (
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	snstypes "github.com/aws/aws-sdk-go-v2/service/sns/types"
+
+	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // ── ECS ──────────────────────────────────────────────────────────────────────
@@ -62,7 +64,7 @@ func TestAuditECSTags(t *testing.T) {
 			"arn:aws:ecs:us-west-2:1:cluster/batch": {"owner": "team"}, // missing env
 		},
 	}}
-	got, err := p.auditECSTags(context.Background(), []string{"owner", "env"})
+	got, err := p.auditECSTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("auditECSTags: %v", err)
 	}
@@ -84,7 +86,7 @@ func TestAuditEKSTags(t *testing.T) {
 			"dev":  {"owner": "team"}, // missing env
 		},
 	}}
-	got, err := p.auditEKSTags(context.Background(), []string{"owner", "env"})
+	got, err := p.auditEKSTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("auditEKSTags: %v", err)
 	}
@@ -130,7 +132,7 @@ func TestAuditDynamoDBTags(t *testing.T) {
 			"sessions": {"owner": "team"}, // missing env
 		},
 	}}
-	got, err := p.auditDynamoDBTags(context.Background(), []string{"owner", "env"})
+	got, err := p.auditDynamoDBTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("auditDynamoDBTags: %v", err)
 	}
@@ -173,7 +175,7 @@ func TestAuditSNSTags(t *testing.T) {
 			"arn:aws:sns:us-west-2:1:billing": {"owner": "team"}, // missing env
 		},
 	}}
-	got, err := p.auditSNSTags(context.Background(), []string{"owner", "env"})
+	got, err := p.auditSNSTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("auditSNSTags: %v", err)
 	}
@@ -195,7 +197,7 @@ func TestAuditSQSTags(t *testing.T) {
 			"https://sqs.us-west-2.amazonaws.com/1/events": {"owner": "team"}, // missing env
 		},
 	}}
-	got, err := p.auditSQSTags(context.Background(), []string{"owner", "env"})
+	got, err := p.auditSQSTags(context.Background(), cloud.RequiredOnly("owner", "env"))
 	if err != nil {
 		t.Fatalf("auditSQSTags: %v", err)
 	}

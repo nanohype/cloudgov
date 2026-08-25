@@ -53,18 +53,18 @@ type lambdaAPI interface {
 // required tags.
 // S3's bucket list is account-global, so it is audited once; every other service
 // here is regional and is audited once per region.
-func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
-	if len(required) == 0 {
+func (p *Provider) AuditTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
+	if rules.Empty() {
 		return nil, nil
 	}
 
-	findings, err := p.auditS3Tags(ctx, required)
+	findings, err := p.auditS3Tags(ctx, rules)
 	if err != nil {
 		return nil, fmt.Errorf("s3 tags: %w", err)
 	}
 
 	regional, err := eachRegion(ctx, p, func(ctx context.Context, rp *Provider) ([]cloud.TagFinding, error) {
-		return rp.auditRegionalTags(ctx, required)
+		return rp.auditRegionalTags(ctx, rules)
 	})
 	if err != nil {
 		return nil, err
@@ -72,10 +72,10 @@ func (p *Provider) AuditTags(ctx context.Context, required []string) ([]cloud.Ta
 	return append(findings, regional...), nil
 }
 
-func (p *Provider) auditRegionalTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditRegionalTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	type auditor struct {
 		name string
-		fn   func(context.Context, []string) ([]cloud.TagFinding, error)
+		fn   func(context.Context, cloud.TagRules) ([]cloud.TagFinding, error)
 	}
 	auditors := []auditor{
 		{"ec2", p.auditEC2Tags},
@@ -90,7 +90,7 @@ func (p *Provider) auditRegionalTags(ctx context.Context, required []string) ([]
 
 	var findings []cloud.TagFinding
 	for _, a := range auditors {
-		got, err := a.fn(ctx, required)
+		got, err := a.fn(ctx, rules)
 		if err != nil {
 			return nil, fmt.Errorf("%s tags: %w", a.name, err)
 		}
@@ -99,7 +99,7 @@ func (p *Provider) auditRegionalTags(ctx context.Context, required []string) ([]
 	return findings, nil
 }
 
-func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditEC2Tags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.ec2 == nil {
 		return nil, nil
 	}
@@ -117,7 +117,7 @@ func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud
 				for _, t := range instance.Tags {
 					tagMap[awssdk.ToString(t.Key)] = struct{}{}
 				}
-				missing := missingTags(required, tagMap)
+				missing := rules.MissingFor("ec2:instance", tagMap)
 				if len(missing) == 0 {
 					continue
 				}
@@ -137,7 +137,7 @@ func (p *Provider) auditEC2Tags(ctx context.Context, required []string) ([]cloud
 	return findings, nil
 }
 
-func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditS3Tags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.s3 == nil {
 		return nil, nil
 	}
@@ -164,7 +164,7 @@ func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.
 			}
 		}
 
-		missing := missingTags(required, tagMap)
+		missing := rules.MissingFor("s3:bucket", tagMap)
 		if len(missing) == 0 {
 			continue
 		}
@@ -181,7 +181,7 @@ func (p *Provider) auditS3Tags(ctx context.Context, required []string) ([]cloud.
 	return findings, nil
 }
 
-func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditRDSTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.rds == nil {
 		return nil, nil
 	}
@@ -198,7 +198,7 @@ func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud
 			for _, t := range db.TagList {
 				tagMap[awssdk.ToString(t.Key)] = struct{}{}
 			}
-			missing := missingTags(required, tagMap)
+			missing := rules.MissingFor("rds:db", tagMap)
 			if len(missing) == 0 {
 				continue
 			}
@@ -217,7 +217,7 @@ func (p *Provider) auditRDSTags(ctx context.Context, required []string) ([]cloud
 	return findings, nil
 }
 
-func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditLambdaTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.lambda == nil {
 		return nil, nil
 	}
@@ -245,7 +245,7 @@ func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cl
 			for k := range tagsOut.Tags {
 				tagMap[k] = struct{}{}
 			}
-			missing := missingTags(required, tagMap)
+			missing := rules.MissingFor("lambda:function", tagMap)
 			if len(missing) == 0 {
 				continue
 			}
@@ -268,7 +268,7 @@ func (p *Provider) auditLambdaTags(ctx context.Context, required []string) ([]cl
 	return findings, nil
 }
 
-func (p *Provider) auditECSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditECSTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.ecs == nil {
 		return nil, nil
 	}
@@ -292,7 +292,7 @@ func (p *Provider) auditECSTags(ctx context.Context, required []string) ([]cloud
 				for _, t := range c.Tags {
 					tagMap[awssdk.ToString(t.Key)] = struct{}{}
 				}
-				missing := missingTags(required, tagMap)
+				missing := rules.MissingFor("ecs:cluster", tagMap)
 				if len(missing) == 0 {
 					continue
 				}
@@ -316,7 +316,7 @@ func (p *Provider) auditECSTags(ctx context.Context, required []string) ([]cloud
 	return findings, nil
 }
 
-func (p *Provider) auditEKSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditEKSTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.eks == nil {
 		return nil, nil
 	}
@@ -340,7 +340,7 @@ func (p *Provider) auditEKSTags(ctx context.Context, required []string) ([]cloud
 			for k := range desc.Cluster.Tags {
 				tagMap[k] = struct{}{}
 			}
-			missing := missingTags(required, tagMap)
+			missing := rules.MissingFor("eks:cluster", tagMap)
 			if len(missing) == 0 {
 				continue
 			}
@@ -362,7 +362,7 @@ func (p *Provider) auditEKSTags(ctx context.Context, required []string) ([]cloud
 	return findings, nil
 }
 
-func (p *Provider) auditDynamoDBTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditDynamoDBTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.dynamodb == nil {
 		return nil, nil
 	}
@@ -387,7 +387,7 @@ func (p *Provider) auditDynamoDBTags(ctx context.Context, required []string) ([]
 				p.warnf("warn: list tags for dynamodb table %s: %v\n", name, err)
 				continue
 			}
-			missing := missingTags(required, tagMap)
+			missing := rules.MissingFor("dynamodb:table", tagMap)
 			if len(missing) == 0 {
 				continue
 			}
@@ -433,7 +433,7 @@ func (p *Provider) dynamodbTableTags(ctx context.Context, arn string) (map[strin
 	return tagMap, nil
 }
 
-func (p *Provider) auditSNSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditSNSTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.sns == nil {
 		return nil, nil
 	}
@@ -458,7 +458,7 @@ func (p *Provider) auditSNSTags(ctx context.Context, required []string) ([]cloud
 			for _, t := range tagsOut.Tags {
 				tagMap[awssdk.ToString(t.Key)] = struct{}{}
 			}
-			missing := missingTags(required, tagMap)
+			missing := rules.MissingFor("sns:topic", tagMap)
 			if len(missing) == 0 {
 				continue
 			}
@@ -481,7 +481,7 @@ func (p *Provider) auditSNSTags(ctx context.Context, required []string) ([]cloud
 	return findings, nil
 }
 
-func (p *Provider) auditSQSTags(ctx context.Context, required []string) ([]cloud.TagFinding, error) {
+func (p *Provider) auditSQSTags(ctx context.Context, rules cloud.TagRules) ([]cloud.TagFinding, error) {
 	if p.sqs == nil {
 		return nil, nil
 	}
@@ -502,7 +502,7 @@ func (p *Provider) auditSQSTags(ctx context.Context, required []string) ([]cloud
 			for k := range tagsOut.Tags {
 				tagMap[k] = struct{}{}
 			}
-			missing := missingTags(required, tagMap)
+			missing := rules.MissingFor("sqs:queue", tagMap)
 			if len(missing) == 0 {
 				continue
 			}
