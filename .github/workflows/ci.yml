@@ -85,6 +85,42 @@ jobs:
         # keeps it true across a rename. Checked rather than trusted.
         run: bash scripts/check-doc-paths.sh
 
+      - name: install bash 3.2
+        # The portability probe needs an interpreter older than 4, and a runner
+        # ships only bash 5. Without one the gate can scan but cannot RUN
+        # anything — and running is the only check here that catches a construct
+        # the table does not list.
+        #
+        # Built rather than skipped. Resolved from the machine, absence made the
+        # gate print a skip into a green job, so on a runner it had never been
+        # exercised in the one place it gates. The gate now exits non-zero when
+        # no old bash is present and CI never sets the opt-out, so this step
+        # failing cannot pass silently either.
+        #
+        # Pinned by URL and verified by digest: the tarball is a supply-chain
+        # input like any other, and this one compiles and then runs every gate.
+        run: |
+          set -euo pipefail
+          # renovate: datasource=gnu depName=bash
+          BASH32_VERSION=3.2.57
+          BASH32_SHA256=3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4
+          curl -fsSL -o /tmp/bash32.tar.gz \
+            "https://ftp.gnu.org/gnu/bash/bash-${BASH32_VERSION}.tar.gz"
+          echo "${BASH32_SHA256}  /tmp/bash32.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/bash32.tar.gz -C /tmp
+          cd "/tmp/bash-${BASH32_VERSION}"
+          # bash 3.2 predates the compilers on a current runner; these are the
+          # two diagnostics it trips that are errors by default now.
+          ./configure --quiet --prefix=/usr/local \
+            CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -O2"
+          make --quiet -j"$(nproc)"
+          # Installed where the gate looks, and asserted to be what was asked
+          # for: a build that silently produced bash 5 would restore the skip.
+          install -m 0755 bash /usr/bin/bash-3.2
+          ln -sf /usr/bin/bash-3.2 /usr/bin/bash32
+          /usr/bin/bash-3.2 --version | head -1
+          test "$(/usr/bin/bash-3.2 -c 'echo "${BASH_VERSINFO[0]}"')" = 3
+
       - name: shell portability
         # A gate script that aborts partway through has read some of the tree and
         # reported on none of it. `bash -n` cannot find the cause: a bash 4

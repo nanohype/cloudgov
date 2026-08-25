@@ -69,3 +69,50 @@ filter_find_args() {
     esac
   done
 }
+
+# require_tracked_source fails unless $1 can be enumerated from version control.
+#
+# THE FALLBACK IS SILENT, AND THAT IS ITS OWN DEFECT. tracked_files drops to a
+# filesystem walk where git cannot answer, which is right for a scratch tree a
+# self-test built — such a tree holds only what the test put in it. It is wrong
+# for the repository: there, the walk is exactly what the tracked set replaced,
+# so a missing git or an unexpected working directory silently restores the
+# behaviour of grading whatever CI placed beside the checkout.
+#
+# An exemption on one axis is not an exemption on the others. tracked_files may
+# legitimately be unable to consult git; it must never be unable to SAY so. A
+# gate that enumerates the repository calls this first, so the precondition is
+# named rather than inferred from a suspiciously small count.
+require_tracked_source() {
+  local root="${1:-.}" what="${2:-this gate}"
+
+  if ! command -v git >/dev/null 2>&1; then
+    echo "error: git is not on PATH, so ${what} cannot tell a tracked file from one CI placed" >&2
+    echo "       beside the checkout. It has NOT examined anything; that is different from" >&2
+    echo "       finding nothing." >&2
+    return 2
+  fi
+  if ! git -C "$root" rev-parse --show-toplevel >/dev/null 2>&1; then
+    echo "error: ${root} is not inside a git working tree, so ${what} cannot enumerate the" >&2
+    echo "       tracked set. It has NOT examined anything." >&2
+    return 2
+  fi
+
+  local top
+  top="$(git -C "$root" rev-parse --show-toplevel)"
+  if [ "$(cd "$root" && pwd -P)" != "$(cd "$top" && pwd -P)" ]; then
+    echo "error: ${root} is not the root of its working tree (${top}), so the enumeration would" >&2
+    echo "       silently fall back to a filesystem walk." >&2
+    return 2
+  fi
+
+  # A tracked set of zero is not a small repository; it is an enumeration that
+  # failed while returning success.
+  local n
+  n="$(git -C "$root" ls-files | wc -l | tr -d ' ')"
+  if [ "${n:-0}" -eq 0 ]; then
+    echo "error: git reports no tracked files under ${root}; ${what} would examine nothing and" >&2
+    echo "       report it as a clean tree." >&2
+    return 2
+  fi
+}

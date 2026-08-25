@@ -372,6 +372,11 @@ cat: /nonexistent/zzctl06path: No such file or directory'
   echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, a non-zero exit with no verdict, a SILENT exit 127, a verdict printed after the gate's own helper died, and a real verdict that QUOTES a shell diagnostic as its finding."
 }
 
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "check-positive-controls" || exit 2
+
 self_test
 
 fail=0

@@ -503,7 +503,11 @@ MENTIONS
   # the filesystem grades them, passes on the seat, and reports on someone else's
   # code in CI. The enumeration is the tracked set for that reason, and this is
   # the assertion — an untracked file under the repo root is not examined.
-  local untracked="internal/cloud/aws/zzuntracked_probe.go"
+  # At the repository ROOT, not inside a package directory. A fixture that
+  # assumes a directory exists is a fixture outside the population on any tree
+  # that lacks it — there it does not test the exclusion, it crashes, and a
+  # harness reading the exit status records a crash as a refusal.
+  local untracked="zzuntracked_probe.go"
   printf 'package aws\n\nfunc zzUntrackedProbe() {}\n' >"${repo_root}/${untracked}"
   local listed=0
   if (cd "$repo_root" && tracked_files . -name '*.go' -type f) | grep -q 'zzuntracked_probe'; then
@@ -521,15 +525,57 @@ cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091  # resolved at run time from lib_dir, not at parse time
 . "${lib_dir}/tracked-files.sh"
 
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "context-awareness" || exit 2
+
 self_test
 
 # The denominator. A gate that passes over zero files reads exactly like a gate
 # that passed over all of them, and an --include glob or a find predicate that
 # stops matching is the usual way that happens. Reporting the count makes an
 # empty sweep visible rather than merely non-failing.
-scanned=$(tracked_files . -name '*.go' -type f | grep -cv '_test\.go$')
-if [[ "$scanned" -eq 0 ]]; then
-  echo "context-awareness check: no Go files found — the enumeration is broken, not the tree." >&2
+# Written to a file rather than a variable: an empty variable printed through
+# `printf '%s\n'` yields one blank line, which every count below then reads as
+# one file. That is the empty case reporting as a non-empty one, in the counters
+# whose whole job is to notice emptiness.
+scanned_list=$(mktemp)
+trap 'rm -f "$scanned_list"' EXIT
+tracked_files . -name '*.go' -type f | grep -v '_test\.go$' | sed 's|^\./||' >"$scanned_list" || true
+scanned=$(grep -c . "$scanned_list" || true)
+outside=$(grep -cv '^scripts/' "$scanned_list" || true)
+#
+# A FLOOR WELL UNDER THE REAL COUNT, not at-least-one. "Matched almost nothing"
+# is the failure that reads as success: an at-least-one floor is satisfied by the
+# gate scripts themselves, or by one stray file, and reports a clean tree. This
+# catches an enumeration that collapsed, and is set low enough that ordinary
+# growth or deletion does not trip it.
+# TWO FLOORS, AND THEY ANSWER DIFFERENT QUESTIONS. Collapsing them into one
+# number loses the half that generalises.
+#
+#   UNCONDITIONAL — at least one file examined OUTSIDE this gate's own
+#                   directories. A law about ANY tree: a gate whose whole
+#                   population turned out to be its own scripts has examined
+#                   nothing about the repository, however large the count looks.
+#   REPO-ONLY     — a realistic count for THIS repository. True here, not a law
+#                   anywhere. It catches an enumeration that collapsed to a
+#                   handful without collapsing to zero.
+#
+# A margin is not a property: lower the repo-only number far enough and it stops
+# distinguishing a manifest the repo ships from a fixture the gate carries. Only
+# the unconditional half can make that distinction, which is why it is separate
+# and why it is not a count.
+if [[ "${outside:-0}" -eq 0 ]]; then
+  echo "context-awareness check: every Go file examined lies under scripts/, so nothing about" >&2
+  echo "this repository's code was read. That is an empty answer, not a clean one." >&2
+  exit 2
+fi
+
+readonly CONTEXT_FILE_FLOOR=90 # measured 128 non-test Go files
+if [[ "$scanned" -lt "$CONTEXT_FILE_FLOOR" ]]; then
+  echo "context-awareness check: examined ${scanned} non-test Go file(s), under the floor of ${CONTEXT_FILE_FLOOR}." >&2
+  echo "The enumeration collapsed; this is not a report about the tree." >&2
   exit 2
 fi
 

@@ -65,9 +65,15 @@ repo_extensions() {
     sed 's/|$//'
 }
 
+# $2 optionally overrides the extension set. The self-test passes a FIXED set:
+# its fixtures name .go and .sh paths, and deriving the set from the tree makes
+# the self-test's answer depend on what the tree happens to contain — on a tree
+# with no Go files the fixture stops being a path claim and the assertion fails
+# for a reason that has nothing to do with the extractor. A self-test's fixture
+# must lie inside the population the assertion is about.
 extract_paths() {
-  local file="$1" exts
-  exts="$(repo_extensions)"
+  local file="$1" exts="${2:-}"
+  [ -n "$exts" ] || exts="$(repo_extensions)"
   if [ -z "$exts" ]; then
     echo "extract_paths: no file extensions found in this tree; every code span would be out of scope" >&2
     return 1
@@ -147,6 +153,8 @@ self_test_die() {
   exit 1
 }
 
+readonly SELF_TEST_EXTS='go|sh|md|yaml|yml|json|awk|py|txt|html'
+
 self_test() {
   local tmp found want excluded
   tmp="$(mktemp -d)"
@@ -163,7 +171,7 @@ A module ref `example.com/x@v1.2.3` is not a path.
 A citation `cmd/root.go:59` names a line, not a file to stat.
 MD
 
-  found="$(extract_paths "$tmp/doc.md")"
+  found="$(extract_paths "$tmp/doc.md" "$SELF_TEST_EXTS")"
 
   printf '%s\n' "$found" | grep -q 'internal/cloud/aws/iam.go' ||
     self_test_die "a plain repo-relative path was not extracted"
@@ -194,7 +202,7 @@ An [external link](https://example.test/a) is not a path.
 An [anchor](#section) is not a path.
 A [nested one](internal/cloud/aws/iam.go) is.
 MD
-  found="$(extract_paths "$tmp/links.md")"
+  found="$(extract_paths "$tmp/links.md" "$SELF_TEST_EXTS")"
   for want in 'AGENTS.md' 'LICENSE' 'internal/cloud/aws/iam.go'; do
     printf '%s
 ' "$found" | grep -q "$want" ||
@@ -211,7 +219,7 @@ MD
   # position, a name is not distinguishable from prose.
   printf 'The word `LICENSE` appears in running text.
 ' >"$tmp/bareword.md"
-  [ -z "$(extract_paths "$tmp/bareword.md")" ] ||
+  [ -z "$(extract_paths "$tmp/bareword.md" "$SELF_TEST_EXTS")" ] ||
     self_test_die "a bare word in backticks was treated as a path claim"
 
   # The extension set is derived from the tree, so the derivation needs its own
@@ -227,11 +235,16 @@ MD
 
   # A document naming no paths must extract nothing rather than something.
   printf 'Prose with no code spans at all.\n' >"$tmp/bare.md"
-  [ -z "$(extract_paths "$tmp/bare.md")" ] ||
+  [ -z "$(extract_paths "$tmp/bare.md" "$SELF_TEST_EXTS")" ] ||
     self_test_die "extracted a path from a document that names none"
 
   echo "check-doc-paths self-test passed: it extracts repo paths and markdown link targets, skips URLs, anchors, flags, placeholders, citations and bare words, and cites the right line."
 }
+
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "check-doc-paths" || exit 2
 
 self_test
 
@@ -253,15 +266,37 @@ while IFS= read -r doc; do
   done < <(extract_paths "$doc")
 done < <(tracked_files . -name '*.md' -type f | sort)
 
+md_list=$(mktemp)
+trap 'rm -f "$md_list"' EXIT
+tracked_files . -name '*.md' -type f | sed 's|^\./||' >"$md_list" || true
+outside_scripts=$(grep -cv '^scripts/' "$md_list" || true)
+
 # A verdict over nothing is not a pass. Both counts matter: no documents means
 # the enumeration broke, and no claims means the extractor stopped matching —
 # and either would report a clean tree.
-if [ "$checked" -eq 0 ]; then
-  echo "error: no markdown files found — the enumeration is broken, not the tree." >&2
+#
+# A FLOOR WELL UNDER THE REAL COUNT, not at-least-one. "Matched almost nothing"
+# is the failure that reads as success: an at-least-one floor is satisfied by the
+# gate scripts themselves, or by one stray file, and reports a clean tree. This
+# catches an enumeration that collapsed, and is set low enough that ordinary
+# growth or deletion does not trip it.
+# UNCONDITIONAL: at least one document outside this gate's own directories. See
+# the note in check-context.sh — a count cannot tell the repo's own files from
+# the gate's, and only this half can.
+if [ "${outside_scripts:-0}" -eq 0 ]; then
+  echo "error: every markdown file read lies under scripts/, so nothing about this repository's" >&2
+  echo "       documentation was examined. That is an empty answer, not a clean one." >&2
   exit 2
 fi
-if [ "$claims" -eq 0 ]; then
-  echo "error: ${checked} markdown file(s) read and not one path claim extracted — the extractor is broken, not the docs." >&2
+
+readonly DOC_FILE_FLOOR=4   # measured 5 markdown files
+readonly DOC_CLAIM_FLOOR=15 # measured 23 path claims
+if [ "$checked" -lt "$DOC_FILE_FLOOR" ]; then
+  echo "error: read ${checked} markdown file(s), under the floor of ${DOC_FILE_FLOOR} — the enumeration collapsed." >&2
+  exit 2
+fi
+if [ "$claims" -lt "$DOC_CLAIM_FLOOR" ]; then
+  echo "error: extracted ${claims} path claim(s) from ${checked} file(s), under the floor of ${DOC_CLAIM_FLOOR} — the extractor stopped matching." >&2
   exit 2
 fi
 

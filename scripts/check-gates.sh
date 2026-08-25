@@ -453,6 +453,11 @@ YML
   echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, an empty workflow directory, and a gate missing from the contributor checklist."
 }
 
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "check-gates" || exit 2
+
 self_test
 
 fail=0
@@ -497,8 +502,15 @@ done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | 
 
 # A verdict over nothing is not a pass: an empty scripts/ directory, or a glob
 # that stopped matching, would otherwise report every gate as wired.
-if [ "$checked" -eq 0 ]; then
-  echo "error: no gate scripts found in scripts/ — the enumeration is broken, not the tree." >&2
+#
+# A FLOOR WELL UNDER THE REAL COUNT, not at-least-one. "Matched almost nothing"
+# is the failure that reads as success: an at-least-one floor is satisfied by the
+# gate scripts themselves, or by one stray file, and reports a clean tree. This
+# catches an enumeration that collapsed, and is set low enough that ordinary
+# growth or deletion does not trip it.
+readonly GATE_COUNT_FLOOR=5 # measured 7 gates besides this one
+if [ "$checked" -lt "$GATE_COUNT_FLOOR" ]; then
+  echo "error: found ${checked} gate script(s), under the floor of ${GATE_COUNT_FLOOR} — the enumeration collapsed." >&2
   exit 2
 fi
 
