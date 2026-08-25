@@ -77,7 +77,7 @@ func runCerts(cmd *cobra.Command, _ []string) error {
 	case "json":
 		return output.WriteCerts(w, findings, incomplete)
 	case "sarif":
-		return output.WriteCertsSARIF(w, findings, Version)
+		return output.WriteCertsSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d certificate findings\n\n", len(findings))

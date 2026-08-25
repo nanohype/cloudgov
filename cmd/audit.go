@@ -120,7 +120,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 	case "sarif":
-		if err := output.WriteAuditSARIF(w, report, Version); err != nil {
+		if err := output.WriteAuditSARIF(w, report, Version, report.Incomplete); err != nil {
 			return err
 		}
 	default:

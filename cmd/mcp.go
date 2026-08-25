@@ -443,10 +443,12 @@ func registerMCPTools(s *mcp.Server) {
 				return nil, nil, fmt.Errorf("unknown benchmark %q; available: %s", in.Benchmark, strings.Join(compliance.AvailableBenchmarks(), ", "))
 			}
 			var input compliance.InputFindings
-			if err := loadComplianceReports(in, &input); err != nil {
+			unread, err := loadComplianceReports(in, &input)
+			if err != nil {
 				return nil, nil, err
 			}
 			report := compliance.Evaluate(benchmark, input)
+			report.Incomplete = unread
 			return jsonResult(func(w io.Writer) error { return output.WriteCompliance(w, report) })
 		})
 
@@ -480,43 +482,66 @@ func registerMCPTools(s *mcp.Server) {
 		})
 }
 
-func loadComplianceReports(in complianceInput, input *compliance.InputFindings) error {
+// loadComplianceReports returns what the input scans could not read alongside
+// their findings.
+//
+// Over MCP there is no exit code, so the incomplete array is the only carrier a
+// caller has. A benchmark evaluated over a scan that was denied part of an
+// account, returned here as a clean verdict, is a claim the model has no way to
+// question.
+func loadComplianceReports(in complianceInput, input *compliance.InputFindings) ([]string, error) {
+	var unreadAll []string
 	if in.IAMReport != "" {
-		f, err := compliance.LoadIAMReport(in.IAMReport)
+		f, unread, err := compliance.LoadIAMReport(in.IAMReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.IAM = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "iam scan report: "+entry)
+		}
 	}
 	if in.StorageReport != "" {
-		f, err := compliance.LoadStorageReport(in.StorageReport)
+		f, unread, err := compliance.LoadStorageReport(in.StorageReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Storage = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "storage audit report: "+entry)
+		}
 	}
 	if in.NetworkReport != "" {
-		f, err := compliance.LoadNetworkReport(in.NetworkReport)
+		f, unread, err := compliance.LoadNetworkReport(in.NetworkReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Network = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "network audit report: "+entry)
+		}
 	}
 	if in.CertsReport != "" {
-		f, err := compliance.LoadCertsReport(in.CertsReport)
+		f, unread, err := compliance.LoadCertsReport(in.CertsReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Certs = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "certs report: "+entry)
+		}
 	}
 	if in.TagsReport != "" {
-		f, err := compliance.LoadTagsReport(in.TagsReport)
+		f, unread, err := compliance.LoadTagsReport(in.TagsReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Tags = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "tags report: "+entry)
+		}
 	}
-	return nil
+	return unreadAll, nil
 }
 
 // jsonResult renders a report via one of the output.Write* funcs into a single

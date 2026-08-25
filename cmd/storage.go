@@ -85,7 +85,7 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 	case "json":
 		return output.WriteStorage(w, findings, incomplete)
 	case "sarif":
-		return output.WriteStorageSARIF(w, findings, Version)
+		return output.WriteStorageSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d storage findings\n\n", len(findings))

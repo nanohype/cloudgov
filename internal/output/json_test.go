@@ -609,10 +609,15 @@ func writersTakingIncomplete(t *testing.T) int {
 			if !ok || fn.Recv != nil || !fn.Name.IsExported() || fn.Type.Params == nil {
 				continue
 			}
-			// Only the JSON writers. IncompleteNote takes the same argument and
-			// renders it to a table, which is a different surface with its own
-			// check (TestIncompleteNoteStatesCoverageEitherWay).
-			if !strings.HasPrefix(fn.Name.Name, "Write") {
+			// Only the JSON writers. Two other surfaces take the same argument
+			// and are checked where their own shape can be asserted, because a
+			// count that mixed them would be satisfied by the wrong one:
+			//
+			//   IncompleteNote  renders it to a table
+			//                   (TestIncompleteNoteStatesCoverageEitherWay)
+			//   Write*SARIF     renders it as invocations + notifications
+			//                   (TestEverySARIFWriterCarriesTheIncompleteRecord)
+			if !strings.HasPrefix(fn.Name.Name, "Write") || strings.HasSuffix(fn.Name.Name, "SARIF") {
 				continue
 			}
 			params := fn.Type.Params.List

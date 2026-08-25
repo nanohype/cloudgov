@@ -41,6 +41,14 @@ type ComplianceReport struct {
 	Benchmark string            `json:"benchmark"`
 	Summary   ComplianceSummary `json:"summary"`
 	Results   []ControlResult   `json:"results"`
+	// Incomplete names what the scans behind this evaluation could not read.
+	//
+	// A benchmark verdict is only as complete as its inputs. A control evaluated
+	// against a scan that was denied half an account reads exactly like one
+	// evaluated against a whole account, and it is the surface where that
+	// difference matters most: the output is the artifact someone points at to
+	// say a control passed. Always present, empty when every input was whole.
+	Incomplete []string `json:"incomplete"`
 }
 
 // InputFindings holds all finding types loaded from cloudgov scan JSON reports.

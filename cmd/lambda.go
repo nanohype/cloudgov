@@ -100,7 +100,7 @@ func runLambdaAudit(cmd *cobra.Command, _ []string) error {
 	case "json":
 		return output.WriteLambdaPolicy(w, allFindings, incomplete)
 	case "sarif":
-		return output.WriteLambdaSARIF(w, allFindings, Version)
+		return output.WriteLambdaSARIF(w, allFindings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d Lambda policy findings\n\n", len(allFindings))

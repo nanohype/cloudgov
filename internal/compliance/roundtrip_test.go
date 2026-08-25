@@ -44,7 +44,7 @@ func TestLoadCertsReportRoundTrip(t *testing.T) {
 		return output.WriteCerts(b, []cloud.CertFinding{want}, nil)
 	})
 
-	got, err := compliance.LoadCertsReport(path)
+	got, _, err := compliance.LoadCertsReport(path)
 	if err != nil {
 		t.Fatalf("LoadCertsReport: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestLoadTagsReportRoundTrip(t *testing.T) {
 		return output.WriteTags(b, []cloud.TagFinding{want}, nil)
 	})
 
-	got, err := compliance.LoadTagsReport(path)
+	got, _, err := compliance.LoadTagsReport(path)
 	if err != nil {
 		t.Fatalf("LoadTagsReport: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestLoadStorageReportRoundTrip(t *testing.T) {
 		return output.WriteStorage(b, []cloud.BucketFinding{want}, nil)
 	})
 
-	got, err := compliance.LoadStorageReport(path)
+	got, _, err := compliance.LoadStorageReport(path)
 	if err != nil {
 		t.Fatalf("LoadStorageReport: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestLoadNetworkReportRoundTrip(t *testing.T) {
 		return output.WriteNetwork(b, []cloud.NetworkFinding{want}, nil)
 	})
 
-	got, err := compliance.LoadNetworkReport(path)
+	got, _, err := compliance.LoadNetworkReport(path)
 	if err != nil {
 		t.Fatalf("LoadNetworkReport: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestLoadIAMReportRoundTrip(t *testing.T) {
 		return output.WriteIAM(b, []cloud.Finding{want}, 1, nil, nil)
 	})
 
-	got, err := compliance.LoadIAMReport(path)
+	got, _, err := compliance.LoadIAMReport(path)
 	if err != nil {
 		t.Fatalf("LoadIAMReport: %v", err)
 	}

@@ -141,7 +141,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	case "json":
 		return output.WriteIAM(w, allFindings, totalPrincipals, allUsedPerms, incomplete)
 	case "sarif":
-		return output.WriteSARIF(w, allFindings, Version)
+		return output.WriteSARIF(w, allFindings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d findings across %d principals\n\n", len(allFindings), totalPrincipals)

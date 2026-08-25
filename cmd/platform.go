@@ -125,7 +125,7 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	case "json":
 		return output.WritePlatform(w, findings, incomplete)
 	case "sarif":
-		return output.WritePlatformSARIF(w, findings, Version)
+		return output.WritePlatformSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d platform conformance findings (context: %s)\n\n", len(findings), clients.ContextName)

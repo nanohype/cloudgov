@@ -81,7 +81,7 @@ func runSecretsScan(cmd *cobra.Command, _ []string) error {
 	case "json":
 		return output.WriteSecrets(w, findings, incomplete)
 	case "sarif":
-		return output.WriteSecretsSARIF(w, findings, Version)
+		return output.WriteSecretsSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d secret findings\n\n", len(findings))

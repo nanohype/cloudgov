@@ -120,11 +120,11 @@ func TestEvaluateCISAWSDispatch(t *testing.T) {
 // and every control mapped to that domain would then read NOT_EVALUATED.
 func TestLoadersRejectUnreadableReports(t *testing.T) {
 	loaders := map[string]func(string) error{
-		"iam":     func(p string) error { _, err := LoadIAMReport(p); return err },
-		"storage": func(p string) error { _, err := LoadStorageReport(p); return err },
-		"network": func(p string) error { _, err := LoadNetworkReport(p); return err },
-		"certs":   func(p string) error { _, err := LoadCertsReport(p); return err },
-		"tags":    func(p string) error { _, err := LoadTagsReport(p); return err },
+		"iam":     func(p string) error { _, _, err := LoadIAMReport(p); return err },
+		"storage": func(p string) error { _, _, err := LoadStorageReport(p); return err },
+		"network": func(p string) error { _, _, err := LoadNetworkReport(p); return err },
+		"certs":   func(p string) error { _, _, err := LoadCertsReport(p); return err },
+		"tags":    func(p string) error { _, _, err := LoadTagsReport(p); return err },
 	}
 	dir := t.TempDir()
 	malformed := filepath.Join(dir, "malformed.json")

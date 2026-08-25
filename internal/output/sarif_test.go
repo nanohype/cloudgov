@@ -21,7 +21,7 @@ func TestWriteSARIF_StructureValid(t *testing.T) {
 		Principal: &cloud.Principal{Name: "admin"},
 		Detail:    "wildcard action",
 	}}
-	if err := WriteSARIF(&buf, findings, "v1.0.0"); err != nil {
+	if err := WriteSARIF(&buf, findings, "v1.0.0", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestWriteStorageSARIF(t *testing.T) {
 		Bucket:   "leaky",
 		Region:   "us-east-1",
 	}}
-	if err := WriteStorageSARIF(&buf, findings, "v1.0.0"); err != nil {
+	if err := WriteStorageSARIF(&buf, findings, "v1.0.0", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var out map[string]interface{}
@@ -69,7 +69,7 @@ func TestWriteSecretsSARIF(t *testing.T) {
 		Key:      "AWS_KEY",
 		Detail:   "leaked",
 	}}
-	if err := WriteSecretsSARIF(&buf, findings, "v1.0.0"); err != nil {
+	if err := WriteSecretsSARIF(&buf, findings, "v1.0.0", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var out map[string]interface{}
@@ -84,7 +84,7 @@ func TestWriteAuditSARIF(t *testing.T) {
 		IAM:     []cloud.Finding{{Severity: cloud.SeverityCritical, Type: cloud.FindingAdminAccess, Provider: "aws", Principal: &cloud.Principal{Name: "x"}}},
 		Storage: []cloud.BucketFinding{{Severity: cloud.SeverityHigh, Provider: "aws", Bucket: "b"}},
 	}
-	if err := WriteAuditSARIF(&buf, rep, "v1.0.0"); err != nil {
+	if err := WriteAuditSARIF(&buf, rep, "v1.0.0", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	var out map[string]interface{}
@@ -183,7 +183,7 @@ func TestWriteK8sSARIF(t *testing.T) {
 		{Type: cloud.K8sDangerousVerb, Severity: cloud.SeverityMedium, Detail: "delete on *"},
 	}
 	var buf bytes.Buffer
-	if err := WriteK8sSARIF(&buf, findings, "v1.0.0"); err != nil {
+	if err := WriteK8sSARIF(&buf, findings, "v1.0.0", nil); err != nil {
 		t.Fatal(err)
 	}
 	results := decodeSARIF(t, buf.Bytes())
@@ -203,7 +203,7 @@ func TestWriteLambdaSARIF(t *testing.T) {
 		{Type: cloud.LambdaPublicInvoke, Severity: cloud.SeverityCritical, Detail: "public invoke"},
 	}
 	var buf bytes.Buffer
-	if err := WriteLambdaSARIF(&buf, findings, "v1"); err != nil {
+	if err := WriteLambdaSARIF(&buf, findings, "v1", nil); err != nil {
 		t.Fatal(err)
 	}
 	results := decodeSARIF(t, buf.Bytes())
@@ -221,7 +221,7 @@ func TestWriteComplianceSARIF_OmitsPasses(t *testing.T) {
 		},
 	}
 	var buf bytes.Buffer
-	if err := WriteComplianceSARIF(&buf, report, "v1"); err != nil {
+	if err := WriteComplianceSARIF(&buf, report, "v1", nil); err != nil {
 		t.Fatal(err)
 	}
 	results := decodeSARIF(t, buf.Bytes())
@@ -243,7 +243,7 @@ func TestWriteDriftSARIF_OmitsInSync(t *testing.T) {
 		{Status: cloud.DriftInSync, ResourceName: "aws_iam_role.app"},
 	}
 	var buf bytes.Buffer
-	if err := WriteDriftSARIF(&buf, results, "v1"); err != nil {
+	if err := WriteDriftSARIF(&buf, results, "v1", nil); err != nil {
 		t.Fatal(err)
 	}
 	got := decodeSARIF(t, buf.Bytes())
@@ -264,7 +264,7 @@ func TestWriteCertsSARIF(t *testing.T) {
 		{Severity: cloud.SeverityLow, Status: cloud.CertLow, Provider: "aws", Domain: "ok.example.com", Detail: "expires in 80 days"},
 	}
 	var buf bytes.Buffer
-	if err := WriteCertsSARIF(&buf, findings, "v1"); err != nil {
+	if err := WriteCertsSARIF(&buf, findings, "v1", nil); err != nil {
 		t.Fatal(err)
 	}
 	got := decodeSARIF(t, buf.Bytes())
@@ -333,7 +333,7 @@ func TestAuditSARIFCoversEveryDomain(t *testing.T) {
 	}
 
 	var buf bytes.Buffer
-	if err := WriteAuditSARIF(&buf, report, "test"); err != nil {
+	if err := WriteAuditSARIF(&buf, report, "test", nil); err != nil {
 		t.Fatalf("WriteAuditSARIF: %v", err)
 	}
 

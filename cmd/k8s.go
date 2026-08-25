@@ -70,6 +70,13 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	// RBAC has no partial state to report. Both reads it makes — cluster roles
+	// and cluster role bindings — return an error rather than a short list, so a
+	// denied read fails the command instead of yielding a clean-looking scan.
+	// The record is emitted anyway: an absent incomplete field and an empty one
+	// are different claims, and this is the empty one.
+	k8sUnread := []string{}
+
 	findings = filterK8sBySeverity(findings, strings.ToUpper(k8sMinSeverity))
 
 	gate(findings, func(f cloud.K8sFinding) cloud.Severity { return f.Severity })
@@ -84,9 +91,9 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 
 	switch k8sFormat {
 	case "json":
-		return output.WriteK8sFindings(w, findings, nil)
+		return output.WriteK8sFindings(w, findings, k8sUnread)
 	case "sarif":
-		return output.WriteK8sSARIF(w, findings, Version)
+		return output.WriteK8sSARIF(w, findings, Version, k8sUnread)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d RBAC findings (context: %s)\n\n", len(findings), p.ContextName())

@@ -93,7 +93,7 @@ func runDrift(cmd *cobra.Command, args []string) error {
 	case "json":
 		return output.WriteDrift(w, results, incomplete)
 	case "sarif":
-		return output.WriteDriftSARIF(w, results, Version)
+		return output.WriteDriftSARIF(w, results, Version, incomplete)
 	default:
 		if !quiet {
 			var modified, deleted, inSync, errored int
