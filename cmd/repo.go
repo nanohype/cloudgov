@@ -49,6 +49,7 @@ var (
 	repoOrg          string
 	repoExpectedFile string
 	repoOutputFmt    string
+	repoOutputFile   string
 	repoSeverity     string
 )
 
@@ -61,6 +62,7 @@ func init() {
 	repoCmd.PersistentFlags().StringVar(&repoExpectedFile, "expected", "expected-repo-settings.yaml",
 		"path to the committed expected settings")
 	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", tableJSON[0], tableJSON.usage())
+	repoCmd.PersistentFlags().StringVar(&repoOutputFile, "output-file", "", "write output to a file instead of stdout")
 	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", "minimum severity to report")
 
 	// Marked required so cobra rejects the omission by name. Without this an
@@ -107,6 +109,15 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 	})
 
 	w := cmd.OutOrStdout()
+	if repoOutputFile != "" {
+		f, err := os.Create(repoOutputFile)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		w = f
+	}
+
 	if repoFormat == "json" {
 		return output.WriteRepo(w, kept)
 	}

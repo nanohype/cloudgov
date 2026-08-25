@@ -9,12 +9,21 @@
 ## Build & test
 
 ```bash
-task build        # compile binary
-go test ./...     # run all tests (no credentials needed)
-go vet ./...      # static analysis
+task build                          # compile binary
+go test ./...                       # run all tests (no credentials needed)
+go vet ./...                        # static analysis
+task lint                           # golangci-lint
+bash scripts/coverage.sh            # tests + the per-package coverage floors
+bash scripts/check-context.sh       # every cloud call threads the signal-aware context
+bash scripts/check-release-urls.sh  # documented download URLs match .goreleaser.yaml
+bash scripts/check-gates.sh         # every gate above self-tests and is run by CI
+bash scripts/check-version-pins.sh  # every pinned version is watched by Renovate
 ```
 
-All three must pass before opening a PR.
+CI blocks a pull request on every one of these, so a change that skips any of
+them here finds out on the PR instead. `.claude/skills/verify` runs the first
+four; the four scripts are not in it, and the coverage floors are the gate a
+change is most likely to trip.
 
 ---
 
@@ -391,9 +400,10 @@ response is the only carrier: compute it there too.
 
 Add the tool to the MCP table in `AGENTS.md` and the command to the README
 reference. `cmd/incomplete_contract_test.go` fails the build if the AGENTS.md
-table and the registered tools disagree in either direction — the table drifted
-once already, documenting a tool that was registered nowhere, and an agent
-following a doc that overstates the code gets "unknown tool".
+table and the registered tools disagree in either direction. That table is what
+an agent reads to decide which tool to call, so a table naming a tool nothing
+registers hands the caller an "unknown tool" error, and one omitting a registered
+tool hides it.
 
 ---
 
@@ -430,4 +440,10 @@ following a doc that overstates the code gets "unknown tool".
 3. Run `task build` — it must exit 0.
 4. Run `go test ./...` — all tests must pass.
 5. Run `go vet ./...` — no warnings.
-6. Open a pull request with a clear description of what changes and why.
+6. Run `task lint` — golangci-lint reports no issues.
+7. Run `bash scripts/coverage.sh` — every floor met. Raise the floor of any
+   package whose coverage you raised; a ratchet nobody ratchets is a note, not a
+   floor.
+8. Run `bash scripts/check-context.sh`, `bash scripts/check-release-urls.sh`,
+   `bash scripts/check-gates.sh` and `bash scripts/check-version-pins.sh`.
+9. Open a pull request with a clear description of what changes and why.

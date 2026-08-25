@@ -64,6 +64,18 @@ jobs:
         # than described as carrying none.
         run: bash scripts/check-version-pins.sh
 
+      - name: positive controls
+        # Introduces, into this working tree, the exact violation each gate above
+        # exists to catch, and requires the gate to reject it. A gate's own
+        # self-test proves its matching logic against a fixture; this proves the
+        # gate is wired to the tree it guards.
+        #
+        # Each control asserts the gate is clean BEFORE mutating and inspects the
+        # mutated text afterwards, because a mutation that silently fails to land
+        # hands the gate an unmodified file — the gate correctly passes it, and
+        # the run records that pass as proof the control worked.
+        run: bash scripts/check-positive-controls.sh
+
       - name: upload coverage artifact
         if: always() # keep the profile even when a floor fails, for debugging
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

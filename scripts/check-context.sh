@@ -33,18 +33,34 @@
 # Run locally the same way CI does: scripts/check-context.sh
 set -euo pipefail
 
+lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/lib" && pwd)"
+
 # scan_tree prints one "path:line:content" per offending occurrence under $1, or
 # nothing. Both detached-context spellings are matched; _test.go files and the
 # single signal.NotifyContext bootstrap are excluded.
 #
+# Comments and string bodies are stripped before matching, and that is
+# load-bearing in both directions. A detached context is a CALL, so a token inside
+# a string literal is a mention rather than an occurrence. Matching a comment would report a violation that is only a
+# mention. Worse, EXCLUDING on a comment fails the gate open: a real
+# `context.Background()` whose line carries a trailing comment mentioning
+# `signal.NotifyContext(context.Background()` was filtered out as if it were the
+# bootstrap. A gate that reads comments as code fails in exactly the case it
+# exists for.
+#
 # The trailing `|| true` on the pipeline is deliberate: grep exits 1 on "no
 # matches", which under `set -e` would abort the script on the *success* case.
 scan_tree() {
-  local root="$1"
-  grep -rnE 'context\.(Background|TODO)\(\)' "$root" --include='*.go' 2>/dev/null \
-    | grep -v '_test\.go:' \
-    | grep -v 'signal\.NotifyContext(context\.Background()' \
-    || true
+  local root="$1" file stripped
+  while IFS= read -r file; do
+    case "$file" in *_test.go) continue ;; esac
+    stripped=$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$file")
+    printf '%s\n' "$stripped" \
+      | grep -nE 'context\.(Background|TODO)\(\)' \
+      | grep -v 'signal\.NotifyContext(context\.Background()' \
+      | sed "s|^|${file}:|" \
+      || true
+  done < <(find "$root" -name '*.go' -type f 2>/dev/null | sort)
 }
 
 die() {
@@ -125,6 +141,38 @@ CLEANTEST
 
   # Removing every plant must return the tree to silent, proving the gate tracks
   # the tree rather than latching red once it has fired.
+  # A real violation whose line carries a trailing comment mentioning the allowed
+  # bootstrap. The exclusion used to read that comment and filter the violation
+  # out, which is the fail-open direction: the gate went green on the exact shape
+  # it exists to catch.
+  cat >"$tmp/internal/cloud/aws/masked.go" <<'MASKED'
+package aws
+
+func masked() {
+	ctx := context.Background() // not signal.NotifyContext(context.Background()
+	_ = ctx
+}
+MASKED
+  if [[ -z "$(scan_tree "$tmp")" ]]; then
+    die "a violation whose line carries a comment mentioning the allowed bootstrap was not reported (the gate reads comments as code)"
+  fi
+  rm -f "$tmp/internal/cloud/aws/masked.go"
+
+  # A mention inside a comment or a string literal is not a call.
+  cat >"$tmp/internal/cloud/aws/mentions.go" <<'MENTIONS'
+package aws
+
+// Handlers must not call context.Background(); they thread cmd.Context().
+func mentions() string {
+	/* context.TODO() is not allowed here either */
+	return "context.Background()"
+}
+MENTIONS
+  if [[ -n "$(scan_tree "$tmp")" ]]; then
+    die "a mention in a comment or string literal was reported as a call: $(scan_tree "$tmp")"
+  fi
+  rm -f "$tmp/internal/cloud/aws/mentions.go"
+
   if [[ -n "$(scan_tree "$tmp")" ]]; then
     die "tree still flagged after every plant was removed: $(scan_tree "$tmp")"
   fi

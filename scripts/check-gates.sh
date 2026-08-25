@@ -25,6 +25,7 @@
 set -euo pipefail
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+lib_dir="${repo_root}/scripts/lib"
 cd "$repo_root"
 
 self="$(basename "${BASH_SOURCE[0]}")"
@@ -35,23 +36,34 @@ self="$(basename "${BASH_SOURCE[0]}")"
 # Exit: 0 conforms, 1 does not.
 audit_gate() {
   local script="$1" workflows="$2"
-  local name fail=0
+  local name code fail=0
   name="$(basename "$script")"
 
-  if ! grep -qE '^[[:space:]]*self_test\(\)[[:space:]]*\{' "$script"; then
+  # Comments are stripped before matching for the declaration and the call. A
+  # commented-out self_test is the exact state this check exists to catch — the
+  # thing standing where the removed implementation should be IS a comment saying
+  # so — and a matcher that reads comments as code goes green on it.
+  #
+  # String bodies are left intact: the failure-message check below looks for text
+  # inside a string, which is the subject rather than a mention.
+  code="$(awk -v style=hash -f "${lib_dir}/strip-comments.awk" "$script")"
+
+  if ! printf '%s\n' "$code" | grep -qE '^[[:space:]]*self_test\(\)[[:space:]]*\{'; then
     echo "::error::${name} declares no self_test function; nothing shows the gate can reject" >&2
     fail=1
   fi
 
   # Called at top level, not merely defined. A definition nothing invokes is the
   # rot this check is named after.
-  if ! grep -qE '^self_test$' "$script"; then
+  if ! printf '%s\n' "$code" | grep -qE '^self_test$'; then
     echo "::error::${name} defines self_test but never calls it at top level" >&2
     fail=1
   fi
 
-  # A self-test that fails silently is a self-test that passed.
-  if ! grep -qE 'self.test.*FAILED' "$script"; then
+  # A self-test that fails silently is a self-test that passed. The message lives
+  # in a string literal, so this one reads the code view too — a commented-out
+  # message is not a message.
+  if ! printf '%s\n' "$code" | grep -qE 'self.test.*FAILED'; then
     echo "::error::${name} has no failure message naming the self-test, so a broken gate reads as a clean one" >&2
     fail=1
   fi
@@ -85,6 +97,7 @@ self_test() {
       - run: bash scripts/silent.sh
       - run: bash scripts/uncalled.sh
       - run: bash scripts/no-selftest.sh
+      - run: bash scripts/commented-out.sh
 WF
 
   cat >"$tmp/scripts/conformant.sh" <<'OK'
@@ -108,6 +121,17 @@ NONE
   ! audit_gate "$tmp/scripts/no-selftest.sh" "$tmp/workflows" 2>/dev/null ||
     self_test_die "accepted a gate with no self_test at all"
 
+  # A gate whose self_test was removed and replaced by a comment saying so. This
+  # is the fail-open direction: a matcher reading comments as code accepts it.
+  cat >"$tmp/scripts/commented-out.sh" <<'CO'
+# self_test_die() { echo "commented-out self-test FAILED: $*" >&2; exit 1; }
+# self_test() { :; }
+# self_test
+echo "checking things"
+CO
+  ! audit_gate "$tmp/scripts/commented-out.sh" "$tmp/workflows" 2>/dev/null ||
+    self_test_die "accepted a gate whose self_test exists only as a comment"
+
   cat >"$tmp/scripts/silent.sh" <<'SILENT'
 self_test() { :; }
 self_test
@@ -123,7 +147,7 @@ UNRUN
   ! audit_gate "$tmp/scripts/unrun.sh" "$tmp/workflows" 2>/dev/null ||
     self_test_die "accepted a conformant gate that no workflow runs"
 
-  echo "check-gates self-test passed: it rejects a missing, uninvoked, silent, and CI-unrun self-test."
+  echo "check-gates self-test passed: it rejects a missing, commented-out, uninvoked, silent, and CI-unrun self-test."
 }
 
 self_test

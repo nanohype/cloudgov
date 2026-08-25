@@ -78,16 +78,63 @@ func TestContrastRatioArithmetic(t *testing.T) {
 	}
 }
 
-var tokenRe = regexp.MustCompile(`--([a-z-]+):\s*(#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?)\b`)
+var (
+	tokenRe      = regexp.MustCompile(`--([a-z-]+):\s*(#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?)\b`)
+	cssCommentRe = regexp.MustCompile(`(?s)/\*.*?\*/`)
+)
+
+// stripCSSComments blanks comment bodies, keeping newlines so a later split on
+// the dark-scheme marker still lands in the right place.
+//
+// A token declared inside a comment is not a declaration. Reading one as if it
+// were is the fail-open direction for this file: a commented-out `--medium`
+// would satisfy the "declared in both themes" check while the live palette had
+// none, and the contrast assertion would then measure a colour the page does not
+// use. The template's own explanatory comments name tokens, so this is not
+// hypothetical.
+func stripCSSComments(src string) string {
+	return cssCommentRe.ReplaceAllStringFunc(src, func(comment string) string {
+		out := make([]byte, 0, len(comment))
+		for i := 0; i < len(comment); i++ {
+			if comment[i] == '\n' {
+				out = append(out, '\n')
+				continue
+			}
+			out = append(out, ' ')
+		}
+		return string(out)
+	})
+}
 
 // themeTokens returns the custom properties declared in one CSS block.
 func themeTokens(t *testing.T, block string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for _, m := range tokenRe.FindAllStringSubmatch(block, -1) {
+	for _, m := range tokenRe.FindAllStringSubmatch(stripCSSComments(block), -1) {
 		out[m[1]] = m[2]
 	}
 	return out
+}
+
+// The stripper is the load-bearing half of every colour assertion in this file,
+// so it carries its own control: a token inside a comment must not be read, a
+// live one must be, and line positions must survive.
+func TestStripCSSCommentsIgnoresDeclarationsInsideComments(t *testing.T) {
+	src := ":root {\n" +
+		"  /* --medium: #ffffff was the old value */\n" +
+		"  --medium: #8f6000;\n" +
+		"}\n"
+
+	tokens := themeTokens(t, src)
+	if got := tokens["medium"]; got != "#8f6000" {
+		t.Errorf("--medium = %q, want the live declaration #8f6000 rather than the commented one", got)
+	}
+	if strings.Count(stripCSSComments(src), "\n") != strings.Count(src, "\n") {
+		t.Error("stripping comments changed the line count, so block boundaries would shift")
+	}
+	if commented := themeTokens(t, "/* --ghost: #123456 */"); len(commented) != 0 {
+		t.Errorf("a declaration that exists only inside a comment was read: %v", commented)
+	}
 }
 
 // lightBlock and darkBlock split the template's two :root declarations.
