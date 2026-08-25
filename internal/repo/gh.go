@@ -228,11 +228,26 @@ func (g *GHReader) Settings(ctx context.Context, org, name string) (cloud.RepoSe
 	} else if !isNotFound(err) {
 		s.MarkUnread("Dependabot security updates", err)
 	}
-	if alerts, err := g.Run(ctx, "api",
+	// Both failures are recorded, like the three probes above. OpenAlerts is an
+	// int whose zero value means "no open alerts", so a dropped error here files
+	// an unreadable repository as a clean one — and unlike the booleans, nothing
+	// about a zero suggests it was never set.
+	alerts, err := g.Run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/dependabot/alerts?state=open&per_page=100", org, name),
-		"--jq", "length"); err == nil {
+		"--jq", "length")
+	switch {
+	case err != nil && isNotFound(err):
+		// Alerts are unavailable on this repository rather than absent from it.
+		// That is the same fact RepoAlertsDisabled reports and not an unread
+		// probe, so it is left to the finding above.
+	case err != nil:
+		s.MarkUnread("Dependabot open alerts", err)
+	default:
 		var n int
-		if json.Unmarshal([]byte(strings.TrimSpace(string(alerts))), &n) == nil {
+		if uerr := json.Unmarshal([]byte(strings.TrimSpace(string(alerts))), &n); uerr != nil {
+			s.MarkUnread("Dependabot open alerts", fmt.Errorf("parse alert count %q: %w",
+				strings.TrimSpace(string(alerts)), uerr))
+		} else {
 			s.OpenAlerts = n
 		}
 	}

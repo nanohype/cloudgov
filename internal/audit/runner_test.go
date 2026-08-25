@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -268,4 +269,76 @@ func TestRun_GathersIncompleteAcrossDomains(t *testing.T) {
 	if len(report.Incomplete) != 2 {
 		t.Fatalf("expected both the warning and the failed domain, got %v", report.Incomplete)
 	}
+}
+
+// One provider implements several capabilities, and the SAME instance sits in
+// several of the Providers slices — the AWS provider is in all seven. Asking
+// each slice for its incomplete record therefore returns one denied read once
+// per capability that provider satisfies, and a caller counting entries reads
+// seven failures where there was one.
+func TestIncompleteRecordDoesNotRepeatOneProvidersWarnings(t *testing.T) {
+	shared := &multiCapabilityProvider{unread: []string{
+		"ec2:DescribeInstances in eu-west-1: AccessDenied",
+		"s3:GetBucketTagging on logs-bucket: AccessDenied",
+	}}
+
+	providers := Providers{
+		IAM:     []cloud.IAMProvider{shared},
+		Storage: []cloud.StorageProvider{shared},
+		Network: []cloud.NetworkProvider{shared},
+	}
+
+	got := collectIncomplete(providers, Options{Skip: map[string]bool{}}, nil, nil)
+
+	counts := map[string]int{}
+	for _, entry := range got {
+		counts[entry]++
+	}
+	for entry, n := range counts {
+		if n != 1 {
+			t.Errorf("%q appears %d times; one denied read reported once per capability the "+
+				"provider satisfies is a count of scanners, not of observations that could not be made",
+				entry, n)
+		}
+	}
+	if len(got) != len(shared.unread) {
+		t.Errorf("collected %d entries from %d distinct unread observations: %v",
+			len(got), len(shared.unread), got)
+	}
+
+	// The other direction on the same helper: two genuinely different entries
+	// must both survive, or a deduplicating record could satisfy the check above
+	// by dropping everything after the first.
+	if len(got) < 2 {
+		t.Errorf("deduplication dropped a distinct observation: %v", got)
+	}
+}
+
+// multiCapabilityProvider stands in for a real provider that implements many
+// capability interfaces at once, which is what puts one instance in several
+// slices.
+type multiCapabilityProvider struct {
+	unread []string
+}
+
+func (m *multiCapabilityProvider) Name() string                  { return "multi" }
+func (m *multiCapabilityProvider) Detect(_ context.Context) bool { return true }
+func (m *multiCapabilityProvider) Incomplete() []string          { return m.unread }
+func (m *multiCapabilityProvider) ListPrincipals(_ context.Context) ([]cloud.Principal, error) {
+	return nil, nil
+}
+func (m *multiCapabilityProvider) GrantedPermissions(_ context.Context, _ cloud.Principal) ([]cloud.Permission, error) {
+	return nil, nil
+}
+func (m *multiCapabilityProvider) UsedPermissions(_ context.Context, _ cloud.Principal, _ time.Time) ([]cloud.Permission, error) {
+	return nil, nil
+}
+func (m *multiCapabilityProvider) MinimalPolicy(_ context.Context, _ cloud.Principal, _ []cloud.Permission) (cloud.Policy, error) {
+	return cloud.Policy{}, nil
+}
+func (m *multiCapabilityProvider) AuditStorage(_ context.Context) ([]cloud.BucketFinding, error) {
+	return nil, nil
+}
+func (m *multiCapabilityProvider) AuditNetwork(_ context.Context) ([]cloud.NetworkFinding, error) {
+	return nil, nil
 }

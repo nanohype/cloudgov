@@ -329,6 +329,27 @@ func collectIncomplete(providers Providers, opts Options, errs []error, scannerU
 		out = append(out, err.Error())
 	}
 	out = append(out, scannerUnread...)
+
+	// Deduplicated, because one provider implements several capabilities and the
+	// SAME instance is in several of these slices — the AWS provider is in all
+	// seven. cloud.Incomplete asks each slice, so a single denied read is
+	// reported once per capability that provider satisfies, and the count reads
+	// as seven separate failures. The record is a set of observations that could
+	// not be made, not a tally of how many scanners noticed.
+	//
+	// Order is preserved: first occurrence wins, so the list still reads in the
+	// order the scan produced it.
+	seen := make(map[string]struct{}, len(out))
+	unique := out[:0]
+	for _, entry := range out {
+		if _, dup := seen[entry]; dup {
+			continue
+		}
+		seen[entry] = struct{}{}
+		unique = append(unique, entry)
+	}
+	out = unique
+
 	// A run that observed everything reports an empty list, never a nil one. The
 	// JSON envelope always carries the key, and `null` there is indistinguishable
 	// from a report that does not describe its own coverage — which is the
