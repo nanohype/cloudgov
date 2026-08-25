@@ -238,3 +238,70 @@ func TestGenerate_Cost(t *testing.T) {
 		t.Error("missing cost report title")
 	}
 }
+
+// The rendered page must show what the scan could not read, and must show it
+// above the counts it qualifies. A reader who sees "0 Total Findings" without
+// this has been told an account is clean when half of it went unexamined — and
+// this page exists precisely for the reader who will not open the JSON.
+func TestGenerate_CarriesIncompleteFromEveryReportType(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input string
+	}{
+		{"audit", `{"summary":{"total_findings":0},"incomplete":["us-west-2: ec2:DescribeInstances denied"]}`},
+		{"iam", `{"findings":[],"total":0,"incomplete":["iam:ListRoles denied"]}`},
+		{"storage", `{"findings":[],"total":0,"incomplete":["s3:GetBucketVersioning denied on 4 buckets"]}`},
+		{"network", `{"findings":[],"total":0,"incomplete":["ec2:DescribeSecurityGroups denied"]}`},
+		{"certs", `{"findings":[],"total":0,"incomplete":["acm:ListCertificates denied"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			in := filepath.Join(dir, "in.json")
+			out := filepath.Join(dir, "out.html")
+			if err := os.WriteFile(in, []byte(tc.input), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Generate(Options{InputFile: in, OutputFile: out, ReportType: tc.name}); err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			html, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			content := string(html)
+
+			if !strings.Contains(content, "did not observe everything") {
+				t.Fatal("the rendered page carries no incomplete notice")
+			}
+			if !strings.Contains(content, "denied") {
+				t.Error("the notice does not name what could not be read")
+			}
+			notice := strings.Index(content, "did not observe everything")
+			cards := strings.Index(content, `class="cards"`)
+			if notice > cards {
+				t.Error("the notice renders below the summary counts it qualifies")
+			}
+		})
+	}
+}
+
+// The complement: a run that observed everything renders no notice, so the
+// notice above is a signal rather than page furniture.
+func TestGenerate_NoIncompleteNoticeOnCompleteScan(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.json")
+	out := filepath.Join(dir, "out.html")
+	if err := os.WriteFile(in, []byte(`{"findings":[],"total":0}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Generate(Options{InputFile: in, OutputFile: out, ReportType: "iam"}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	html, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(html), "did not observe everything") {
+		t.Error("a complete scan rendered an incomplete notice")
+	}
+}

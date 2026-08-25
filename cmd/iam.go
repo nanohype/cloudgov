@@ -51,8 +51,8 @@ var (
 func init() {
 	iamScanCmd.Flags().IntVar(&iamDays, "days", 90, "audit log lookback period in days")
 	iamScanCmd.Flags().StringVar(&iamPrincipal, "principal", "", "scan a specific principal by name or ID")
-	iamScanCmd.Flags().StringVar(&iamSeverity, "severity", "LOW", "minimum severity to report (CRITICAL,HIGH,MEDIUM,LOW,INFO)")
-	iamScanCmd.Flags().StringVar(&iamOutputFmt, "output", "table", "output format: table, json, sarif")
+	iamScanCmd.Flags().StringVar(&iamSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
+	iamScanCmd.Flags().StringVar(&iamOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	iamScanCmd.Flags().StringVar(&iamOutputFile, "output-file", "", "write output to file instead of stdout")
 	iamScanCmd.Flags().IntVar(&iamConcurrency, "concurrency", 10, "max parallel goroutines for scanning principals")
 	iamScanCmd.Flags().StringVar(&iamProfile, "profile", "", "AWS named profile to use for credentials")
@@ -60,7 +60,7 @@ func init() {
 	iamFixCmd.Flags().StringVar(&iamFromFile, "from", "", "path to JSON report from 'cloudgov iam scan --output json'")
 	iamFixCmd.Flags().StringVar(&iamFixFormat, "format", "terraform", "fix format: terraform, json")
 	iamFixCmd.Flags().StringVar(&iamFixOut, "out", "./cloudgov-fixes", "output directory")
-	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", "minimum severity to generate fixes for")
+	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", severityUsage("minimum severity to generate fixes for"))
 	iamFixCmd.Flags().StringVar(&iamFixProfile, "profile", "", "AWS named profile to use for credentials (match the profile used for the scan)")
 	_ = iamFixCmd.MarkFlagRequired("from")
 
@@ -68,6 +68,18 @@ func init() {
 }
 
 func runIAMScan(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(iamSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	iamFormat, err := tableJSONSARIF.resolve(iamOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveIAMProviders(ctx, iamProfile)
 	if err != nil {
@@ -77,7 +89,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	opts := iam.ScanOptions{
 		Days:            iamDays,
 		PrincipalFilter: iamPrincipal,
-		MinSeverity:     cloud.Severity(strings.ToUpper(iamSeverity)),
+		MinSeverity:     minSeverity,
 		Concurrency:     iamConcurrency,
 	}
 
@@ -85,6 +97,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	var incomplete []string
 	allUsedPerms := make(map[string][]cloud.Permission)
 	totalPrincipals := 0
+	totalScanned := 0
 	for _, p := range providers {
 		providerName := p.Name()
 		if !quiet {
@@ -105,6 +118,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 		allFindings = append(allFindings, result.Findings...)
 		incomplete = append(incomplete, result.Incomplete...)
 		totalPrincipals += result.Principals
+		totalScanned += result.Scanned
 		for pid, used := range result.UsedPermissions {
 			allUsedPerms[pid] = used
 		}
@@ -125,11 +139,11 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	gate(allFindings, func(f cloud.Finding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(iamOutputFmt) {
+	switch iamFormat {
 	case "json":
-		return output.WriteIAM(w, allFindings, totalPrincipals, allUsedPerms, incomplete)
+		return output.WriteIAM(w, allFindings, totalPrincipals, totalScanned, allUsedPerms, incomplete)
 	case "sarif":
-		return output.WriteSARIF(w, allFindings, Version)
+		return output.WriteSARIF(w, allFindings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d findings across %d principals\n\n", len(allFindings), totalPrincipals)
@@ -141,6 +155,10 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 }
 
 func runIAMFix(cmd *cobra.Command, _ []string) error {
+	fixSeverity, err := resolveSeverity(iamFixSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	data, err := os.ReadFile(iamFromFile)
@@ -169,6 +187,12 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		providerMap[p.Name()] = p
 	}
 
+	// A principal this pass could not generate a policy for is a principal the
+	// fix set does not cover. Without this record the caller gets a smaller fix
+	// set than the report it was built from, exit 0, and nothing saying which
+	// principals were left out.
+	var unfixed []string
+
 	policies := make(map[string]cloud.Policy)
 	for _, f := range r.Findings {
 		if f.Principal == nil {
@@ -179,11 +203,15 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		}
 		p, ok := providerMap[f.Provider]
 		if !ok {
+			unfixed = append(unfixed, fmt.Sprintf("%s: no %s provider is available, so no policy was generated",
+				f.Principal.Name, f.Provider))
 			continue
 		}
 		usedPerms := r.UsedPermissions[f.Principal.ID]
 		pol, err := p.MinimalPolicy(ctx, *f.Principal, usedPerms)
 		if err != nil {
+			unfixed = append(unfixed, fmt.Sprintf("%s: minimal policy could not be generated: %v",
+				f.Principal.Name, err))
 			continue
 		}
 		policies[f.Principal.ID] = pol
@@ -192,9 +220,15 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		}
 	}
 
+	// The same contract as every command that reads an account: a fix set built
+	// from a partial pass must not report as a complete one. The provider's own
+	// unread observations count too — a scan that could not read a principal's
+	// policies produces a fix for it that is not a fix.
+	gateIncomplete(append(cloud.Incomplete(providers), unfixed...))
+
 	opts := fix.Options{
 		OutputDir: iamFixOut,
-		Severity:  cloud.Severity(strings.ToUpper(iamFixSeverity)),
+		Severity:  fixSeverity,
 	}
 
 	switch strings.ToLower(iamFixFormat) {

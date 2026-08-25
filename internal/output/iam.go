@@ -54,23 +54,28 @@ func IAMFindings(w io.Writer, findings []cloud.Finding, totalPrincipals int) {
 }
 
 type iamReport struct {
-	Findings   []cloud.Finding `json:"findings"`
-	Total      int             `json:"total"`
-	Principals int             `json:"principals_scanned"`
-	// Incomplete is what the scan could not read. principals_scanned counts
-	// only principals actually analyzed, so a consumer comparing the two can
-	// tell a clean account from an account this run could not see.
-	Incomplete      []string                      `json:"incomplete,omitempty"`
+	Findings []cloud.Finding `json:"findings"`
+	Total    int             `json:"total"`
+	// Listed is how many principals the account returned; Scanned is how many
+	// were actually analyzed. They are separate fields because they answer
+	// different questions and a single number cannot: a principal whose policies
+	// could not be read is listed and not scanned, and collapsing the two makes
+	// that principal indistinguishable from one that was read and found clean.
+	Listed  int `json:"principals_listed"`
+	Scanned int `json:"principals_scanned"`
+	// Incomplete is what the scan could not read.
+	Incomplete      []string                      `json:"incomplete"`
 	UsedPermissions map[string][]cloud.Permission `json:"used_permissions,omitempty"`
 }
 
 // WriteIAM marshals IAM findings as JSON to w.
-func WriteIAM(w io.Writer, findings []cloud.Finding, principalsScanned int, usedPerms map[string][]cloud.Permission, incomplete []string) error {
+func WriteIAM(w io.Writer, findings []cloud.Finding, principalsListed, principalsScanned int, usedPerms map[string][]cloud.Permission, incomplete []string) error {
 	return writeJSON(w, iamReport{
 		Findings:        findings,
 		Total:           len(findings),
-		Principals:      principalsScanned,
-		Incomplete:      incomplete,
+		Listed:          principalsListed,
+		Scanned:         principalsScanned,
+		Incomplete:      observed(incomplete),
 		UsedPermissions: usedPerms,
 	})
 }

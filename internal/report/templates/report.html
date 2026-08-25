@@ -7,14 +7,25 @@
 <style>
 :root {
   --bg: #ffffff; --fg: #1a1a1a; --card-bg: #f5f5f5; --border: #e0e0e0;
-  --critical: #d32f2f; --high: #e65100; --medium: #f9a825; --low: #757575; --info: #9e9e9e;
+  --critical: #c62828; --high: #b45309; --medium: #8f6000; --low: #5f6368; --info: #656b70;
   --green: #2e7d32; --red: #c62828;
   --table-header: #e8e8e8; --table-alt: #fafafa;
+  --focus: #0b57d0;
 }
+/* Severity colours are redefined here, not only the layout tokens. A palette
+   picked for a white page is unreadable on a dark one: the light --medium sits
+   at 1.5:1 against #2a2a2a. The two things a reader scans this page for are the
+   CRITICAL markers and the cost deltas, so those are the ones that must not be
+   the casualties. Every value in both blocks clears 4.5:1 against the darker of
+   --bg and --card-bg, which is the background these colours are actually drawn
+   on. */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1a1a1a; --fg: #e0e0e0; --card-bg: #2a2a2a; --border: #444;
-    --table-header: #333; --table-alt: #222;
+    --bg: #1a1a1a; --fg: #e0e0e0; --card-bg: #2a2a2a; --border: #444444;
+    --critical: #ff8a80; --high: #ffb74d; --medium: #ffd54f; --low: #b0b3b8; --info: #9aa0a6;
+    --green: #81c995; --red: #f28b82;
+    --table-header: #333333; --table-alt: #222222;
+    --focus: #a8c7fa;
   }
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -34,9 +45,21 @@ h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
 .red { color: var(--red); }
 h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; border-bottom: 2px solid var(--border); padding-bottom: 0.25rem; }
 table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; font-size: 0.85rem; }
-th { background: var(--table-header); text-align: left; padding: 0.5rem; font-weight: 600; cursor: pointer; user-select: none; }
+th { background: var(--table-header); text-align: left; padding: 0; font-weight: 600; }
+th button { width: 100%; display: flex; align-items: center; gap: 0.35rem; padding: 0.5rem; background: none; border: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+th button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+/* The glyph is decorative: aria-sort on the th is what a screen reader announces,
+   and duplicating it in text would have the column read its state twice. */
+th button .arrow { font-size: 0.7em; opacity: 0; }
+th[aria-sort="ascending"] .arrow, th[aria-sort="descending"] .arrow { opacity: 1; }
+th[aria-sort="descending"] .arrow { transform: rotate(180deg); }
 td { padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); }
-tr:nth-child(even) { background: var(--table-alt); }
+tbody tr:nth-child(even) { background: var(--table-alt); }
+tfoot td { font-weight: 700; border-top: 2px solid var(--border); }
+.incomplete { background: var(--card-bg); border: 1px solid var(--border); border-left: 4px solid var(--high); border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; }
+.incomplete h2 { margin: 0 0 0.5rem; border: 0; padding: 0; font-size: 1rem; color: var(--high); }
+.incomplete p { font-size: 0.85rem; margin-bottom: 0.5rem; }
+.incomplete ul { margin: 0; padding-left: 1.25rem; font-size: 0.85rem; }
 .domain-bar { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .domain-badge { background: var(--card-bg); border: 1px solid var(--border); border-radius: 4px; padding: 0.25rem 0.75rem; font-size: 0.8rem; }
 footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--low); }
@@ -47,6 +70,14 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
 <div class="meta">
   {{.ReportType}} report &middot; generated {{.GeneratedAt}}{{if .Version}} &middot; cloudgov {{.Version}}{{end}}{{if .Duration}} &middot; scan took {{.Duration}}{{end}}
 </div>
+
+{{if .Incomplete}}
+<section class="incomplete" role="region" aria-labelledby="incomplete-heading">
+  <h2 id="incomplete-heading">This scan did not observe everything it was asked to</h2>
+  <p>The counts below are not evidence of a clean account. {{len .Incomplete}} observation(s) could not be made:</p>
+  <ul>{{range .Incomplete}}<li>{{.}}</li>{{end}}</ul>
+</section>
+{{end}}
 
 <div class="cards">
   <div class="card"><div class="number">{{.TotalFindings}}</div><div class="label">Total Findings</div></div>
@@ -66,7 +97,17 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
 {{if .IAMFindings}}
 <h2>IAM Findings ({{len .IAMFindings}})</h2>
 <table>
-<tr><th>Severity</th><th>Type</th><th>Principal</th><th>Provider</th><th>Resource</th><th>Detail</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Severity<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Type<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Principal<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Resource<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Detail<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .IAMFindings}}<tr>
   <td class="{{lower .Severity}}">{{.Severity}}</td>
   <td>{{.Type}}</td>
@@ -75,13 +116,23 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{.Resource}}</td>
   <td>{{.Detail}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 {{if .StorageFindings}}
 <h2>Storage Findings ({{len .StorageFindings}})</h2>
 <table>
-<tr><th>Severity</th><th>Type</th><th>Provider</th><th>Bucket</th><th>Detail</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Severity<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Type<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Bucket<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Detail<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .StorageFindings}}<tr>
   <td class="{{lower .Severity}}">{{.Severity}}</td>
   <td>{{.Type}}</td>
@@ -89,13 +140,25 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{.Bucket}}</td>
   <td>{{.Detail}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 {{if .NetworkFindings}}
 <h2>Network Findings ({{len .NetworkFindings}})</h2>
 <table>
-<tr><th>Severity</th><th>Type</th><th>Provider</th><th>Resource</th><th>Port</th><th>CIDR</th><th>Detail</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Severity<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Type<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Resource<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Port<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">CIDR<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Detail<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .NetworkFindings}}<tr>
   <td class="{{lower .Severity}}">{{.Severity}}</td>
   <td>{{.Type}}</td>
@@ -105,13 +168,25 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{.CIDR}}</td>
   <td>{{.Detail}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 {{if .OrphanResources}}
 <h2>Orphaned Resources ({{len .OrphanResources}})</h2>
 <table>
-<tr><th>Kind</th><th>Provider</th><th>ID</th><th>Name</th><th>Region</th><th>Monthly Cost</th><th>Detail</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Kind<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">ID<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Name<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Region<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Monthly Cost<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Detail<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .OrphanResources}}<tr>
   <td>{{.Kind}}</td>
   <td>{{.Provider}}</td>
@@ -121,13 +196,24 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td class="red">${{formatCost .MonthlyCost}}</td>
   <td>{{.Detail}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 {{if .CertFindings}}
 <h2>Certificate Findings ({{len .CertFindings}})</h2>
 <table>
-<tr><th>Severity</th><th>Status</th><th>Provider</th><th>Domain</th><th>Days Left</th><th>Detail</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Severity<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Status<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Domain<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Days Left<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Detail<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .CertFindings}}<tr>
   <td class="{{lower .Severity}}">{{.Severity}}</td>
   <td>{{.Status}}</td>
@@ -136,13 +222,23 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{.DaysLeft}}</td>
   <td>{{.Detail}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 {{if .TagFindings}}
 <h2>Tag Findings ({{len .TagFindings}})</h2>
 <table>
-<tr><th>Severity</th><th>Provider</th><th>Resource</th><th>Type</th><th>Missing Tags</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Severity<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Resource<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Type<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Missing Tags<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .TagFindings}}<tr>
   <td class="{{lower .Severity}}">{{.Severity}}</td>
   <td>{{.Provider}}</td>
@@ -150,13 +246,24 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{.ResourceType}}</td>
   <td>{{joinStrings .MissingTags ", "}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 {{if .SecretFindings}}
 <h2>Secret Findings ({{len .SecretFindings}})</h2>
 <table>
-<tr><th>Severity</th><th>Type</th><th>Provider</th><th>Resource</th><th>Key</th><th>Detail</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Severity<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Type<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Resource<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Key<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Detail<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .SecretFindings}}<tr>
   <td class="{{lower .Severity}}">{{.Severity}}</td>
   <td>{{.Type}}</td>
@@ -165,6 +272,7 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{.Key}}</td>
   <td>{{.Detail}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
@@ -173,7 +281,16 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
 {{range .CostDiffs}}
 <h3>{{.Provider}}</h3>
 <table>
-<tr><th>Service</th><th>Before</th><th>After</th><th>Delta</th><th>Change %</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Service<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Before<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">After<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Delta<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Change %<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .Entries}}<tr>
   <td>{{.Service}}</td>
   <td>${{formatCost .Before}}</td>
@@ -181,13 +298,16 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td class="{{if gt .Delta 0.0}}red{{else}}green{{end}}">${{formatCost .Delta}}</td>
   <td class="{{pctClass .PctChange}}">{{formatPct .PctChange}}</td>
 </tr>{{end}}
-<tr style="font-weight:bold">
+</tbody>
+<tfoot>
+<tr>
   <td>TOTAL</td>
   <td>${{formatCost .TotalBefore}}</td>
   <td>${{formatCost .TotalAfter}}</td>
   <td class="{{if gt .TotalDelta 0.0}}red{{else}}green{{end}}">${{formatCost .TotalDelta}}</td>
   <td></td>
 </tr>
+</tfoot>
 </table>
 {{end}}
 {{end}}
@@ -195,7 +315,17 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
 {{if .QuotaUsages}}
 <h2>Quota Utilization ({{len .QuotaUsages}})</h2>
 <table>
-<tr><th>Provider</th><th>Service</th><th>Quota</th><th>Used</th><th>Limit</th><th>Utilization</th></tr>
+<thead>
+<tr>
+<th scope="col" aria-sort="none"><button type="button">Provider<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Service<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Quota<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Used<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Limit<span class="arrow" aria-hidden="true">▲</span></button></th>
+<th scope="col" aria-sort="none"><button type="button">Utilization<span class="arrow" aria-hidden="true">▲</span></button></th>
+</tr>
+</thead>
+<tbody>
 {{range .QuotaUsages}}<tr>
   <td>{{.Provider}}</td>
   <td>{{.Service}}</td>
@@ -204,28 +334,41 @@ footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--border
   <td>{{formatCost .Limit}}</td>
   <td class="{{pctClass .Utilization}}">{{formatPct .Utilization}}</td>
 </tr>{{end}}
+</tbody>
 </table>
 {{end}}
 
 <footer>Generated by cloudgov{{if .Version}} {{.Version}}{{end}}</footer>
 
 <script>
-document.querySelectorAll('th').forEach(th => {
-  th.addEventListener('click', () => {
+// Sorting is driven from the button inside each header cell rather than the cell
+// itself, so the only interactive control on the page is reachable by keyboard
+// and announces itself as a control. aria-sort on the th is what carries the
+// direction; the glyph is decorative.
+document.querySelectorAll('thead th button').forEach(button => {
+  button.addEventListener('click', () => {
+    const th = button.closest('th');
     const table = th.closest('table');
+    const tbody = table.tBodies[0];
+    if (!tbody) return;
     const idx = Array.from(th.parentNode.children).indexOf(th);
-    const rows = Array.from(table.querySelectorAll('tr')).slice(1);
-    const asc = th.dataset.asc !== 'true';
-    th.dataset.asc = asc;
+    const ascending = th.getAttribute('aria-sort') !== 'ascending';
+
+    // Only this table's headers are reset: two tables sorted independently must
+    // not clear each other's announced state.
+    th.parentNode.querySelectorAll('th').forEach(other => other.setAttribute('aria-sort', 'none'));
+    th.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
+
+    // Rows come from the tbody, so a tfoot summary row stays a summary row.
+    const rows = Array.from(tbody.rows);
     rows.sort((a, b) => {
-      const av = a.children[idx]?.textContent.trim() || '';
-      const bv = b.children[idx]?.textContent.trim() || '';
+      const av = a.cells[idx]?.textContent.trim() || '';
+      const bv = b.cells[idx]?.textContent.trim() || '';
       const an = parseFloat(av.replace(/[$,%]/g, ''));
       const bn = parseFloat(bv.replace(/[$,%]/g, ''));
-      if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
-      return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+      if (!isNaN(an) && !isNaN(bn)) return ascending ? an - bn : bn - an;
+      return ascending ? av.localeCompare(bv) : bv.localeCompare(av);
     });
-    const tbody = table.querySelector('tbody') || table;
     rows.forEach(r => tbody.appendChild(r));
   });
 });

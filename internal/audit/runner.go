@@ -30,13 +30,13 @@ type Providers struct {
 
 // Options controls which scans to run and how.
 type Options struct {
-	Skip         map[string]bool // domain names to skip (e.g. "iam", "certs")
-	MinSeverity  cloud.Severity
-	IAMDays      int
-	CertDays     int
-	RequiredTags []string
-	Concurrency  int
-	Quiet        bool
+	Skip        map[string]bool // domain names to skip (e.g. "iam", "certs")
+	MinSeverity cloud.Severity
+	IAMDays     int
+	CertDays    int
+	TagRules    cloud.TagRules
+	Concurrency int
+	Quiet       bool
 }
 
 // Report contains all findings from a full audit.
@@ -60,7 +60,7 @@ type Report struct {
 	// consumed as merge-gate evidence where 0 affirmatively supports approval,
 	// so a partial view has to say so rather than argue that the part it never
 	// read was fine.
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // ReportSummary holds aggregated finding counts.
@@ -80,6 +80,12 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	errs := make([]error, 0)
+
+	// Observations a domain SCANNER could not make, as distinct from a whole
+	// domain that failed (errs) or a provider-level warning (cloud.Incomplete).
+	// A scanner that reads per-resource records its misses on its own result, and
+	// neither of the other two channels carries them.
+	scannerUnread := make([]string, 0)
 
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
@@ -109,6 +115,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 			defer wg.Done()
 			progress("iam", "scanning...")
 			var findings []cloud.Finding
+			var unread []string
 			for _, p := range providers.IAM {
 				result, err := iam.Scan(ctx, p, iam.ScanOptions{
 					Days:        iamDays,
@@ -122,9 +129,17 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 					continue
 				}
 				findings = append(findings, result.Findings...)
+				// The scanner records per-principal read failures on its own
+				// Result, not through the provider's warn channel, so
+				// cloud.Incomplete(providers.IAM) does not see them. Without this
+				// line the same fact reaches a caller through `iam scan` and is
+				// erased through `audit` — and a run denied on every principal
+				// reports zero findings with an empty incomplete array.
+				unread = append(unread, result.Incomplete...)
 			}
 			mu.Lock()
 			report.IAM = findings
+			scannerUnread = append(scannerUnread, unread...)
 			mu.Unlock()
 			progress("iam", fmt.Sprintf("done (%d findings)", len(findings)))
 		}()
@@ -218,14 +233,14 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 	}
 
 	// Tags
-	if !opts.Skip["tags"] && len(providers.Tags) > 0 && len(opts.RequiredTags) > 0 {
+	if !opts.Skip["tags"] && len(providers.Tags) > 0 && !opts.TagRules.Empty() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			progress("tags", "scanning...")
 			findings, err := tags.Scan(ctx, providers.Tags, tags.ScanOptions{
 				MinSeverity: opts.MinSeverity,
-				Required:    opts.RequiredTags,
+				Rules:       opts.TagRules,
 			})
 			if err != nil {
 				mu.Lock()
@@ -266,7 +281,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 
 	report.Duration = time.Since(start).Truncate(time.Millisecond).String()
 	report.Summary = buildSummary(report, opts)
-	report.Incomplete = collectIncomplete(providers, opts, errs)
+	report.Incomplete = collectIncomplete(providers, opts, errs, scannerUnread)
 
 	if len(errs) > 0 && !opts.Quiet {
 		for _, err := range errs {
@@ -284,7 +299,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 // Skipped domains are deliberately absent. The operator asked not to look
 // there, which the summary already reports as DomainsSkipped; treating it as an
 // unobserved domain would make `--skip` raise the incomplete exit code.
-func collectIncomplete(providers Providers, opts Options, errs []error) []string {
+func collectIncomplete(providers Providers, opts Options, errs []error, scannerUnread []string) []string {
 	var out []string
 	ran := func(domain string, n int) bool { return !opts.Skip[domain] && n > 0 }
 
@@ -312,6 +327,35 @@ func collectIncomplete(providers Providers, opts Options, errs []error) []string
 
 	for _, err := range errs {
 		out = append(out, err.Error())
+	}
+	out = append(out, scannerUnread...)
+
+	// Deduplicated, because one provider implements several capabilities and the
+	// SAME instance is in several of these slices — the AWS provider is in all
+	// seven. cloud.Incomplete asks each slice, so a single denied read is
+	// reported once per capability that provider satisfies, and the count reads
+	// as seven separate failures. The record is a set of observations that could
+	// not be made, not a tally of how many scanners noticed.
+	//
+	// Order is preserved: first occurrence wins, so the list still reads in the
+	// order the scan produced it.
+	seen := make(map[string]struct{}, len(out))
+	unique := out[:0]
+	for _, entry := range out {
+		if _, dup := seen[entry]; dup {
+			continue
+		}
+		seen[entry] = struct{}{}
+		unique = append(unique, entry)
+	}
+	out = unique
+
+	// A run that observed everything reports an empty list, never a nil one. The
+	// JSON envelope always carries the key, and `null` there is indistinguishable
+	// from a report that does not describe its own coverage — which is the
+	// distinction this record exists to make.
+	if out == nil {
+		return []string{}
 	}
 	return out
 }

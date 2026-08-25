@@ -1,7 +1,6 @@
 package output
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 
@@ -26,14 +25,32 @@ func RepoFindings(w io.Writer, findings []cloud.RepoFinding) {
 	}
 }
 
-// WriteRepo writes findings as JSON. An empty result is an empty array, never
-// null: a consumer distinguishing "clean" from "did not run" needs the shape to
-// be stable.
-func WriteRepo(w io.Writer, findings []cloud.RepoFinding) error {
+// repoReport is the JSON envelope for a repository-settings sweep.
+//
+// It is an envelope rather than a bare array for the same reason every other
+// domain's is: the findings alone cannot say whether the sweep read the whole
+// organization. A repository `gh` could not reach produces no finding, and
+// without `incomplete` that is indistinguishable from a repository that
+// conforms.
+type repoReport struct {
+	Findings []cloud.RepoFinding `json:"findings"`
+	Total    int                 `json:"total"`
+
+	// Incomplete lists repositories the sweep was asked to examine and could
+	// not. Always present; empty means every repository was read.
+	Incomplete []string `json:"incomplete"`
+}
+
+// WriteRepo writes a repository-settings report as JSON. An empty findings list
+// is an empty array, never null: a consumer distinguishing "clean" from "did not
+// run" needs the shape to be stable.
+func WriteRepo(w io.Writer, findings []cloud.RepoFinding, incomplete []string) error {
 	if findings == nil {
 		findings = []cloud.RepoFinding{}
 	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(findings)
+	return writeJSON(w, repoReport{
+		Findings:   findings,
+		Total:      len(findings),
+		Incomplete: observed(incomplete),
+	})
 }

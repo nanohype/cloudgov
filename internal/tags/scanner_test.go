@@ -16,7 +16,7 @@ type mockTagProvider struct {
 
 func (m *mockTagProvider) Name() string                  { return m.name }
 func (m *mockTagProvider) Detect(_ context.Context) bool { return true }
-func (m *mockTagProvider) AuditTags(_ context.Context, _ []string) ([]cloud.TagFinding, error) {
+func (m *mockTagProvider) AuditTags(_ context.Context, _ cloud.TagRules) ([]cloud.TagFinding, error) {
 	return m.findings, m.err
 }
 
@@ -37,7 +37,7 @@ func TestScan(t *testing.T) {
 			providers: []cloud.TagProvider{
 				&mockTagProvider{name: "aws", findings: []cloud.TagFinding{f1, f2}},
 			},
-			opts:      ScanOptions{Required: []string{"owner", "env", "cost-center"}},
+			opts:      ScanOptions{Rules: cloud.RequiredOnly("owner", "env", "cost-center")},
 			wantCount: 2,
 		},
 		{
@@ -46,7 +46,7 @@ func TestScan(t *testing.T) {
 				&mockTagProvider{name: "aws", findings: []cloud.TagFinding{f1, f2}},
 				&mockTagProvider{name: "gamma", findings: []cloud.TagFinding{f3}},
 			},
-			opts:      ScanOptions{Required: []string{"owner", "env"}},
+			opts:      ScanOptions{Rules: cloud.RequiredOnly("owner", "env")},
 			wantCount: 3,
 		},
 		{

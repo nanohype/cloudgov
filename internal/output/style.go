@@ -72,7 +72,14 @@ func truncate(s string, n int) string {
 // unreadable one. An artifact that cannot be read correctly on its own is a
 // false clean with a delivery delay.
 func IncompleteNote(w io.Writer, incomplete []string) {
+	// A complete run says so. Printing nothing here made "0 findings, and I read
+	// everything I was asked to" render identically to "0 findings" from a run
+	// that read half the account — and an empty findings table is exactly where a
+	// reader stops looking. The JSON envelope solves this by always carrying the
+	// key; the table has to say it in words.
 	if len(incomplete) == 0 {
+		fmt.Fprintf(w, "\n%s every observation this scan was asked to make completed\n",
+			greenStyle.Render("COMPLETE"))
 		return
 	}
 	fmt.Fprintf(w, "\n%s %d observation(s) could not be completed; these findings are a partial view\n",

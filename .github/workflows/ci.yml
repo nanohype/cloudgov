@@ -13,21 +13,36 @@ on:
 permissions:
   contents: read
 
+# One run per ref. A superseded push has nothing to say about the commit that
+# replaced it, and letting it finish only delays the run that matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
+    name: build and test
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: setup go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: go build
         run: go build ./...
+
+      - name: test with a shuffled order
+        # Package-level state shared between tests is invisible in declaration
+        # order and surfaces the first time a suite runs in a different one. The
+        # seed is printed on failure, so a shuffle-only break is reproducible.
+        run: go test ./... -shuffle=on -count=1
 
       - name: test with per-package coverage floors
         # Runs the suite with coverage and enforces .coverage-floors (each package
@@ -44,38 +59,100 @@ jobs:
         run: bash scripts/check-context.sh
 
       - name: release-URL check
-        # .goreleaser.yaml decides the asset filenames; the README repeats them
-        # from memory. Nothing compared the two, so every documented install
-        # command 404'd — in the README and in the three CI recipes it hands
-        # people to paste. This is that comparison, offline against the
-        # committed config.
+        # .goreleaser.yaml decides the asset filenames and the README repeats
+        # them, so without this comparison the two only agree by memory. Runs
+        # offline against the committed config.
         run: bash scripts/check-release-urls.sh
+
+      - name: gate wiring
+        # Every script in scripts/ is run by some workflow and named in
+        # CONTRIBUTING.md. A gate no workflow invokes guards nothing on a pull
+        # request while still passing locally, and one the checklist omits gives
+        # a contributor a list that does not produce a green PR.
+        #
+        # Whether a gate CAN reject is a separate question, asserted by observing
+        # it rather than by reading it — see the positive-controls step below.
+        run: bash scripts/check-gates.sh
+
+      - name: version-pin coverage
+        # Every version pinned in the tree is watched by a Renovate manager, and
+        # every file exempted from that is asserted to carry no version rather
+        # than described as carrying none.
+        run: bash scripts/check-version-pins.sh
+
+      - name: documented paths resolve
+        # Prose that names a file is a claim about this repository, and nothing
+        # keeps it true across a rename. Checked rather than trusted.
+        run: bash scripts/check-doc-paths.sh
+
+      - name: shell portability
+        # A gate script that aborts partway through has read some of the tree and
+        # reported on none of it. `bash -n` cannot find the cause: a bash 4
+        # builtin under bash 3.2 is a missing command, not a parse error, so it
+        # parses clean everywhere and fails only when run.
+        run: bash scripts/check-shell-portability.sh
+
+      - name: shellcheck
+        # shellcheck PARSES rather than runs, so it answers a question none of
+        # the gates above ask: quoting, word splitting and the tests that read a
+        # command's output where they mean its status. Default severity, because
+        # everything it reports here is at note or warning level — a gate set to
+        # fail on errors alone would exit 0 over all of them.
+        #
+        # PINNED, not the runner image's. The image shipped 0.9.0 while a
+        # contributor's machine had 0.11.0, and the two disagree about which
+        # findings exist — so the gate's verdict was a function of the runner
+        # rather than of the commit, and a clean local run meant nothing. The
+        # version is printed for the same reason the other pins are.
+        run: |
+          # renovate: datasource=github-releases depName=koalaman/shellcheck
+          SHELLCHECK_VERSION=v0.11.0
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJf - --strip-components=1 -C /usr/local/bin "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          shellcheck --version
+          shellcheck scripts/*.sh scripts/lib/*.sh
+
+      - name: positive controls
+        # Introduces, into this working tree, the exact violation each gate above
+        # exists to catch, and requires the gate to reject it. A gate's own
+        # self-test proves its matching logic against a fixture; this proves the
+        # gate is wired to the tree it guards.
+        #
+        # Each control asserts the gate is clean BEFORE mutating and inspects the
+        # mutated text afterwards, because a mutation that silently fails to land
+        # hands the gate an unmodified file — the gate correctly passes it, and
+        # the run records that pass as proof the control worked.
+        run: bash scripts/check-positive-controls.sh
 
       - name: upload coverage artifact
         if: always() # keep the profile even when a floor fails, for debugging
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
           path: coverage.out
 
   lint:
+    name: lint
     runs-on: ubuntu-latest
     steps:
       - name: checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: setup go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          # v2 binary requires action v7. v2.12.x is built with Go 1.26,
-          # so it type-checks this module's go 1.26 dependencies cleanly.
-          version: v2.12.2
+          # Pinned rather than left to the action's default so a lint result is a
+          # function of the commit under test.
+          # renovate: datasource=github-releases depName=golangci/golangci-lint
+          version: v2.13.1
 
   merge-gate:
     name: merge gate

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -49,6 +48,7 @@ var (
 	repoOrg          string
 	repoExpectedFile string
 	repoOutputFmt    string
+	repoOutputFile   string
 	repoSeverity     string
 )
 
@@ -60,8 +60,9 @@ func init() {
 	repoCmd.PersistentFlags().StringVar(&repoOrg, "org", "", "GitHub organization to audit")
 	repoCmd.PersistentFlags().StringVar(&repoExpectedFile, "expected", "expected-repo-settings.yaml",
 		"path to the committed expected settings")
-	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", "table", "output format: table, json")
-	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", "minimum severity to report")
+	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", tableJSON[0], tableJSON.usage())
+	repoCmd.PersistentFlags().StringVar(&repoOutputFile, "output-file", "", "write output to a file instead of stdout")
+	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 
 	// Marked required so cobra rejects the omission by name. Without this an
 	// empty org reaches checkName and fails with `org "" is not a valid GitHub
@@ -72,6 +73,18 @@ func init() {
 }
 
 func runRepoAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(repoSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	repoFormat, err := tableJSON.resolve(repoOutputFmt)
+	if err != nil {
+		return err
+	}
 	raw, err := os.ReadFile(repoExpectedFile)
 	if err != nil {
 		return fmt.Errorf("read expected settings: %w", err)
@@ -81,12 +94,12 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("parse %s: %w", repoExpectedFile, err)
 	}
 
-	findings, err := repo.Audit(cmd.Context(), repo.NewGHReader(), repoOrg, exp)
+	findings, unread, err := repo.Audit(cmd.Context(), repo.NewGHReader(), repoOrg, exp)
 	if err != nil {
 		return err
 	}
 
-	minRank := cloud.SeverityRank(cloud.Severity(strings.ToUpper(repoSeverity)))
+	minRank := cloud.SeverityRank(minSeverity)
 	var kept []cloud.RepoFinding
 	for _, f := range findings {
 		if cloud.SeverityRank(f.Severity) >= minRank {
@@ -101,9 +114,25 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 	})
 
 	w := cmd.OutOrStdout()
-	if repoOutputFmt == "json" {
-		return output.WriteRepo(w, kept)
+	if repoOutputFile != "" {
+		f, err := os.Create(repoOutputFile)
+		if err != nil {
+			return fmt.Errorf("create output file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		w = f
+	}
+
+	// The exit-3 contract applies here for the same reason it applies to every
+	// command that reads an account: a repository nobody could read is not a
+	// repository that conforms.
+	gate(kept, func(f cloud.RepoFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(unread)
+
+	if repoFormat == "json" {
+		return output.WriteRepo(w, kept, unread)
 	}
 	output.RepoFindings(w, kept)
+	output.IncompleteNote(w, unread)
 	return nil
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/output"
@@ -31,14 +30,26 @@ var (
 )
 
 func init() {
-	secretsScanCmd.Flags().StringVar(&secretsSeverity, "severity", "LOW", "minimum severity to report")
-	secretsScanCmd.Flags().StringVar(&secretsOutputFmt, "output", "table", "output format: table, json, sarif")
+	secretsScanCmd.Flags().StringVar(&secretsSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
+	secretsScanCmd.Flags().StringVar(&secretsOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	secretsScanCmd.Flags().StringVar(&secretsOutputFile, "output-file", "", "write output to file")
 
 	secretsCmd.AddCommand(secretsScanCmd)
 }
 
 func runSecretsScan(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(secretsSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	secretsFormat, err := tableJSONSARIF.resolve(secretsOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveSecretsProviders(ctx)
 	if err != nil {
@@ -46,7 +57,7 @@ func runSecretsScan(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := secrets.ScanProviders(ctx, providers, secrets.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(secretsSeverity)),
+		MinSeverity: minSeverity,
 	})
 	if err != nil {
 		return err
@@ -66,11 +77,11 @@ func runSecretsScan(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.SecretFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(secretsOutputFmt) {
+	switch secretsFormat {
 	case "json":
 		return output.WriteSecrets(w, findings, incomplete)
 	case "sarif":
-		return output.WriteSecretsSARIF(w, findings, Version)
+		return output.WriteSecretsSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d secret findings\n\n", len(findings))

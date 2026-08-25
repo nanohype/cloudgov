@@ -10,7 +10,7 @@ func TestLoadIAMReport(t *testing.T) {
 	data := `{"findings":[{"severity":"CRITICAL","type":"ADMIN_ACCESS","provider":"aws","detail":"full admin"}],"total":1}`
 	path := writeTemp(t, "iam.json", data)
 
-	findings, err := LoadIAMReport(path)
+	findings, _, err := LoadIAMReport(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestLoadStorageReport(t *testing.T) {
 	data := `{"findings":[{"severity":"HIGH","type":"UNENCRYPTED","provider":"aws","bucket":"my-bucket"}],"total":1}`
 	path := writeTemp(t, "storage.json", data)
 
-	findings, err := LoadStorageReport(path)
+	findings, _, err := LoadStorageReport(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestLoadNetworkReport(t *testing.T) {
 	data := `{"findings":[{"severity":"CRITICAL","type":"ADMIN_PORT_OPEN","provider":"aws","resource":"sg-123"}],"total":1}`
 	path := writeTemp(t, "network.json", data)
 
-	findings, err := LoadNetworkReport(path)
+	findings, _, err := LoadNetworkReport(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestLoadNetworkReport(t *testing.T) {
 }
 
 func TestLoadReportFileNotFound(t *testing.T) {
-	_, err := LoadIAMReport("/nonexistent/path.json")
+	_, _, err := LoadIAMReport("/nonexistent/path.json")
 	if err == nil {
 		t.Fatal("expected error for nonexistent file")
 	}
@@ -63,7 +63,7 @@ func TestLoadReportFileNotFound(t *testing.T) {
 
 func TestLoadReportInvalidJSON(t *testing.T) {
 	path := writeTemp(t, "bad.json", "not json")
-	_, err := LoadIAMReport(path)
+	_, _, err := LoadIAMReport(path)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}

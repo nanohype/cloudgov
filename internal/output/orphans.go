@@ -46,7 +46,7 @@ type orphansReport struct {
 
 	// Incomplete is what this scan could not read. An empty findings list with a
 	// non-empty Incomplete is "could not tell", not "nothing to report".
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // WriteOrphans marshals orphan resources as JSON to w.
@@ -59,6 +59,6 @@ func WriteOrphans(w io.Writer, orphans []cloud.OrphanResource, incomplete []stri
 		Resources:           orphans,
 		Total:               len(orphans),
 		EstimatedMonthlyUSD: total,
-		Incomplete:          incomplete,
+		Incomplete:          observed(incomplete),
 	})
 }

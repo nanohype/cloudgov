@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -45,14 +44,20 @@ var (
 func init() {
 	k8sCmd.PersistentFlags().StringVar(&k8sKubeconfig, "kubeconfig", "",
 		"path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config, falls back to in-cluster)")
-	k8sCmd.PersistentFlags().StringVar(&k8sOutputFmt, "output", "table", "output format: table, json, sarif")
+	k8sCmd.PersistentFlags().StringVar(&k8sOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	k8sCmd.PersistentFlags().StringVar(&k8sOutputFile, "output-file", "", "write output to file instead of stdout")
-	k8sCmd.PersistentFlags().StringVar(&k8sMinSeverity, "severity", "LOW", "minimum severity to report")
+	k8sCmd.PersistentFlags().StringVar(&k8sMinSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 
 	k8sCmd.AddCommand(k8sRBACCmd)
 }
 
 func runK8sRBAC(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	k8sFormat, err := tableJSONSARIF.resolve(k8sOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	p, err := cloudk8s.New(ctx, k8sKubeconfig)
 	if err != nil {
@@ -64,7 +69,18 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	findings = filterK8sBySeverity(findings, strings.ToUpper(k8sMinSeverity))
+	// RBAC has no partial state to report. Both reads it makes — cluster roles
+	// and cluster role bindings — return an error rather than a short list, so a
+	// denied read fails the command instead of yielding a clean-looking scan.
+	// The record is emitted anyway: an absent incomplete field and an empty one
+	// are different claims, and this is the empty one.
+	k8sUnread := []string{}
+
+	minSeverity, err := resolveSeverity(k8sMinSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	findings = filterK8sBySeverity(findings, minSeverity)
 
 	gate(findings, func(f cloud.K8sFinding) cloud.Severity { return f.Severity })
 
@@ -76,11 +92,11 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 		defer closer()
 	}
 
-	switch strings.ToLower(k8sOutputFmt) {
+	switch k8sFormat {
 	case "json":
-		return output.WriteK8sFindings(w, findings)
+		return output.WriteK8sFindings(w, findings, k8sUnread)
 	case "sarif":
-		return output.WriteK8sSARIF(w, findings, Version)
+		return output.WriteK8sSARIF(w, findings, Version, k8sUnread)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d RBAC findings (context: %s)\n\n", len(findings), p.ContextName())
@@ -101,8 +117,11 @@ func openK8sOutput() (out *os.File, closer func(), err error) {
 	return f, func() { _ = f.Close() }, nil
 }
 
-func filterK8sBySeverity(in []cloud.K8sFinding, min string) []cloud.K8sFinding {
-	minRank := cloud.SeverityRank(cloud.Severity(min))
+// The threshold arrives already validated. Casting a raw flag here instead
+// would rank an unrecognised level 0, and every real level outranks 0 — so a
+// typo widens this filter to everything rather than failing.
+func filterK8sBySeverity(in []cloud.K8sFinding, min cloud.Severity) []cloud.K8sFinding {
+	minRank := cloud.SeverityRank(min)
 	out := in[:0]
 	for _, f := range in {
 		if cloud.SeverityRank(f.Severity) >= minRank {

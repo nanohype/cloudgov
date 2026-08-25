@@ -1,0 +1,58 @@
+name: advisory
+
+# Gate what the commit controls; schedule what the world controls.
+#
+# govulncheck's verdict is a function of the advisory database, not of the tree:
+# a pull request that changes nothing goes red the morning a vulnerability is
+# published against a dependency it did not introduce. Blocking a merge on the
+# world changing is how a gate teaches people to bypass it.
+#
+# It lives in its own workflow for that reason. The merge gate's rule is
+# per-workflow — every job in a workflow that carries a gate must be in that
+# gate's `needs:`, with no exemptions — so a job that legitimately must not
+# block a merge cannot sit beside jobs that must. Keeping it here is what makes
+# "advisory on a pull request, gating on a schedule" true rather than asserted.
+#
+# A scheduled run here can be red with no commit at fault.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly Tuesday 06:00 UTC — catches newly published CVEs even when no PRs land.
+    - cron: '0 6 * * 2'
+
+permissions:
+  contents: read # read the tree govulncheck analyses
+
+concurrency:
+  group: advisory-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: govulncheck (known-vuln reachability — advisory on PRs, gating on schedule)
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: setup go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: govulncheck
+        # Exits non-zero when any known vulnerability is reachable from this
+        # module's code (symbol-level analysis, not just go.sum). Pinned so the
+        # tool is a function of the commit under test; Renovate tracks the pin
+        # through the govulncheck customManager in renovate.json. The
+        # vulnerability database is fetched at run time and stays current.
+        run: |
+          # renovate: datasource=go depName=golang.org/x/vuln
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...

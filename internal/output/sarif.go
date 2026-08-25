@@ -3,6 +3,8 @@ package output
 import (
 	"encoding/json"
 	"io"
+	"strings"
+	"unicode"
 
 	"github.com/nanohype/cloudgov/internal/audit"
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -17,8 +19,50 @@ type sarifLog struct {
 }
 
 type sarifRun struct {
-	Tool    sarifTool     `json:"tool"`
-	Results []sarifResult `json:"results"`
+	Tool        sarifTool         `json:"tool"`
+	Invocations []sarifInvocation `json:"invocations"`
+	Results     []sarifResult     `json:"results"`
+}
+
+// sarifInvocation carries what the scan could NOT read.
+//
+// SARIF's results array says what was found; it has no way to say that part of
+// the account was unreadable, and a consumer cannot tell a clean account from an
+// account half of which returned AccessDenied. That distinction is the guarantee
+// this tool exists to make, and every other format carries it — the JSON writers
+// take an incomplete list, the table renderer prints a note, and the process
+// exits 3.
+//
+// SARIF is the one format that becomes a durable artifact: it is uploaded,
+// ingested and read later by someone who never sees the exit code. Reporting a
+// partial scan as a clean one there is the failure mode with the longest half
+// life, so the run is marked unsuccessful and each unread probe is attached as a
+// tool execution notification.
+type sarifInvocation struct {
+	ExecutionSuccessful        bool                `json:"executionSuccessful"`
+	ToolExecutionNotifications []sarifNotification `json:"toolExecutionNotifications"`
+}
+
+type sarifNotification struct {
+	Level   string       `json:"level"`
+	Message sarifMessage `json:"message"`
+}
+
+// sarifInvocations renders the incomplete record. An empty list is a complete
+// scan, and it is still emitted — an absent invocations array and a successful
+// one are different claims, and only one of them is being made.
+func sarifInvocations(incomplete []string) []sarifInvocation {
+	notes := make([]sarifNotification, 0, len(incomplete))
+	for _, entry := range incomplete {
+		notes = append(notes, sarifNotification{
+			Level:   "warning",
+			Message: sarifMessage{Text: entry},
+		})
+	}
+	return []sarifInvocation{{
+		ExecutionSuccessful:        len(incomplete) == 0,
+		ToolExecutionNotifications: notes,
+	}}
 }
 
 type sarifTool struct {
@@ -55,7 +99,7 @@ type sarifMessage struct {
 }
 
 // WriteSARIF writes IAM findings in SARIF 2.1.0 format.
-func WriteSARIF(w io.Writer, findings []cloud.Finding, version string) error {
+func WriteSARIF(w io.Writer, findings []cloud.Finding, version string, incomplete []string) error {
 	rules := buildRules()
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
@@ -77,7 +121,8 @@ func WriteSARIF(w io.Writer, findings []cloud.Finding, version string) error {
 				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
-			Results: results,
+			Invocations: sarifInvocations(incomplete),
+			Results:     results,
 		}},
 	}
 
@@ -87,7 +132,7 @@ func WriteSARIF(w io.Writer, findings []cloud.Finding, version string) error {
 }
 
 // WriteStorageSARIF writes storage audit findings in SARIF 2.1.0 format.
-func WriteStorageSARIF(w io.Writer, findings []cloud.BucketFinding, version string) error {
+func WriteStorageSARIF(w io.Writer, findings []cloud.BucketFinding, version string, incomplete []string) error {
 	rules := buildStorageRules()
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
@@ -109,7 +154,8 @@ func WriteStorageSARIF(w io.Writer, findings []cloud.BucketFinding, version stri
 				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
-			Results: results,
+			Invocations: sarifInvocations(incomplete),
+			Results:     results,
 		}},
 	}
 
@@ -119,7 +165,7 @@ func WriteStorageSARIF(w io.Writer, findings []cloud.BucketFinding, version stri
 }
 
 // WriteSecretsSARIF writes secret findings in SARIF 2.1.0 format.
-func WriteSecretsSARIF(w io.Writer, findings []cloud.SecretFinding, version string) error {
+func WriteSecretsSARIF(w io.Writer, findings []cloud.SecretFinding, version string, incomplete []string) error {
 	rules := buildSecretsRules()
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
@@ -141,7 +187,8 @@ func WriteSecretsSARIF(w io.Writer, findings []cloud.SecretFinding, version stri
 				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
-			Results: results,
+			Invocations: sarifInvocations(incomplete),
+			Results:     results,
 		}},
 	}
 
@@ -152,7 +199,7 @@ func WriteSecretsSARIF(w io.Writer, findings []cloud.SecretFinding, version stri
 
 // sarifReport assembles a SARIF 2.1.0 log from a tool version, its rules, and
 // results. Shared by the per-domain SARIF writers below.
-func sarifReport(version string, rules []sarifRule, results []sarifResult) sarifLog {
+func sarifReport(version string, rules []sarifRule, results []sarifResult, incomplete []string) sarifLog {
 	return sarifLog{
 		Version: "2.1.0",
 		Schema:  "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
@@ -163,7 +210,8 @@ func sarifReport(version string, rules []sarifRule, results []sarifResult) sarif
 				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          rules,
 			}},
-			Results: results,
+			Invocations: sarifInvocations(incomplete),
+			Results:     results,
 		}},
 	}
 }
@@ -175,7 +223,7 @@ func encodeSARIF(w io.Writer, log sarifLog) error {
 }
 
 // WriteK8sSARIF writes Kubernetes RBAC findings in SARIF 2.1.0 format.
-func WriteK8sSARIF(w io.Writer, findings []cloud.K8sFinding, version string) error {
+func WriteK8sSARIF(w io.Writer, findings []cloud.K8sFinding, version string, incomplete []string) error {
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
 		results = append(results, sarifResult{
@@ -185,7 +233,7 @@ func WriteK8sSARIF(w io.Writer, findings []cloud.K8sFinding, version string) err
 			Kind:    "open",
 		})
 	}
-	return encodeSARIF(w, sarifReport(version, buildK8sRules(), results))
+	return encodeSARIF(w, sarifReport(version, buildK8sRules(), results, incomplete))
 }
 
 func buildK8sRules() []sarifRule {
@@ -211,7 +259,7 @@ func buildK8sRules() []sarifRule {
 }
 
 // WriteLambdaSARIF writes Lambda resource-policy findings in SARIF 2.1.0 format.
-func WriteLambdaSARIF(w io.Writer, findings []cloud.LambdaPolicyFinding, version string) error {
+func WriteLambdaSARIF(w io.Writer, findings []cloud.LambdaPolicyFinding, version string, incomplete []string) error {
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
 		results = append(results, sarifResult{
@@ -221,7 +269,7 @@ func WriteLambdaSARIF(w io.Writer, findings []cloud.LambdaPolicyFinding, version
 			Kind:    "open",
 		})
 	}
-	return encodeSARIF(w, sarifReport(version, buildLambdaRules(), results))
+	return encodeSARIF(w, sarifReport(version, buildLambdaRules(), results, incomplete))
 }
 
 func buildLambdaRules() []sarifRule {
@@ -249,7 +297,7 @@ func buildLambdaRules() []sarifRule {
 // WriteComplianceSARIF writes failed and not-evaluated controls in SARIF 2.1.0
 // format. Passing controls are omitted. Rule level follows each control's
 // severity for failures, "note" for not-evaluated.
-func WriteComplianceSARIF(w io.Writer, report compliance.ComplianceReport, version string) error {
+func WriteComplianceSARIF(w io.Writer, report compliance.ComplianceReport, version string, incomplete []string) error {
 	var rules []sarifRule
 	var results []sarifResult
 	seen := make(map[string]bool)
@@ -277,12 +325,12 @@ func WriteComplianceSARIF(w io.Writer, report compliance.ComplianceReport, versi
 			Kind:    "open",
 		})
 	}
-	return encodeSARIF(w, sarifReport(version, rules, results))
+	return encodeSARIF(w, sarifReport(version, rules, results, incomplete))
 }
 
 // WriteDriftSARIF writes drifted resources (modified, deleted, or errored) in
 // SARIF 2.1.0 format. In-sync resources are omitted.
-func WriteDriftSARIF(w io.Writer, results []cloud.DriftResult, version string) error {
+func WriteDriftSARIF(w io.Writer, results []cloud.DriftResult, version string, incomplete []string) error {
 	var out []sarifResult
 	for _, r := range results {
 		if r.Status == cloud.DriftInSync {
@@ -295,7 +343,7 @@ func WriteDriftSARIF(w io.Writer, results []cloud.DriftResult, version string) e
 			Kind:    "open",
 		})
 	}
-	return encodeSARIF(w, sarifReport(version, buildDriftRules(), out))
+	return encodeSARIF(w, sarifReport(version, buildDriftRules(), out, incomplete))
 }
 
 func buildDriftRules() []sarifRule {
@@ -331,7 +379,7 @@ func driftLevel(s cloud.DriftStatus) string {
 }
 
 // WritePlatformSARIF writes Platform-tenant conformance findings in SARIF 2.1.0.
-func WritePlatformSARIF(w io.Writer, findings []cloud.PlatformFinding, version string) error {
+func WritePlatformSARIF(w io.Writer, findings []cloud.PlatformFinding, version string, incomplete []string) error {
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
 		results = append(results, sarifResult{
@@ -341,7 +389,7 @@ func WritePlatformSARIF(w io.Writer, findings []cloud.PlatformFinding, version s
 			Kind:    "open",
 		})
 	}
-	return encodeSARIF(w, sarifReport(version, buildPlatformRules(), results))
+	return encodeSARIF(w, sarifReport(version, buildPlatformRules(), results, incomplete))
 }
 
 func buildPlatformRules() []sarifRule {
@@ -401,7 +449,7 @@ func sarifLevel(s cloud.Severity) string {
 
 // WriteCertsSARIF writes certificate-expiry findings in SARIF 2.1.0 format. The
 // rule id is the cert status (EXPIRED, EXPIRING_7D, …); the level follows severity.
-func WriteCertsSARIF(w io.Writer, findings []cloud.CertFinding, version string) error {
+func WriteCertsSARIF(w io.Writer, findings []cloud.CertFinding, version string, incomplete []string) error {
 	results := make([]sarifResult, 0, len(findings))
 	for _, f := range findings {
 		results = append(results, sarifResult{
@@ -411,7 +459,7 @@ func WriteCertsSARIF(w io.Writer, findings []cloud.CertFinding, version string) 
 			Kind:    "open",
 		})
 	}
-	return encodeSARIF(w, sarifReport(version, buildCertRules(), results))
+	return encodeSARIF(w, sarifReport(version, buildCertRules(), results, incomplete))
 }
 
 func buildCertRules() []sarifRule {
@@ -489,12 +537,82 @@ func buildSecretsRules() []sarifRule {
 }
 
 // WriteAuditSARIF writes all audit findings combined into a single SARIF 2.1.0 report.
-func WriteAuditSARIF(w io.Writer, report *audit.Report, version string) error {
+// buildTagRules and buildOrphanRules give the two domains with no standalone
+// SARIF writer the rule entries the audit report needs.
+//
+// A SARIF result whose ruleId is not declared in the driver's rule table is
+// dropped by some consumers and rendered without a name by others, so a domain
+// cannot be added to the results without being added here.
+func buildTagRules() []sarifRule {
+	return []sarifRule{{
+		ID:               tagRuleID,
+		Name:             "MissingRequiredTags",
+		ShortDescription: sarifMessage{Text: "Resource is missing one or more required tags"},
+		DefaultConfig:    sarifRuleConfig{Level: "warning"},
+	}}
+}
+
+// camelCase turns an OrphanKind's snake_case id into a SARIF rule name.
+func camelCase(id string) string {
+	var b strings.Builder
+	upper := true
+	for _, r := range id {
+		if r == '_' {
+			upper = true
+			continue
+		}
+		if upper {
+			b.WriteRune(unicode.ToUpper(r))
+			upper = false
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// tagRuleID is the single rule every tag finding reports under. Tag findings do
+// not carry a type — the finding IS "these keys are absent" — so the missing
+// keys travel in the message rather than in the rule.
+const tagRuleID = "MISSING_REQUIRED_TAGS"
+
+func buildOrphanRules() []sarifRule {
+	kinds := []cloud.OrphanKind{
+		cloud.OrphanDisk, cloud.OrphanIP, cloud.OrphanLoadBalancer,
+		cloud.OrphanSnapshot, cloud.OrphanImage, cloud.OrphanDBSnapshot,
+	}
+	rules := make([]sarifRule, 0, len(kinds))
+	for _, kind := range kinds {
+		rules = append(rules, sarifRule{
+			ID:               string(kind),
+			Name:             "Orphan" + camelCase(string(kind)),
+			ShortDescription: sarifMessage{Text: "Unused resource still incurring cost"},
+			DefaultConfig:    sarifRuleConfig{Level: "note"},
+		})
+	}
+	return rules
+}
+
+// WriteAuditSARIF renders a full audit report as SARIF.
+//
+// Every domain the Report declares is rendered, because the exit code and the
+// artifact are two halves of one answer to a merge gate. A writer covering a
+// subset makes them disagree silently: the run exits 2 on a critical expired
+// certificate and the file uploaded to code scanning contains no such result,
+// and the artifact is the half a reviewer looks at.
+//
+// TestAuditSARIFCoversEveryDomain counts the Report's own finding slices by
+// reflection, so a domain added there and not here fails the build rather than
+// silently vanishing from the upload.
+func WriteAuditSARIF(w io.Writer, report *audit.Report, version string, incomplete []string) error {
 	var allRules []sarifRule
 	allRules = append(allRules, buildRules()...)
 	allRules = append(allRules, buildStorageRules()...)
 	allRules = append(allRules, buildSecretsRules()...)
 	allRules = append(allRules, buildNetworkRules()...)
+	allRules = append(allRules, buildCertRules()...)
+	allRules = append(allRules, buildTagRules()...)
+	allRules = append(allRules, buildOrphanRules()...)
 
 	var results []sarifResult
 	for _, f := range report.IAM {
@@ -529,6 +647,33 @@ func WriteAuditSARIF(w io.Writer, report *audit.Report, version string) error {
 			Kind:    "open",
 		})
 	}
+	for _, f := range report.Certs {
+		results = append(results, sarifResult{
+			RuleID:  string(f.Status),
+			Level:   sarifLevel(f.Severity),
+			Message: sarifMessage{Text: "[certs] " + f.Domain + ": " + f.Detail},
+			Kind:    "open",
+		})
+	}
+	for _, f := range report.Tags {
+		results = append(results, sarifResult{
+			RuleID:  tagRuleID,
+			Level:   sarifLevel(f.Severity),
+			Message: sarifMessage{Text: "[tags] " + f.ResourceID + ": missing " + strings.Join(f.MissingTags, ", ")},
+			Kind:    "open",
+		})
+	}
+	// An orphan carries a cost rather than a severity, and the audit summary
+	// counts it at LOW. Rendering it at the same level keeps the artifact and the
+	// counts telling one story.
+	for _, o := range report.Orphans {
+		results = append(results, sarifResult{
+			RuleID:  string(o.Kind),
+			Level:   sarifLevel(cloud.SeverityLow),
+			Message: sarifMessage{Text: "[orphans] " + o.ID + ": " + o.Detail},
+			Kind:    "open",
+		})
+	}
 
 	log := sarifLog{
 		Version: "2.1.0",
@@ -540,7 +685,8 @@ func WriteAuditSARIF(w io.Writer, report *audit.Report, version string) error {
 				InformationURI: "https://github.com/nanohype/cloudgov",
 				Rules:          allRules,
 			}},
-			Results: results,
+			Invocations: sarifInvocations(incomplete),
+			Results:     results,
 		}},
 	}
 

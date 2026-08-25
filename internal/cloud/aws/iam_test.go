@@ -513,7 +513,11 @@ func TestMinimalPolicy(t *testing.T) {
 			}
 			var gotActions []string
 			for _, s := range doc.Statement {
-				gotActions = append(gotActions, toStringSlice(s.Action)...)
+				acts, err := toStringSlice(s.Action)
+				if err != nil {
+					t.Fatalf("decode action: %v", err)
+				}
+				gotActions = append(gotActions, acts...)
 			}
 			sort.Strings(gotActions)
 			if !equalStrings(gotActions, tt.wantActions) {
@@ -698,11 +702,24 @@ func TestToStringSlice(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := toStringSlice([]byte(tt.raw))
+			got, err := toStringSlice([]byte(tt.raw))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 			if !equalStrings(got, tt.want) {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
+	}
+
+	// A field that is neither a string nor a list of strings must be an error.
+	// Returning an empty list reports a permission the scanner could not read as
+	// a permission the principal does not have.
+	for _, raw := range []string{`{"NotAString":1}`, `42`, `true`} {
+		if _, err := toStringSlice([]byte(raw)); err == nil {
+			t.Errorf("toStringSlice(%s) returned no error; an undecodable policy field read as an "+
+				"absence of permissions turns a grant the scanner could not parse into a clean principal", raw)
+		}
 	}
 }
 

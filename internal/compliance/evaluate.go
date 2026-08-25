@@ -1,6 +1,10 @@
 package compliance
 
-import "github.com/nanohype/cloudgov/internal/cloud"
+import (
+	"fmt"
+
+	"github.com/nanohype/cloudgov/internal/cloud"
+)
 
 // Evaluate runs all controls in a benchmark against the provided findings.
 func Evaluate(benchmark *Benchmark, input InputFindings) ComplianceReport {
@@ -192,11 +196,22 @@ func evalBroadScope(ctrl Control, findings []cloud.Finding) ControlResult {
 	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no broad scope policies detected"}
 }
 
+// evalIAMGeneric serves the controls whose criterion an IAM scan is evidence
+// toward but does not decide: password policy, credential rotation cadence, MFA
+// enrolment, change-management review. cloudgov reads none of those, so it holds
+// no evidence either way and reports NOT_EVALUATED with the IAM finding count as
+// context.
+//
+// It must never report PASS. A control this evaluator serves is one nothing
+// examined, and PASS is the answer an auditor reads as "examined and clean" —
+// the same conflation the incomplete contract exists to prevent elsewhere in
+// this tool, arriving here as a compliance verdict.
 func evalIAMGeneric(ctrl Control, findings []cloud.Finding) ControlResult {
 	if len(findings) == 0 {
-		return ControlResult{Control: ctrl, Status: StatusNotEvaluated, Detail: "no IAM findings provided"}
+		return evalNotEvaluated(ctrl, "no IAM findings provided")
 	}
-	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no relevant IAM findings detected"}
+	return evalNotEvaluated(ctrl, fmt.Sprintf(
+		"cloudgov has no evaluator for this control; the %d IAM finding(s) loaded are context, not a verdict", len(findings)))
 }
 
 func evalStorageFinding(ctrl Control, findings []cloud.BucketFinding, findingType cloud.BucketFindingType) ControlResult {
@@ -270,18 +285,19 @@ func evalCerts(ctrl Control, findings []cloud.CertFinding) ControlResult {
 	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no critical certificate expiry detected"}
 }
 
+// evalTags has no PASS arm, unlike the other domain evaluators. A tags report
+// lists only the resources that are missing a required tag, so a finding is a
+// failure by construction and an empty report is the clean case — which is
+// indistinguishable here from a tags scan nobody ran, hence NOT_EVALUATED.
 func evalTags(ctrl Control, findings []cloud.TagFinding) ControlResult {
 	if len(findings) == 0 {
-		return ControlResult{Control: ctrl, Status: StatusNotEvaluated, Detail: "no tags findings provided"}
+		return evalNotEvaluated(ctrl, "no tags findings provided")
 	}
-	var refs []string
+	refs := make([]string, 0, len(findings))
 	for _, f := range findings {
 		refs = append(refs, f.ResourceID+": missing "+joinTags(f.MissingTags))
 	}
-	if len(refs) > 0 {
-		return ControlResult{Control: ctrl, Status: StatusFail, Findings: refs, Detail: "resources missing required tags"}
-	}
-	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "all resources have required tags"}
+	return ControlResult{Control: ctrl, Status: StatusFail, Findings: refs, Detail: "resources missing required tags"}
 }
 
 func evalNotEvaluated(ctrl Control, reason string) ControlResult {

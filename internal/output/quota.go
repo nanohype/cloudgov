@@ -51,7 +51,7 @@ type quotaReport struct {
 
 	// Incomplete is what this scan could not read. An empty findings list with a
 	// non-empty Incomplete is "could not tell", not "nothing to report".
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // WriteQuotas marshals quota usage data as JSON to w.
@@ -73,6 +73,6 @@ func WriteQuotas(w io.Writer, quotas []cloud.QuotaUsage, incomplete []string) er
 		Critical:   crit,
 		High:       high,
 		Medium:     med,
-		Incomplete: incomplete,
+		Incomplete: observed(incomplete),
 	})
 }

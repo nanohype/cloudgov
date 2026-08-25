@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -77,7 +78,7 @@ func TestAudit_ProtectedButRequiresNothing(t *testing.T) {
 			},
 		},
 	}
-	got, err := Audit(context.Background(), r, "nanohype", defaults())
+	got, _, err := Audit(context.Background(), r, "nanohype", defaults())
 	if err != nil {
 		t.Fatalf("audit: %v", err)
 	}
@@ -109,7 +110,7 @@ func TestAudit_UnprotectableIsNotCompliant(t *testing.T) {
 			},
 		},
 	}
-	got, _ := Audit(context.Background(), r, "nanohype", defaults())
+	got, _, _ := Audit(context.Background(), r, "nanohype", defaults())
 	counts := typesOf(got)
 	if counts[cloud.RepoUnprotectable] != 1 {
 		t.Fatalf("an unprotectable repository must be reported, not passed over: %+v", counts)
@@ -129,7 +130,7 @@ func TestAudit_MissingRequiredCheck(t *testing.T) {
 	exp := defaults()
 	exp.RequiredChecks = map[string][]string{"eks-gitops": {"lint", "validate", "kyverno"}}
 
-	got, _ := Audit(context.Background(), r, "nanohype", exp)
+	got, _, _ := Audit(context.Background(), r, "nanohype", exp)
 	counts := typesOf(got)
 	if counts[cloud.RepoMissingRequiredCheck] != 1 {
 		t.Fatalf("missing expected checks must be reported: %+v", counts)
@@ -150,21 +151,59 @@ func contains(s, sub string) bool {
 	})()
 }
 
-// TestAudit_UnreadableRepoIsReportedNotSkipped is the anti-vacuity rule. A sweep
-// that skips what it cannot read reports a clean org over repositories it never
-// looked at — the same shape as every defect this tool is pointed at.
-func TestAudit_UnreadableRepoIsReportedNotSkipped(t *testing.T) {
+// The anti-vacuity rule: a sweep that skips what it cannot read reports a clean
+// org over repositories it never looked at.
+//
+// It is recorded as UNREAD rather than as a finding, and that distinction is the
+// point. An error from `gh` is returned for an unreachable API, an
+// unauthenticated CLI, a rate limit, a deadline and a token genuinely missing
+// the scope — one exit status covering causes with different remedies. Filing it
+// as NO_BRANCH_PROTECTION at HIGH asserted one of them, and handed a merge gate a
+// governance breach where there was an outage.
+func TestAudit_UnreadableRepoIsRecordedAsUnreadNotAsAFinding(t *testing.T) {
 	r := &fakeReader{
-		repos:    []string{"portal"},
-		settings: map[string]cloud.RepoSettings{},
-		errs:     map[string]error{"portal": errors.New("404 Not Found")},
+		repos:    []string{"portal", "gitops"},
+		settings: map[string]cloud.RepoSettings{"gitops": {Name: "gitops", DefaultRef: "main"}},
+		errs:     map[string]error{"portal": errors.New("dial tcp: connection refused")},
 	}
-	got, err := Audit(context.Background(), r, "nanohype", defaults())
+	got, unread, err := Audit(context.Background(), r, "nanohype", defaults())
 	if err != nil {
 		t.Fatalf("one unreadable repo must not fail the whole sweep: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("an unreadable repository must produce a finding, got %d", len(got))
+
+	if len(unread) != 1 {
+		t.Fatalf("the unreadable repository was not recorded: %v", unread)
+	}
+	if !strings.Contains(unread[0], "portal") {
+		t.Errorf("the record does not name the repository: %q", unread[0])
+	}
+	// The record carries what the tool actually said, so an operator can tell a
+	// down cluster from a narrow token without re-running anything.
+	if !strings.Contains(unread[0], "connection refused") {
+		t.Errorf("the record does not carry the underlying error: %q", unread[0])
+	}
+
+	for _, f := range got {
+		if f.Repo == "portal" {
+			t.Errorf("the unreadable repository produced a finding, which asserts a cause the "+
+				"error does not carry: %+v", f)
+		}
+	}
+}
+
+// The complement: a fully readable sweep records nothing unread, so the entries
+// above are a signal rather than a constant.
+func TestAudit_FullyReadableSweepRecordsNothingUnread(t *testing.T) {
+	r := &fakeReader{
+		repos:    []string{"gitops"},
+		settings: map[string]cloud.RepoSettings{"gitops": {Name: "gitops", DefaultRef: "main"}},
+	}
+	_, unread, err := Audit(context.Background(), r, "nanohype", defaults())
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(unread) != 0 {
+		t.Errorf("a sweep that read every repository reported %d unread: %v", len(unread), unread)
 	}
 }
 
@@ -182,7 +221,7 @@ func TestAudit_ExemptAndArchivedAreSkipped(t *testing.T) {
 	exp := defaults()
 	exp.Exempt = map[string]string{"skipme": "a template repo with no delivery path"}
 
-	got, _ := Audit(context.Background(), r, "nanohype", exp)
+	got, _, _ := Audit(context.Background(), r, "nanohype", exp)
 	for _, f := range got {
 		if f.Repo == "old" || f.Repo == "skipme" {
 			t.Errorf("%s must be skipped, got %s", f.Repo, f.Type)
@@ -201,7 +240,7 @@ func TestAudit_HealthyRepoIsSilent(t *testing.T) {
 		repos:    []string{"fab"},
 		settings: map[string]cloud.RepoSettings{"fab": healthy("fab")},
 	}
-	got, _ := Audit(context.Background(), r, "nanohype", defaults())
+	got, _, _ := Audit(context.Background(), r, "nanohype", defaults())
 	if len(got) != 0 {
 		t.Errorf("a conforming repository must produce no findings, got %+v", got)
 	}
@@ -217,7 +256,7 @@ func TestAudit_DependabotGaps(t *testing.T) {
 	s.OpenAlerts = 3
 	r := &fakeReader{repos: []string{"docs"}, settings: map[string]cloud.RepoSettings{"docs": s}}
 
-	got, _ := Audit(context.Background(), r, "nanohype", defaults())
+	got, _, _ := Audit(context.Background(), r, "nanohype", defaults())
 	counts := typesOf(got)
 	if counts[cloud.RepoSecurityUpdatesDisabled] != 1 {
 		t.Errorf("security updates off must be reported: %+v", counts)
@@ -231,7 +270,80 @@ func TestAudit_DependabotGaps(t *testing.T) {
 // found nothing, it has found out nothing.
 func TestAudit_ListFailureIsAnError(t *testing.T) {
 	r := &fakeReader{listErr: errors.New("401 Bad credentials")}
-	if _, err := Audit(context.Background(), r, "nanohype", defaults()); err == nil {
+	if _, _, err := Audit(context.Background(), r, "nanohype", defaults()); err == nil {
 		t.Fatal("a failed org listing must be an error, not an empty clean report")
+	}
+}
+
+// A probe that did not answer must not be read as a negative answer.
+//
+// `gh` returns the same non-zero exit for a repository with no protection rule,
+// an unreachable API, an unauthenticated CLI and a rate limit. Reading every one
+// of them as "unprotected" filed an outage as NO_BRANCH_PROTECTION at HIGH — a
+// governance breach reported where nothing was read. Only the message separates
+// them, so the message is what gets read.
+func TestAuditDoesNotDeriveFindingsFromUnreadProbes(t *testing.T) {
+	unread := cloud.RepoSettings{
+		Name:       "portal",
+		DefaultRef: "main",
+		Unread: map[string]string{
+			"branch protection":           "dial tcp: connection refused",
+			"Dependabot alerts":           "dial tcp: connection refused",
+			"Dependabot security updates": "dial tcp: connection refused",
+		},
+	}
+	r := &fakeReader{
+		repos:    []string{"portal"},
+		settings: map[string]cloud.RepoSettings{"portal": unread},
+	}
+
+	got, recorded, err := Audit(context.Background(), r, "nanohype", defaults())
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+
+	for _, f := range got {
+		switch f.Type {
+		case cloud.RepoNoProtection, cloud.RepoAlertsDisabled, cloud.RepoSecurityUpdatesDisabled:
+			t.Errorf("a probe that did not answer produced %s, which asserts a setting is off "+
+				"when nothing read it: %+v", f.Type, f)
+		}
+	}
+
+	if len(recorded) != len(unread.Unread) {
+		t.Fatalf("recorded %d unread observations for %d failed probes: %v",
+			len(recorded), len(unread.Unread), recorded)
+	}
+	for _, entry := range recorded {
+		if !strings.Contains(entry, "connection refused") {
+			t.Errorf("the record does not carry what the tool said: %q", entry)
+		}
+	}
+}
+
+// The complement, and the reason the check above is not vacuous: a probe that
+// DID answer, negatively, still produces its finding.
+func TestAuditStillReportsAGenuinelyUnprotectedRepo(t *testing.T) {
+	r := &fakeReader{
+		repos: []string{"portal"},
+		settings: map[string]cloud.RepoSettings{
+			"portal": {Name: "portal", DefaultRef: "main", Protected: false},
+		},
+	}
+	got, recorded, err := Audit(context.Background(), r, "nanohype", defaults())
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(recorded) != 0 {
+		t.Errorf("a repository whose probes all answered reported %d unread: %v", len(recorded), recorded)
+	}
+	found := false
+	for _, f := range got {
+		if f.Type == cloud.RepoNoProtection {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a genuinely unprotected repository produced no NO_BRANCH_PROTECTION finding")
 	}
 }

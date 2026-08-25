@@ -56,6 +56,13 @@ type TemplateData struct {
 
 	ByDomain          map[string]int
 	OrphanMonthlyCost float64
+
+	// Incomplete lists what the scan was asked to observe and could not. It is
+	// rendered above the summary counts because those counts are only evidence
+	// when this is empty: a run denied half an account reports the same "0
+	// Findings" as a clean one, and this page is the surface aimed at the reader
+	// who will not open the JSON to check.
+	Incomplete []string
 }
 
 // DetectType detects the report type from JSON data.
@@ -115,6 +122,17 @@ func buildTemplateData(data []byte, reportType, version string) (*TemplateData, 
 		Version:     version,
 		ByDomain:    make(map[string]int),
 	}
+
+	// Every report envelope this renderer accepts carries `incomplete` at the top
+	// level — the domain writers in internal/output and audit.Report alike — so
+	// one decode serves all ten types and a new type inherits it.
+	var envelope struct {
+		Incomplete []string `json:"incomplete"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("parse report envelope: %w", err)
+	}
+	td.Incomplete = envelope.Incomplete
 
 	switch compare.ReportType(reportType) {
 	case compare.ReportTypeAudit:

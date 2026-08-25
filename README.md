@@ -472,14 +472,21 @@ cloudgov tags --standard-file resource-tagging.json --fail-on medium
 cloudgov tags --require owner,env --output json --output-file tags.json
 ```
 
-The required tag set comes from `--require` (ad-hoc) or `--standard-file` (the required AWS keys of a [nanohype resource-tagging standard](https://github.com/nanohype/nanohype/blob/main/standards/resource-tagging.json) JSON — `content.required_by_surface.aws`). `--require` wins when both are set. Pair with the global `--fail-on medium` to gate CI (all findings are MEDIUM, so `--fail-on medium` exits non-zero on any missing required tag).
+The tag policy comes from `--require` (ad-hoc) or `--standard-file` (a [nanohype resource-tagging standard](https://github.com/nanohype/nanohype/blob/main/standards/resource-tagging.json) JSON). `--require` wins when both are set. Pair with the global `--fail-on medium` to gate CI (all findings are MEDIUM, so `--fail-on medium` exits non-zero on any missing required tag).
+
+`--standard-file` reads both tiers the standard declares, and only it can: a rule that applies to some resource kinds and not others is not expressible as a list of keys.
+
+- **Required** (`content.required_by_surface.aws`) — the keys every resource carries.
+- **Conditional** (`content.conditional_requirements`) — keys required only on certain kinds. The standard declares one: `BackupPolicy`, required on backup-eligible resources. A resource carrying all ten required keys and no `BackupPolicy` is never selected by the tag-matching backup plan, and nothing errors until a restore is attempted — so it is flagged here.
+
+A conditional rule naming a kind cloudgov does not enumerate is reported as an incomplete observation rather than dropped, so the run states the coverage it has rather than the coverage the standard asks for. Aurora and EFS are in that position: there is no EFS auditor, and the RDS auditor paginates `DescribeDBInstances`, which does not return Aurora clusters. Run the command to see which kinds the standard you point it at leave unenforceable.
 
 **Flags**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--require` | | Comma-separated tag keys that must be present |
-| `--standard-file` | | Path to a resource-tagging standard JSON; gates on its required AWS keys |
+| `--standard-file` | | Path to a resource-tagging standard JSON; gates on its required keys and conditional rules |
 | `--severity` | `MEDIUM` | Minimum severity to report |
 | `--output` | `table` | Output format: `table`, `json` |
 | `--output-file` | | Write output to file instead of stdout |
@@ -828,6 +835,104 @@ cloudgov compare --from monday-scan.json --to friday-scan.json --output json
 
 ---
 
+### `cloudgov platform audit` — nanohype Platform-tenant conformance
+
+Audits every `Platform` CR in a cluster against the eks-agent-platform contract:
+the tenant namespace and its restricted Pod Security Standards label, the
+ResourceQuota and LimitRange, the default-deny `tenant-egress` policy (as a
+NetworkPolicy or a CiliumNetworkPolicy, whichever the cluster's network engine
+uses), the tenant ServiceAccount and the EKS Pod Identity association that binds
+it, and the tenant IAM role's trust policy and generated inline policies.
+
+The cluster half needs a kubeconfig; the tenant-role and Pod Identity half needs
+AWS credentials. Absent AWS credentials do not fail the run — the cluster-side
+checks still execute — but they are recorded as an incomplete observation,
+because skipping a class of conformance checks is not the same as passing them.
+Any check the run could not perform lands the same way, so a tenant nobody was
+allowed to inspect never reads as a tenant that conforms.
+
+```sh
+# Audit every Platform in the current context
+cloudgov platform audit
+
+# A specific cluster, gating a merge on real breaches
+cloudgov platform audit --kubeconfig /path/to/kubeconfig --fail-on HIGH
+
+# SARIF for GitHub Advanced Security
+cloudgov platform audit --output sarif --output-file platform.sarif
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--kubeconfig` | (chain) | Path to kubeconfig file |
+| `--severity` | `LOW` | Minimum severity to report |
+| `--output` | `table` | Output format: `table`, `json`, `sarif` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
+### `cloudgov repo audit` — GitHub repository settings
+
+Branch protection, required status checks and Dependabot state live only in
+GitHub, so no gate inside a repository can observe them: a repository can carry a
+full CI matrix, a protection rule that requires none of it, and nothing anywhere
+says so. This compares an organization's repositories against the committed
+`expected-repo-settings.yaml` and reports the differences. It never changes a
+setting.
+
+Reads through the `gh` CLI, so it uses whatever credentials `gh auth status`
+reports. `--org` is required: a default would not save a keystroke, it would pick
+a target.
+
+```sh
+# Audit an organization against the committed expected shape
+cloudgov repo audit --org my-org
+
+# A different expected shape
+cloudgov repo audit --org my-org --expected ./ci/repo-settings.yaml
+
+# JSON for a dashboard
+cloudgov repo audit --org my-org --output json --output-file repos.json
+```
+
+**Flags**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--org` | (required) | GitHub organization to audit |
+| `--expected` | `expected-repo-settings.yaml` | Path to the committed expected settings |
+| `--severity` | `LOW` | Minimum severity to report |
+| `--output` | `table` | Output format: `table`, `json` |
+| `--output-file` | | Write output to file instead of stdout |
+
+---
+
+### `cloudgov mcp` — serve the scanners to an AI agent
+
+Runs cloudgov as a Model Context Protocol server over stdio, exposing each
+scanner as a tool that returns the same JSON report the CLI emits with
+`--output json`. Register it once:
+
+```sh
+claude mcp add --transport stdio cloudgov -- cloudgov mcp
+```
+
+The server is read-only and takes no flags — credentials resolve through the same
+AWS SDK and kubeconfig chains the CLI uses. There is no exit code over MCP, so
+the `incomplete` array in each response is the only carrier of "this scan could
+not see everything it was asked to".
+
+One parameter is narrower than its CLI equivalent: a `kubeconfig` path supplied
+through a tool call may not authenticate by running an exec credential plugin,
+because the plugin's command line comes from the file and a tool argument must
+not choose which binary runs. Omit it to use the server's own kubeconfig chain.
+
+See [AGENTS.md](AGENTS.md) for the full tool table and parameters.
+
+---
+
 ### `cloudgov report` — generate HTML executive summary
 
 Generates a standalone, self-contained HTML report from any JSON scan output. Includes summary cards, severity breakdown, domain-specific tables, and client-side table sorting. Supports light and dark mode via `prefers-color-scheme`.
@@ -911,13 +1016,18 @@ Exit `3` exists because `0` gets read as evidence *for* approval. A denied
 dropped, so a scan run with partial permissions has to be distinguishable from
 one that found nothing.
 
-**Every command that reads a cloud account honours this** — `audit`, `iam scan`,
-`storage audit`, `network audit`, `certs`, `tags`, `secrets scan`, `orphans`,
-`quota`, `inventory`, `cost diff`, `drift`, `lambda audit`, and
-`platform audit`. Commands that read no cloud account (`compare`, `report`,
-`baseline`, `remediate`, `compliance`, `repo audit`) exit `0`/`1`/`2` only, as
-does `k8s rbac` — the Kubernetes client reports errors rather than partial
-observations.
+**Every command that can observe less than it was asked to honours this** —
+`audit`, `iam scan`, `storage audit`, `network audit`, `certs`, `tags`,
+`secrets scan`, `orphans`, `quota`, `inventory`, `cost diff`, `drift`,
+`lambda audit`, `platform audit`, `repo audit` and `compliance`. The last two
+read no cloud account and still qualify: `repo audit` reports a GitHub probe that
+did not answer, and `compliance` carries forward whatever the scan reports it
+loads could not read, because a control evaluated over a partial account is not
+an evaluated control.
+
+Commands that read no cloud account (`compare`, `report`, `baseline`,
+`remediate`) exit `0`/`1`/`2` only, as does `k8s rbac` — its two reads return an
+error rather than a short list, so there is no partial state to report.
 
 ---
 

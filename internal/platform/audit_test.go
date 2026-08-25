@@ -9,12 +9,14 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -239,7 +241,7 @@ func conformantRole() fakeRoles {
 
 func TestAudit_Conformant(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	findings, err := Audit(context.Background(), typed, conformantDyn(), conformantRole())
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), conformantRole())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +259,7 @@ func TestAudit_DriftDetected(t *testing.T) {
 		&corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: defaultName, Namespace: tNS}},
 		&corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: defaultName, Namespace: tNS}},
 	)
-	findings, err := Audit(context.Background(), typed, conformantDyn(), nil)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +277,7 @@ func TestAudit_DriftDetected(t *testing.T) {
 
 func TestAudit_NamespaceMissing(t *testing.T) {
 	typed := kubefake.NewSimpleClientset()
-	findings, err := Audit(context.Background(), typed, conformantDyn(), nil)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +288,7 @@ func TestAudit_NamespaceMissing(t *testing.T) {
 
 func TestAudit_NotReadySkipsResourceChecks(t *testing.T) {
 	typed := kubefake.NewSimpleClientset()
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Pending", []string{"anthropic"}), budgetCR(true), tenantCR(false, false)), nil)
+	findings, _, err := Audit(context.Background(), typed, dynClient(platformCR("Pending", []string{"anthropic"}), budgetCR(true), tenantCR(false, false)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +303,7 @@ func TestAudit_NotReadySkipsResourceChecks(t *testing.T) {
 
 func TestAudit_IdentityInvalid(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", nil), budgetCR(true), tenantCR(false, false)), nil)
+	findings, _, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", nil), budgetCR(true), tenantCR(false, false)), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +314,7 @@ func TestAudit_IdentityInvalid(t *testing.T) {
 
 func TestAudit_TenantRoleMissing(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
-	findings, err := Audit(context.Background(), typed, conformantDyn(), fakeRoles{info: nil})
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), fakeRoles{info: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,7 +340,7 @@ func TestAudit_RetiredIRSAWiringIsTheDrift(t *testing.T) {
 	role.info.TrustPolicyDocument = `{"Statement":[{"Action":"sts:AssumeRoleWithWebIdentity","Effect":"Allow","Condition":{"StringEquals":{"oidc:sub":"system:serviceaccount:tenants-app1:tenant-runtime"}}}]}`
 	role.info.InlinePolicyNames = nil
 
-	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +372,7 @@ func TestAudit_ConformantInlinePoliciesAreNotFlagged(t *testing.T) {
 		"tenant-secrets", "tenant-key-access",
 	}
 
-	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +386,7 @@ func TestAudit_HandAttachedInlinePolicy(t *testing.T) {
 	role := conformantRole()
 	role.info.InlinePolicyNames = append(role.info.InlinePolicyNames, "ops-hotfix-s3")
 
-	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +414,7 @@ func TestAudit_SuspendedRoleSkipsInlineChecks(t *testing.T) {
 	role.info.InlinePolicyNames = nil
 	role.info.AttachedPolicyARNs = nil
 
-	findings, err := Audit(context.Background(), typed, dynClient(cr, budgetCR(true), tenantCR(false, false)), role)
+	findings, _, err := Audit(context.Background(), typed, dynClient(cr, budgetCR(true), tenantCR(false, false)), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -430,7 +432,7 @@ func TestAudit_PodIdentityAssociationMissing(t *testing.T) {
 	role := conformantRole()
 	role.assoc = nil // nothing binds the ServiceAccount
 
-	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,7 +453,7 @@ func TestAudit_PodIdentityAssociationMismatch(t *testing.T) {
 		RoleARN: foreign, Namespace: tNS, ServiceAccount: defaultSAName,
 	}
 
-	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +482,7 @@ func TestAudit_VClusterWithoutPublishedBinding(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	dyn := dynClient(vclusterPlatformCR(), budgetCR(true), tenantCR(false, false))
 
-	findings, err := Audit(context.Background(), typed, dyn, conformantRole())
+	findings, _, err := Audit(context.Background(), typed, dyn, conformantRole())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +502,7 @@ func TestAudit_AssociationProbeFailureIsNotClean(t *testing.T) {
 	role := conformantRole()
 	role.assocErr = errors.New("AccessDenied")
 
-	findings, err := Audit(context.Background(), typed, conformantDyn(), role)
+	findings, _, err := Audit(context.Background(), typed, conformantDyn(), role)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +517,7 @@ func TestAudit_AssociationProbeFailureIsNotClean(t *testing.T) {
 func TestAudit_BudgetMissing(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	// Platform references tBudget and tTen, but no BudgetPolicy/Tenant exist.
-	findings, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), nil)
+	findings, _, err := Audit(context.Background(), typed, dynClient(platformCR("Ready", []string{"anthropic"})), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +534,7 @@ func TestAudit_KillSwitchDisabled(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	// SOC2 platform whose BudgetPolicy has the kill-switch off; Tenant also SOC2.
 	dyn := dynClient(platformCRCompliance(true, false), budgetCR(false), tenantCR(true, false))
-	findings, err := Audit(context.Background(), typed, dyn, nil)
+	findings, _, err := Audit(context.Background(), typed, dyn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -549,7 +551,7 @@ func TestAudit_HipaaRouteInheritingBaselineIsAFinding(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	dyn := dynClient(platformCRCompliance(true, true), budgetCR(true), tenantCR(true, true))
 	addGateways(t, dyn, gatewayCR("gw", tName, "", map[string]string{"review": ""}))
-	findings, err := Audit(context.Background(), typed, dyn, nil)
+	findings, _, err := Audit(context.Background(), typed, dyn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -571,7 +573,7 @@ func TestAudit_HipaaGuardrailSatisfiedByEitherRef(t *testing.T) {
 			typed := kubefake.NewSimpleClientset(conformantObjects()...)
 			dyn := dynClient(platformCRCompliance(true, true), budgetCR(true), tenantCR(true, true))
 			addGateways(t, dyn, gatewayCR("gw", tName, tc.defaultRef, tc.routes))
-			findings, err := Audit(context.Background(), typed, dyn, nil)
+			findings, _, err := Audit(context.Background(), typed, dyn, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -588,7 +590,7 @@ func TestAudit_NonHipaaRouteMayInheritBaseline(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	dyn := dynClient(platformCRCompliance(true, false), budgetCR(true), tenantCR(true, false))
 	addGateways(t, dyn, gatewayCR("gw", tName, "", map[string]string{"review": ""}))
-	findings, err := Audit(context.Background(), typed, dyn, nil)
+	findings, _, err := Audit(context.Background(), typed, dyn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +607,7 @@ func TestAudit_HipaaIgnoresAnotherPlatformsGateway(t *testing.T) {
 	addGateways(t, dyn,
 		gatewayCR("gw-self", tName, "phi-guardrail", map[string]string{"review": ""}),
 		gatewayCR("gw-other", "some-other-platform", "", map[string]string{"unguarded": ""}))
-	findings, err := Audit(context.Background(), typed, dyn, nil)
+	findings, _, err := Audit(context.Background(), typed, dyn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +620,7 @@ func TestAudit_ComplianceWeakerThanTenant(t *testing.T) {
 	typed := kubefake.NewSimpleClientset(conformantObjects()...)
 	// Tenant requires SOC2; Platform does not set it.
 	dyn := dynClient(platformCRCompliance(false, false), budgetCR(true), tenantCR(true, false))
-	findings, err := Audit(context.Background(), typed, dyn, nil)
+	findings, _, err := Audit(context.Background(), typed, dyn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +738,7 @@ func TestAuditNetworkPolicyCiliumEngine(t *testing.T) {
 			if tc.cnp != nil {
 				objs = append(objs, tc.cnp)
 			}
-			got := auditNetworkPolicy(context.Background(), typed, dynClient(objs...), tNS, f)
+			got := auditNetworkPolicy(context.Background(), typed, dynClient(objs...), tNS, f, func(string, error) {})
 
 			if tc.wantOK {
 				if len(got) != 0 {
@@ -751,5 +753,106 @@ func TestAuditNetworkPolicyCiliumEngine(t *testing.T) {
 				t.Errorf("got %s/%s, want %s/%s", got[0].Severity, got[0].Type, tc.wantSev, tc.wantTyp)
 			}
 		})
+	}
+}
+
+// denyReads makes every listed verb+resource pair fail with a permission error,
+// which is what a scan run under a narrower role than the auditor needs looks
+// like from inside client-go.
+func denyReads(c *kubefake.Clientset, resources ...string) {
+	for _, r := range resources {
+		c.PrependReactor("get", r, func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: r}, defaultName,
+				errors.New("cloudgov-auditor cannot get resource"))
+		})
+	}
+}
+
+func hasSubstring(entries []string, want string) bool {
+	for _, e := range entries {
+		if strings.Contains(e, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// The defect this guards: a probe that could not read its object returned no
+// finding, so a tenant nobody was allowed to inspect rendered identically to a
+// tenant that conforms. Each denied read now has to appear in the incomplete
+// list, which survives the severity filter every caller applies to findings.
+func TestAudit_DeniedProbesAreIncompleteNotClean(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		resources []string
+		want      string
+	}{
+		{"egress containment", []string{"networkpolicies"}, "NetworkPolicy could not be read"},
+		{"pod identity binding", []string{"serviceaccounts"}, "ServiceAccount could not be read"},
+		{"resource quota", []string{"resourcequotas"}, "ResourceQuota could not be read"},
+		{"limit range", []string{"limitranges"}, "LimitRange could not be read"},
+		{"the namespace itself", []string{"namespaces"}, "namespace could not be read"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			typed := kubefake.NewSimpleClientset(conformantObjects()...)
+			denyReads(typed, tc.resources...)
+
+			_, incomplete, err := Audit(context.Background(), typed, conformantDyn(), conformantRole())
+			if err != nil {
+				t.Fatalf("Audit: %v", err)
+			}
+			if !hasSubstring(incomplete, tc.want) {
+				t.Fatalf("a denied read produced no incomplete record; want one containing %q, got %v", tc.want, incomplete)
+			}
+		})
+	}
+}
+
+// A denied IAM read is the AWS-side half of the same defect: it was reported only
+// as an INFO finding, and INFO ranks below the LOW floor every caller defaults to,
+// so the record was deleted exactly where it mattered.
+func TestAudit_DeniedIdentityReadsAreIncomplete(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	roles := fakeRoles{
+		err:      errors.New("AccessDenied: not authorized to perform iam:GetRole"),
+		assocErr: errors.New("AccessDenied: not authorized to perform eks:DescribePodIdentityAssociation"),
+	}
+
+	_, incomplete, err := Audit(context.Background(), typed, conformantDyn(), roles)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if !hasSubstring(incomplete, "IAM role") {
+		t.Errorf("denied iam:GetRole produced no incomplete record: %v", incomplete)
+	}
+	if !hasSubstring(incomplete, "Pod Identity association") {
+		t.Errorf("denied Pod Identity read produced no incomplete record: %v", incomplete)
+	}
+}
+
+// A Platform still provisioning has a whole class of checks skipped, which is not
+// the same as passing them.
+func TestAudit_SkippedPhaseChecksAreIncomplete(t *testing.T) {
+	typed := kubefake.NewSimpleClientset()
+	_, incomplete, err := Audit(context.Background(), typed,
+		dynClient(platformCR("Pending", []string{"anthropic"}), budgetCR(true), tenantCR(false, false)), nil)
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if !hasSubstring(incomplete, "namespace conformance was not checked") {
+		t.Fatalf("a Pending platform reported no skipped checks: %v", incomplete)
+	}
+}
+
+// The complement, and the reason the checks above are not vacuous: a run that
+// read everything reports nothing incomplete.
+func TestAudit_ConformantRunReportsNothingIncomplete(t *testing.T) {
+	typed := kubefake.NewSimpleClientset(conformantObjects()...)
+	_, incomplete, err := Audit(context.Background(), typed, conformantDyn(), conformantRole())
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(incomplete) != 0 {
+		t.Fatalf("a fully observed conformant platform reported %d incomplete entries: %v", len(incomplete), incomplete)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
 	"github.com/nanohype/cloudgov/internal/providers"
 	"github.com/spf13/cobra"
 )
@@ -29,6 +30,21 @@ var regions []string
 // providers. Commands resolve through this rather than assembling the list
 // themselves, so a run-scoped flag reaches every command by construction — a
 // scan that silently missed one would report a narrower account than it read.
+// awsProviderOptions is the same set for the two places that must construct the
+// AWS provider directly rather than resolving by capability: the Platform
+// auditor and its MCP handler need a concrete *cloudaws.Provider to read tenant
+// IAM, which the capability interfaces do not express.
+//
+// It exists so those two are not the exception to the sentence above. They were:
+// both called cloudaws.New with at most WithQuiet, so `--regions` was accepted,
+// documented and silently ignored by `platform audit`.
+func awsProviderOptions(extra ...cloudaws.Option) []cloudaws.Option {
+	return append([]cloudaws.Option{
+		cloudaws.WithQuiet(quiet),
+		cloudaws.WithRegions(regions),
+	}, extra...)
+}
+
 func providerOptions(extra ...providers.Option) []providers.Option {
 	return append([]providers.Option{
 		providers.WithQuiet(quiet),
@@ -46,9 +62,19 @@ drift, full audit), and operational visibility (inventory, quotas,
 baselines, diffs, reports).`,
 	SilenceUsage: true,
 	// Reset run-scoped state before every command so the tree is safe to drive
-	// repeatedly in one process (MCP server / agent loops).
-	PersistentPreRun: func(cmd *cobra.Command, _ []string) {
+	// repeatedly in one process, and refuse a --fail-on this tool cannot rank.
+	PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		resetRunState(cmd)
+
+		// An unrecognised threshold does not fail loudly, it ranks 0 — below
+		// every real level — so `--fail-on HIHG` sets the bar at nothing and the
+		// first INFO finding exits 2. A gate that fails for a reason nobody
+		// intended teaches its operator to stop believing it, which costs more
+		// than the typo.
+		if _, err := resolveSeverity(failOn, ""); err != nil {
+			return fmt.Errorf("--fail-on: %w", err)
+		}
+		return nil
 	},
 }
 
@@ -68,7 +94,8 @@ func Execute() {
 func init() {
 	rootCmd.Version = fmt.Sprintf("%s (commit %s, built %s)", Version, Commit, BuildDate)
 	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "suppress progress and summary output to stderr")
-	rootCmd.PersistentFlags().StringVar(&failOn, "fail-on", "", "exit with code 2 if any finding is at or above this severity (CRITICAL, HIGH, MEDIUM, LOW)")
+	rootCmd.PersistentFlags().StringVar(&failOn, "fail-on", "",
+		"exit with code 2 if any finding is at or above this "+severityUsage("severity"))
 	rootCmd.PersistentFlags().StringSliceVar(&regions, "regions", nil, "regions to scan for regional resources (default: every region enabled for the account)")
 	rootCmd.AddCommand(auditCmd)
 	rootCmd.AddCommand(iamCmd)

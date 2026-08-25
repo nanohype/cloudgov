@@ -218,3 +218,57 @@ func TestCompliance_UnevaluatedIsNotPassed(t *testing.T) {
 		})
 	}
 }
+
+// gate refuses a threshold it cannot rank rather than ranking it at zero.
+//
+// The root PersistentPreRunE already validates --fail-on, so on every ordinary
+// path this branch is unreachable. It exists because the gate is the last place
+// to trust an upstream check: ranking an unvalidated string would put the
+// threshold at 0, below every real level, and the first INFO finding would exit
+// 2 for a reason nobody intended. A gate that fails wrongly teaches its operator
+// to stop believing it.
+func TestGateRefusesAnUnrankableThreshold(t *testing.T) {
+	type item struct{ sev cloud.Severity }
+	sev := func(i item) cloud.Severity { return i.sev }
+	items := []item{{cloud.SeverityInfo}}
+
+	// Both package globals are restored, not just the one each case sets. The
+	// pre-existing cases in this file set exitCode before reading it, so a case
+	// that leaves it dirty is invisible until test order changes — which is
+	// exactly the failure `go test -shuffle` exists to surface, and exactly the
+	// convention a new test should not quietly break.
+	restore := func() func() {
+		savedExit, savedFailOn := exitCode, failOn
+		return func() { exitCode, failOn = savedExit, savedFailOn }
+	}
+
+	t.Run("unrankable threshold does not trip the gate", func(t *testing.T) {
+		defer restore()()
+		exitCode = 0
+		failOn = "HIHG"
+		gate(items, sev)
+		if exitCode != 0 {
+			t.Errorf("exit code = %d; an unrankable threshold must not trip the gate on an INFO finding", exitCode)
+		}
+	})
+
+	t.Run("a real threshold still trips it", func(t *testing.T) {
+		defer restore()()
+		exitCode = 0
+		failOn = "INFO"
+		gate(items, sev)
+		if exitCode != 2 {
+			t.Errorf("exit code = %d, want 2 — an INFO finding at an INFO threshold", exitCode)
+		}
+	})
+
+	t.Run("a threshold above the findings does not", func(t *testing.T) {
+		defer restore()()
+		exitCode = 0
+		failOn = "HIGH"
+		gate(items, sev)
+		if exitCode != 0 {
+			t.Errorf("exit code = %d; an INFO finding is below a HIGH threshold", exitCode)
+		}
+	})
+}

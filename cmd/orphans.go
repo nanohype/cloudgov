@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
@@ -27,11 +26,17 @@ var (
 
 func init() {
 	orphansCmd.Flags().Float64Var(&orphanMinCost, "min-cost", 0, "only report orphans with monthly cost above this threshold (USD)")
-	orphansCmd.Flags().StringVar(&orphanOutputFmt, "output", "table", "output format: table, json")
+	orphansCmd.Flags().StringVar(&orphanOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	orphansCmd.Flags().StringVar(&orphanOutputFile, "output-file", "", "write output to file")
 }
 
 func runOrphans(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	orphanFormat, err := tableJSON.resolve(orphanOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveOrphansProviders(ctx)
 	if err != nil {
@@ -58,7 +63,7 @@ func runOrphans(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(orphanOutputFmt) {
+	switch orphanFormat {
 	case "json":
 		return output.WriteOrphans(w, orphans, incomplete)
 	default:

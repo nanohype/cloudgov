@@ -129,7 +129,7 @@ type complianceInput struct {
 }
 
 type repoInput struct {
-	Org      string `json:"org,omitempty" jsonschema:"GitHub organization (default nanohype)"`
+	Org      string `json:"org" jsonschema:"GitHub organization to audit; required, and there is no default"`
 	Expected string `json:"expected,omitempty" jsonschema:"path to the expected-repo-settings YAML (default expected-repo-settings.yaml)"`
 	Severity string `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 }
@@ -140,13 +140,17 @@ type repoInput struct {
 func registerMCPTools(s *mcp.Server) {
 	mcp.AddTool(s, &mcp.Tool{Name: "iam_scan", Description: "Scan AWS IAM principals for unused, admin, wildcard-resource, and cross-account risk."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in iamInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveIAMProviders(ctx, in.Profile)
 			if err != nil {
 				return nil, nil, err
 			}
 			res, err := iam.Scan(ctx, providers[0], iam.ScanOptions{
 				Days:        orDefault(in.Days, 90),
-				MinSeverity: mcpSeverity(in.Severity),
+				MinSeverity: minSeverity,
 				Concurrency: 10,
 			})
 			if err != nil {
@@ -154,17 +158,21 @@ func registerMCPTools(s *mcp.Server) {
 			}
 			incomplete := append(res.Incomplete, cloud.Incomplete(providers)...)
 			return jsonResult(func(w io.Writer) error {
-				return output.WriteIAM(w, res.Findings, res.Principals, res.UsedPermissions, incomplete)
+				return output.WriteIAM(w, res.Findings, res.Principals, res.Scanned, res.UsedPermissions, incomplete)
 			})
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "storage_audit", Description: "Audit S3 buckets for public access, missing encryption, versioning, and logging."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveStorageProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := storage.Scan(ctx, providers, storage.ScanOptions{MinSeverity: mcpSeverity(in.Severity)})
+			findings, err := storage.Scan(ctx, providers, storage.ScanOptions{MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -174,11 +182,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "network_audit", Description: "Audit security groups for overly permissive ingress/egress rules."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveNetworkProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := network.Scan(ctx, providers, network.ScanOptions{MinSeverity: mcpSeverity(in.Severity)})
+			findings, err := network.Scan(ctx, providers, network.ScanOptions{MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -188,11 +200,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "certs", Description: "List TLS certificates (ACM) expiring within a threshold."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in certsInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveCertProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := certs.Scan(ctx, providers, certs.ScanOptions{MinSeverity: mcpSeverity(in.Severity), Days: orDefault(in.Days, 90)})
+			findings, err := certs.Scan(ctx, providers, certs.ScanOptions{MinSeverity: minSeverity, Days: orDefault(in.Days, 90)})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -202,11 +218,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "tags", Description: "Find AWS resources missing required tags."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in tagsInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveTagProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := tags.Scan(ctx, providers, tags.ScanOptions{MinSeverity: mcpSeverity(in.Severity), Required: in.Required})
+			findings, err := tags.Scan(ctx, providers, tags.ScanOptions{MinSeverity: minSeverity, Rules: cloud.RequiredOnly(in.Required...)})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -216,11 +236,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "secrets_scan", Description: "Scan AWS runtime config (Lambda env, ECS task defs, EC2 user data) for embedded secrets, including leaked third-party cloud credentials."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveSecretsProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings, err := secrets.ScanProviders(ctx, providers, secrets.ScanOptions{MinSeverity: mcpSeverity(in.Severity)})
+			findings, err := secrets.ScanProviders(ctx, providers, secrets.ScanOptions{MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -272,11 +296,15 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "cost_diff", Description: "Compare AWS spend between two time windows and surface per-service deltas."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in costInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveCostProviders(ctx)
 			if err != nil {
 				return nil, nil, err
 			}
-			diffs, err := cost.Scan(ctx, providers, cost.ScanOptions{Days: orDefault(in.Days, 30), Threshold: in.Threshold, MinSeverity: mcpSeverity(in.Severity)})
+			diffs, err := cost.Scan(ctx, providers, cost.ScanOptions{Days: orDefault(in.Days, 30), Threshold: in.Threshold, MinSeverity: minSeverity})
 			if err != nil {
 				return nil, nil, err
 			}
@@ -298,12 +326,16 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			incomplete := cloud.Incomplete(providers)
+			incomplete := append(cloud.Incomplete(providers), drift.Incomplete(results)...)
 			return jsonResult(func(w io.Writer) error { return output.WriteDrift(w, results, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "audit", Description: "Run the full security + cost audit (IAM, storage, network, orphans, certs, tags, secrets) in one shot."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in auditInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := buildAuditProviders(ctx)
 			if err != nil {
 				return nil, nil, err
@@ -313,13 +345,13 @@ func registerMCPTools(s *mcp.Server) {
 				skip[strings.ToLower(d)] = true
 			}
 			report, err := audit.Run(ctx, providers, audit.Options{
-				Skip:         skip,
-				MinSeverity:  mcpSeverity(in.Severity),
-				IAMDays:      orDefault(in.IAMDays, 90),
-				CertDays:     orDefault(in.CertDays, 90),
-				RequiredTags: in.RequiredTags,
-				Concurrency:  10,
-				Quiet:        true,
+				Skip:        skip,
+				MinSeverity: minSeverity,
+				IAMDays:     orDefault(in.IAMDays, 90),
+				CertDays:    orDefault(in.CertDays, 90),
+				TagRules:    cloud.RequiredOnly(in.RequiredTags...),
+				Concurrency: 10,
+				Quiet:       true,
 			})
 			if err != nil {
 				return nil, nil, err
@@ -329,7 +361,11 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "k8s_rbac", Description: "Scan cluster-scoped Kubernetes RBAC for over-privileged ClusterRoles and broad bindings."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
-			p, err := cloudk8s.New(ctx, in.Kubeconfig)
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
+			p, err := cloudk8s.New(ctx, in.Kubeconfig, mcpClusterOptions(in.Kubeconfig)...)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -337,12 +373,16 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings = filterK8sBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
-			return jsonResult(func(w io.Writer) error { return output.WriteK8sFindings(w, findings) })
+			findings = filterK8sBySeverity(findings, minSeverity)
+			return jsonResult(func(w io.Writer) error { return output.WriteK8sFindings(w, findings, nil) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "lambda_audit", Description: "Audit AWS Lambda resource-based policies for public-invoke and confused-deputy risk."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in severityInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			providers, err := resolveLambdaPolicyProviders(ctx)
 			if err != nil {
 				return nil, nil, err
@@ -355,16 +395,26 @@ func registerMCPTools(s *mcp.Server) {
 				}
 				findings = append(findings, found...)
 			}
-			findings = filterLambdaBySeverity(findings, mcpSeverity(in.Severity))
+			findings = filterLambdaBySeverity(findings, minSeverity)
 			incomplete := cloud.Incomplete(providers)
 			return jsonResult(func(w io.Writer) error { return output.WriteLambdaPolicy(w, findings, incomplete) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "repo_audit", Description: "Audit GitHub branch protection, required checks and Dependabot state against the committed expected shape."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in repoInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
+			// No default. A compiled-in organization makes a call with no
+			// argument sweep repositories the caller does not own and report
+			// findings about them — and over MCP the caller is a model that has
+			// no way to know a default was applied. The CLI flag carries the same
+			// rule; a tool schema is the surface where a default is hardest to
+			// see, not the one where it is safest.
 			org := in.Org
 			if org == "" {
-				org = "nanohype"
+				return nil, nil, fmt.Errorf("org is required: name the GitHub organization to audit")
 			}
 			expectedPath := in.Expected
 			if expectedPath == "" {
@@ -378,18 +428,18 @@ func registerMCPTools(s *mcp.Server) {
 			if err := yaml.Unmarshal(raw, &exp); err != nil {
 				return nil, nil, fmt.Errorf("parse %s: %w", expectedPath, err)
 			}
-			findings, err := repo.Audit(ctx, repo.NewGHReader(), org, exp)
+			findings, unread, err := repo.Audit(ctx, repo.NewGHReader(), org, exp)
 			if err != nil {
 				return nil, nil, err
 			}
-			minRank := cloud.SeverityRank(mcpSeverity(in.Severity))
+			minRank := cloud.SeverityRank(minSeverity)
 			var kept []cloud.RepoFinding
 			for _, f := range findings {
 				if cloud.SeverityRank(f.Severity) >= minRank {
 					kept = append(kept, f)
 				}
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteRepo(w, kept) })
+			return jsonResult(func(w io.Writer) error { return output.WriteRepo(w, kept, unread) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "compliance", Description: "Map prior scan JSON reports to a compliance benchmark (cis-aws-v3 or soc2)."},
@@ -399,31 +449,37 @@ func registerMCPTools(s *mcp.Server) {
 				return nil, nil, fmt.Errorf("unknown benchmark %q; available: %s", in.Benchmark, strings.Join(compliance.AvailableBenchmarks(), ", "))
 			}
 			var input compliance.InputFindings
-			if err := loadComplianceReports(in, &input); err != nil {
+			unread, err := loadComplianceReports(in, &input)
+			if err != nil {
 				return nil, nil, err
 			}
 			report := compliance.Evaluate(benchmark, input)
+			report.Incomplete = unread
 			return jsonResult(func(w io.Writer) error { return output.WriteCompliance(w, report) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "platform_audit", Description: "Audit nanohype Platform tenants for conformance to the eks-agent-platform contract: namespace + PSS, ResourceQuota, tenant-egress NetworkPolicy, and the tenant role + EKS Pod Identity binding."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
-			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig)
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
+			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig, mcpClusterOptions(in.Kubeconfig)...)
 			if err != nil {
 				return nil, nil, err
 			}
 			var roles platform.IdentityReader
 			var awsProviders []*cloudaws.Provider
-			if awsP, aerr := cloudaws.New(ctx); aerr == nil && awsP.Detect(ctx) {
+			if awsP, aerr := cloudaws.New(ctx, awsProviderOptions()...); aerr == nil && awsP.Detect(ctx) {
 				roles = awsP
 				awsProviders = append(awsProviders, awsP)
 			}
-			findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
+			findings, unread, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 			if err != nil {
 				return nil, nil, err
 			}
-			findings = filterPlatformBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
-			incomplete := cloud.Incomplete(awsProviders)
+			findings = filterPlatformBySeverity(findings, minSeverity)
+			incomplete := append(cloud.Incomplete(awsProviders), unread...)
 			if roles == nil {
 				incomplete = append(incomplete,
 					"AWS credentials not detected; tenant-role and Pod Identity conformance were not checked")
@@ -432,43 +488,66 @@ func registerMCPTools(s *mcp.Server) {
 		})
 }
 
-func loadComplianceReports(in complianceInput, input *compliance.InputFindings) error {
+// loadComplianceReports returns what the input scans could not read alongside
+// their findings.
+//
+// Over MCP there is no exit code, so the incomplete array is the only carrier a
+// caller has. A benchmark evaluated over a scan that was denied part of an
+// account, returned here as a clean verdict, is a claim the model has no way to
+// question.
+func loadComplianceReports(in complianceInput, input *compliance.InputFindings) ([]string, error) {
+	var unreadAll []string
 	if in.IAMReport != "" {
-		f, err := compliance.LoadIAMReport(in.IAMReport)
+		f, unread, err := compliance.LoadIAMReport(in.IAMReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.IAM = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "iam scan report: "+entry)
+		}
 	}
 	if in.StorageReport != "" {
-		f, err := compliance.LoadStorageReport(in.StorageReport)
+		f, unread, err := compliance.LoadStorageReport(in.StorageReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Storage = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "storage audit report: "+entry)
+		}
 	}
 	if in.NetworkReport != "" {
-		f, err := compliance.LoadNetworkReport(in.NetworkReport)
+		f, unread, err := compliance.LoadNetworkReport(in.NetworkReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Network = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "network audit report: "+entry)
+		}
 	}
 	if in.CertsReport != "" {
-		f, err := compliance.LoadCertsReport(in.CertsReport)
+		f, unread, err := compliance.LoadCertsReport(in.CertsReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Certs = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "certs report: "+entry)
+		}
 	}
 	if in.TagsReport != "" {
-		f, err := compliance.LoadTagsReport(in.TagsReport)
+		f, unread, err := compliance.LoadTagsReport(in.TagsReport)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		input.Tags = f
+		for _, entry := range unread {
+			unreadAll = append(unreadAll, "tags report: "+entry)
+		}
 	}
-	return nil
+	return unreadAll, nil
 }
 
 // jsonResult renders a report via one of the output.Write* funcs into a single
@@ -481,22 +560,17 @@ func jsonResult(write func(io.Writer) error) (*mcp.CallToolResult, any, error) {
 	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: buf.String()}}}, nil, nil
 }
 
-func mcpSeverity(s string) cloud.Severity {
-	if s == "" {
-		return cloud.SeverityLow
-	}
-	return cloud.Severity(strings.ToUpper(s))
+// resolveMCPSeverity resolves a tool's `severity` argument, defaulting to LOW.
+//
+// LOW is the documented default for every MCP tool, so it lives here rather than
+// at each call site: fourteen handlers each choosing their own fallback is
+// fourteen chances for one of them to differ from the table in AGENTS.md.
+func resolveMCPSeverity(s string) (cloud.Severity, error) {
+	return resolveSeverity(s, cloud.SeverityLow)
 }
 
 func orDefault(v, def int) int {
 	if v == 0 {
-		return def
-	}
-	return v
-}
-
-func orString(v, def string) string {
-	if v == "" {
 		return def
 	}
 	return v

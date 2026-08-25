@@ -41,8 +41,8 @@ var (
 
 func init() {
 	auditCmd.Flags().StringSliceVar(&auditSkip, "skip", []string{}, "domains to skip (iam,storage,network,orphans,certs,tags,secrets)")
-	auditCmd.Flags().StringVar(&auditSeverity, "severity", "LOW", "minimum severity to report")
-	auditCmd.Flags().StringVar(&auditOutputFmt, "output", "table", "output format: table, json, sarif")
+	auditCmd.Flags().StringVar(&auditSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
+	auditCmd.Flags().StringVar(&auditOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	auditCmd.Flags().StringVar(&auditOutputFile, "output-file", "", "write output to file")
 	auditCmd.Flags().IntVar(&auditIAMDays, "iam-days", 90, "IAM audit log lookback period in days")
 	auditCmd.Flags().IntVar(&auditCertDays, "cert-days", 90, "certificate expiry warning threshold in days")
@@ -55,6 +55,18 @@ func init() {
 }
 
 func runAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(auditSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	auditFormat, err := tableJSONSARIF.resolve(auditOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	skip := make(map[string]bool)
@@ -68,13 +80,13 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	report, err := audit.Run(ctx, providers, audit.Options{
-		Skip:         skip,
-		MinSeverity:  cloud.Severity(strings.ToUpper(auditSeverity)),
-		IAMDays:      auditIAMDays,
-		CertDays:     auditCertDays,
-		RequiredTags: auditRequiredTags,
-		Concurrency:  auditConcurrency,
-		Quiet:        quiet,
+		Skip:        skip,
+		MinSeverity: minSeverity,
+		IAMDays:     auditIAMDays,
+		CertDays:    auditCertDays,
+		TagRules:    cloud.RequiredOnly(auditRequiredTags...),
+		Concurrency: auditConcurrency,
+		Quiet:       quiet,
 	})
 	if err != nil {
 		return err
@@ -102,13 +114,13 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(auditOutputFmt) {
+	switch auditFormat {
 	case "json":
 		if err := output.WriteAudit(w, report); err != nil {
 			return err
 		}
 	case "sarif":
-		if err := output.WriteAuditSARIF(w, report, Version); err != nil {
+		if err := output.WriteAuditSARIF(w, report, Version, report.Incomplete); err != nil {
 			return err
 		}
 	default:
@@ -151,6 +163,11 @@ func auditDigest(r *audit.Report) sinks.Digest {
 		Low:           s.BySeverity["LOW"],
 		Info:          s.BySeverity["INFO"],
 		ReportURL:     auditReportURL,
+		// The scan's own coverage travels with its counts. A digest carrying
+		// zero findings from an account it could not read is the failure this
+		// record exists to prevent, delivered to the audience least able to
+		// check it.
+		Incomplete: r.Incomplete,
 	}
 	for domain, count := range s.ByDomain {
 		if count > 0 {
@@ -196,67 +213,21 @@ func digestProvider(r *audit.Report) string {
 	return "unknown"
 }
 
-// topAuditFindings returns up to n highest-severity findings across all
-// domains so sinks can surface concrete examples, not just counts.
+// topAuditFindings lifts concrete examples out of a report for a sink digest.
+//
+// The domain walk lives on audit.Report, beside the struct that defines the
+// domains, so a domain added there and not here is a change in one file rather
+// than an omission nothing surfaces.
 func topAuditFindings(r *audit.Report, n int) []sinks.Finding {
-	var all []sinks.Finding
-	for _, f := range r.IAM {
-		resource := ""
-		if f.Principal != nil {
-			resource = f.Principal.Name
-		}
-		all = append(all, sinks.Finding{
-			Severity: string(f.Severity), Type: string(f.Type),
-			Provider: f.Provider, Resource: resource, Detail: f.Detail,
+	examples := r.TopFindings(n)
+	out := make([]sinks.Finding, 0, len(examples))
+	for _, e := range examples {
+		out = append(out, sinks.Finding{
+			Severity: e.Severity, Type: e.Type,
+			Provider: e.Provider, Resource: e.Resource, Detail: e.Detail,
 		})
 	}
-	for _, f := range r.Storage {
-		all = append(all, sinks.Finding{
-			Severity: string(f.Severity), Type: string(f.Type),
-			Provider: f.Provider, Resource: f.Bucket, Detail: f.Detail,
-		})
-	}
-	for _, f := range r.Network {
-		all = append(all, sinks.Finding{
-			Severity: string(f.Severity), Type: string(f.Type),
-			Provider: f.Provider, Resource: f.Resource, Detail: f.Detail,
-		})
-	}
-	for _, f := range r.Secrets {
-		all = append(all, sinks.Finding{
-			Severity: string(f.Severity), Type: string(f.Type),
-			Provider: f.Provider, Resource: f.Resource, Detail: f.Detail,
-		})
-	}
-	sortFindingsBySeverity(all)
-	if len(all) > n {
-		all = all[:n]
-	}
-	return all
-}
-
-func sortFindingsBySeverity(fs []sinks.Finding) {
-	rank := func(s string) int {
-		switch strings.ToUpper(s) {
-		case "CRITICAL":
-			return 4
-		case "HIGH":
-			return 3
-		case "MEDIUM":
-			return 2
-		case "LOW":
-			return 1
-		default:
-			return 0
-		}
-	}
-	for i := 1; i < len(fs); i++ {
-		j := i
-		for j > 0 && rank(fs[j].Severity) > rank(fs[j-1].Severity) {
-			fs[j], fs[j-1] = fs[j-1], fs[j]
-			j--
-		}
-	}
+	return out
 }
 
 func buildAuditProviders(ctx context.Context) (audit.Providers, error) {

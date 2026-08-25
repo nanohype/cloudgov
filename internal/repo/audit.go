@@ -50,40 +50,61 @@ type Expected struct {
 }
 
 // Audit compares every repository in the org against the expected shape.
-func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.RepoFinding, error) {
+// Audit compares an organization's repositories against the committed expected
+// shape.
+//
+// The second return is the run's unread list: repositories the sweep was asked to
+// examine and could not. It is separate from the findings because it answers a
+// different question — a repository nobody could read is not a repository with a
+// governance gap, and reporting it as one hands a merge gate a breach that is
+// really an outage.
+func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.RepoFinding, []string, error) {
 	names, err := r.ListRepos(ctx, org)
 	if err != nil {
-		return nil, fmt.Errorf("list repos in %s: %w", org, err)
+		return nil, nil, fmt.Errorf("list repos in %s: %w", org, err)
 	}
 	sort.Strings(names)
 
 	var out []cloud.RepoFinding
+	var unread []string
 	for _, name := range names {
 		if _, ok := exp.Exempt[name]; ok {
 			continue
 		}
 		s, err := r.Settings(ctx, org, name)
 		if err != nil {
-			// A repo whose settings cannot be read is reported, never skipped.
-			// Skipping is how a sweep reports a clean org over repositories it
+			// A repo whose settings cannot be read is recorded, never skipped —
+			// skipping is how a sweep reports a clean org over repositories it
 			// never managed to look at.
-			out = append(out, cloud.RepoFinding{
-				Severity: cloud.SeverityHigh,
-				Type:     cloud.RepoNoProtection,
-				Repo:     name,
-				Detail:   fmt.Sprintf("settings could not be read: %v", err),
-				Remediation: "Re-run with a token carrying repo admin scope. An unreadable " +
-					"repository is reported rather than skipped, because a skipped one is " +
-					"indistinguishable from a compliant one.",
-			})
+			//
+			// It is recorded as UNREAD rather than as a finding, because an
+			// error from `gh` does not carry enough to name a cause: the same
+			// failure is returned for an unreachable API, an unauthenticated CLI,
+			// a rate limit, a deadline, and a token that genuinely lacks the
+			// scope. Filing it as a finding asserts one of those, which is a
+			// guess in the shape of a diagnosis and costs the operator a search
+			// that cannot succeed — and a merge gate reading NO_BRANCH_PROTECTION
+			// at HIGH sees a governance breach where there is an outage.
+			//
+			// So the tool's own distinction applies here as everywhere else: a
+			// thing it could not observe is not a thing it found. The message
+			// carries what gh actually said, and nothing else.
+			unread = append(unread, fmt.Sprintf("%s/%s: settings could not be read: %v", org, name, err))
 			continue
 		}
 		if s.Archived {
 			continue
 		}
+		// A probe that did not answer is recorded as unread rather than left to
+		// be read as "off" by the checks below. Every boolean on RepoSettings has
+		// a false that means the setting is disabled and, without this, a false
+		// that means the read failed.
+		for probe, reason := range s.Unread {
+			unread = append(unread, fmt.Sprintf("%s/%s: %s could not be read: %s", org, name, probe, reason))
+		}
 		out = append(out, auditOne(s, exp)...)
 	}
-	return out, nil
+	return out, unread, nil
 }
 
 func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {
@@ -104,6 +125,11 @@ func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {
 			"Either make the repository public, or upgrade the plan, or record in the "+
 				"ledger that this repository is permanently unprotected by choice. The one "+
 				"unacceptable outcome is leaving it unstated.")
+
+	case s.Unread["branch protection"] != "":
+		// The read failed, so `Protected` is a zero value rather than an answer.
+		// The unread record carries this; emitting NO_BRANCH_PROTECTION here
+		// would report a breach derived from a field nothing filled in.
 
 	case !s.Protected:
 		add(cloud.SeverityHigh, cloud.RepoNoProtection,
@@ -154,23 +180,24 @@ func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {
 		}
 	}
 
-	if exp.AlertsEnabled && !s.AlertsEnabled {
+	if exp.AlertsEnabled && !s.AlertsEnabled && s.Unread["Dependabot alerts"] == "" {
 		add(cloud.SeverityHigh, cloud.RepoAlertsDisabled,
 			"Dependabot vulnerability alerts are disabled",
 			"Enable them. Without alerts an advisory against this dependency tree is "+
 				"reported to nobody, and is found only when a PR happens to touch the repo.")
 	}
-	if exp.SecurityUpdatesEnabled && !s.SecurityUpdatesEnabled {
+	if exp.SecurityUpdatesEnabled && !s.SecurityUpdatesEnabled && s.Unread["Dependabot security updates"] == "" {
 		add(cloud.SeverityMedium, cloud.RepoSecurityUpdatesDisabled,
 			"Dependabot security updates are disabled — no remediation PR opens by itself",
-			"Enable automated security fixes. Alerts alone tell somebody; they do not fix "+
-				"anything, and the same advisory has now been found by hand in five repos.")
+			"Enable automated security fixes. Alerts alone tell somebody; they do not "+
+				"fix anything, so the same advisory is resolved by hand once per repository "+
+				"that carries the dependency.")
 	}
 	if s.OpenAlerts > 0 {
 		add(cloud.SeverityHigh, cloud.RepoOpenAlerts,
 			fmt.Sprintf("%d open Dependabot alert(s)", s.OpenAlerts),
-			"Read them. Open alerts sat unread for weeks while the same advisory was "+
-				"fixed by hand in other repos.")
+			"Read them. An open alert is an advisory nobody has decided about, and the "+
+				"decision does not get easier with age.")
 	}
 
 	return out

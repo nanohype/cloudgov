@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -59,14 +58,20 @@ var (
 func init() {
 	platformCmd.PersistentFlags().StringVar(&platformKubeconfig, "kubeconfig", "",
 		"path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config, falls back to in-cluster)")
-	platformCmd.PersistentFlags().StringVar(&platformOutputFmt, "output", "table", "output format: table, json, sarif")
+	platformCmd.PersistentFlags().StringVar(&platformOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	platformCmd.PersistentFlags().StringVar(&platformOutputFile, "output-file", "", "write output to file instead of stdout")
-	platformCmd.PersistentFlags().StringVar(&platformSeverity, "severity", "LOW", "minimum severity to report")
+	platformCmd.PersistentFlags().StringVar(&platformSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 
 	platformCmd.AddCommand(platformAuditCmd)
 }
 
 func runPlatformAudit(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	platformFormat, err := tableJSONSARIF.resolve(platformOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	clients, err := cloudk8s.NewClients(ctx, platformKubeconfig)
 	if err != nil {
@@ -81,20 +86,26 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	// unexamined.
 	var roles platform.IdentityReader
 	var awsProviders []*cloudaws.Provider
-	if awsP, aerr := cloudaws.New(ctx, cloudaws.WithQuiet(quiet)); aerr == nil && awsP.Detect(ctx) {
+	if awsP, aerr := cloudaws.New(ctx, awsProviderOptions()...); aerr == nil && awsP.Detect(ctx) {
 		roles = awsP
 		awsProviders = append(awsProviders, awsP)
 	}
 
-	findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
+	findings, unread, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 	if err != nil {
 		return err
 	}
-	findings = filterPlatformBySeverity(findings, strings.ToUpper(platformSeverity))
+	minSeverity, err := resolveSeverity(platformSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	findings = filterPlatformBySeverity(findings, minSeverity)
 
 	// Warnings raised while reading tenant roles accumulate on the provider and
-	// are only a record if something reads them.
-	incomplete := cloud.Incomplete(awsProviders)
+	// are only a record if something reads them. The cluster side has no
+	// provider to accumulate on, so the auditor returns its own unread list;
+	// both are the same fact and both must survive the severity filter above.
+	incomplete := append(cloud.Incomplete(awsProviders), unread...)
 	if roles == nil {
 		incomplete = append(incomplete,
 			"AWS credentials not detected; tenant-role and Pod Identity conformance were not checked")
@@ -113,11 +124,11 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 		w = file
 	}
 
-	switch strings.ToLower(platformOutputFmt) {
+	switch platformFormat {
 	case "json":
 		return output.WritePlatform(w, findings, incomplete)
 	case "sarif":
-		return output.WritePlatformSARIF(w, findings, Version)
+		return output.WritePlatformSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d platform conformance findings (context: %s)\n\n", len(findings), clients.ContextName)
@@ -128,8 +139,11 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-func filterPlatformBySeverity(in []cloud.PlatformFinding, min string) []cloud.PlatformFinding {
-	minRank := cloud.SeverityRank(cloud.Severity(min))
+// The threshold arrives already validated. Casting a raw flag here instead
+// would rank an unrecognised level 0, and every real level outranks 0 — so a
+// typo widens this filter to everything rather than failing.
+func filterPlatformBySeverity(in []cloud.PlatformFinding, min cloud.Severity) []cloud.PlatformFinding {
+	minRank := cloud.SeverityRank(min)
 	out := in[:0]
 	for _, f := range in {
 		if cloud.SeverityRank(f.Severity) >= minRank {

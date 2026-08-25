@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/output"
@@ -29,25 +28,43 @@ var (
 
 func init() {
 	tagsCmd.Flags().StringSliceVar(&tagsRequired, "require", []string{}, "required tag/label keys (comma-separated, e.g. owner,env,cost-center)")
-	tagsCmd.Flags().StringVar(&tagsStandardFile, "standard-file", "", "path to a nanohype resource-tagging standard JSON; gates on its required AWS keys (content.required_by_surface.aws)")
-	tagsCmd.Flags().StringVar(&tagsSeverity, "severity", "MEDIUM", "minimum severity to report")
-	tagsCmd.Flags().StringVar(&tagsOutputFmt, "output", "table", "output format: table, json")
+	tagsCmd.Flags().StringVar(&tagsStandardFile, "standard-file", "", "path to a nanohype resource-tagging standard JSON; gates on its whole AWS tag policy — the required keys and the conditional rules")
+	tagsCmd.Flags().StringVar(&tagsSeverity, "severity", "MEDIUM", severityUsage("minimum severity to report"))
+	tagsCmd.Flags().StringVar(&tagsOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	tagsCmd.Flags().StringVar(&tagsOutputFile, "output-file", "", "write output to file")
 }
 
 func runTags(cmd *cobra.Command, _ []string) error {
-	// Precedence: explicit --require wins (ad-hoc override); else the required
-	// AWS keys from --standard-file; else error. Keeps --require working for
-	// one-off checks while --standard-file is the CI gate's source of truth.
-	required := tagsRequired
-	if len(required) == 0 && tagsStandardFile != "" {
-		loaded, err := tags.LoadRequired(tagsStandardFile)
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(tagsSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	tagsFormat, err := tableJSON.resolve(tagsOutputFmt)
+	if err != nil {
+		return err
+	}
+	// Precedence: explicit --require wins (ad-hoc override); else the whole tag
+	// policy from --standard-file. Keeps --require working for one-off checks
+	// while --standard-file is the CI gate's source of truth.
+	//
+	// Only --standard-file can carry conditional rules: a rule that applies to
+	// some resource kinds and not others is not expressible as a list of keys,
+	// and pretending otherwise would apply a backup-policy requirement to every
+	// EC2 instance in the account.
+	rules := cloud.RequiredOnly(tagsRequired...)
+	var unenforceable []string
+	if len(tagsRequired) == 0 && tagsStandardFile != "" {
+		loaded, gaps, err := tags.LoadRules(tagsStandardFile)
 		if err != nil {
 			return err
 		}
-		required = loaded
+		rules, unenforceable = loaded, gaps
 	}
-	if len(required) == 0 {
+	if rules.Empty() {
 		return fmt.Errorf("specify required tag keys via --require or --standard-file")
 	}
 
@@ -58,8 +75,8 @@ func runTags(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := tags.Scan(ctx, providers, tags.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(tagsSeverity)),
-		Required:    required,
+		MinSeverity: minSeverity,
+		Rules:       rules,
 	})
 	if err != nil {
 		return err
@@ -75,11 +92,14 @@ func runTags(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	incomplete := cloud.Incomplete(providers)
+	// A rule the standard declares and this tool cannot evaluate is an
+	// observation the run was asked to make and could not, so it travels with the
+	// provider's own unread list rather than as a note nobody reads.
+	incomplete := append(cloud.Incomplete(providers), unenforceable...)
 	gate(findings, func(f cloud.TagFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(tagsOutputFmt) {
+	switch tagsFormat {
 	case "json":
 		return output.WriteTags(w, findings, incomplete)
 	default:

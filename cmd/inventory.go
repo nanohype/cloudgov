@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/inventory"
@@ -31,11 +30,17 @@ var (
 
 func init() {
 	inventoryCmd.Flags().StringSliceVar(&inventoryTypes, "type", []string{}, "resource types to list (e.g. ec2,s3,lambda); empty = all")
-	inventoryCmd.Flags().StringVar(&inventoryOutputFmt, "output", "table", "output format: table, json")
+	inventoryCmd.Flags().StringVar(&inventoryOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	inventoryCmd.Flags().StringVar(&inventoryOutputFile, "output-file", "", "write output to file")
 }
 
 func runInventory(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	inventoryFormat, err := tableJSON.resolve(inventoryOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveInventoryProviders(ctx)
 	if err != nil {
@@ -66,7 +71,7 @@ func runInventory(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(inventoryOutputFmt) {
+	switch inventoryFormat {
 	case "json":
 		return output.WriteInventory(w, resources, incomplete)
 	default:

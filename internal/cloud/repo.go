@@ -101,4 +101,24 @@ type RepoSettings struct {
 	AlertsEnabled          bool `json:"alertsEnabled"`
 	SecurityUpdatesEnabled bool `json:"securityUpdatesEnabled"`
 	OpenAlerts             int  `json:"openAlerts"`
+
+	// Unread names the probes that did not answer, each with what the tool said.
+	//
+	// Every boolean above has a false that means "off" and, without this, a false
+	// that means "the read failed". The GitHub API returns an error for an
+	// unreachable endpoint, an unauthenticated CLI, a rate limit and a repository
+	// genuinely lacking the feature alike, so treating a failed probe as "off"
+	// files an outage as a governance breach — and the caller cannot tell.
+	//
+	// A probe that lands here is reported as an incomplete observation rather
+	// than as a finding. An empty map means every probe answered.
+	Unread map[string]string `json:"unread,omitempty"`
+}
+
+// MarkUnread records that one probe did not answer.
+func (s *RepoSettings) MarkUnread(probe string, err error) {
+	if s.Unread == nil {
+		s.Unread = map[string]string{}
+	}
+	s.Unread[probe] = err.Error()
 }

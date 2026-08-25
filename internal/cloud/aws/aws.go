@@ -198,6 +198,21 @@ func withOperationTimeout(d time.Duration) func(*smithymiddleware.Stack) error {
 // NewWithProfile loads credentials using the named AWS profile. If profile is empty, the default chain is used.
 func NewWithProfile(ctx context.Context, profile string, opts ...Option) (*Provider, error) {
 	loadOpts := []func(*config.LoadOptions) error{
+		// Retry is uniform across every client because every call this provider
+		// can make is a read, and a read re-derives its answer from observed
+		// state on each attempt. That is the property that makes a retry safe —
+		// convergence, not read-ness as such: a mutation may be retried only
+		// where it re-derives its work each time, and one that appends,
+		// increments, charges or issues never may.
+		//
+		// Nothing here mutates, and internal/cloud/aws/readonly_test.go fails the
+		// build if that stops being true, so a mutating call cannot inherit this
+		// policy by being added next to it.
+		//
+		// Standard mode retries named transient shapes — throttling, 5xx,
+		// connection failures — rather than any error, so a permission denial
+		// fails on the first attempt and reaches warnf as an incomplete
+		// observation instead of being retried five times into the same answer.
 		config.WithRetryMaxAttempts(5),
 		config.WithRetryMode(awssdk.RetryModeStandard),
 		config.WithHTTPClient(awshttp.NewBuildableClient().WithTimeout(awsHTTPTimeout)),

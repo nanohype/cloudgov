@@ -1,0 +1,121 @@
+# strip-comments.awk — blank out comments while preserving line numbering.
+#
+# Every text-matching gate in this repo needs this, and needs it for the same
+# reason. A gate that reads comments as code fails in exactly the case it exists
+# for: the thing standing where a missing implementation should be is very often
+# a comment saying so, and the token a gate excludes on is very often mentioned
+# in a trailing comment beside the violation it was meant to catch.
+#
+# Comment bodies are replaced by spaces rather than removed, so a reported line
+# number still points at the right source line and a `next`-style skip cannot
+# swallow code sharing the line with a comment.
+#
+# Quote-aware: a comment marker inside a string literal is not a comment. Go raw
+# strings (backticks) and both quote styles are honoured. Which delimiters honour
+# a backslash escape is per style — Go escapes inside both quote kinds because a
+# rune literal shares the string escape set; shell and YAML escape only inside
+# double quotes, because a single-quoted string there is literal.
+#
+# Usage: awk -v style=go|hash|css [-v strings=blank|blank-single] -f strip-comments.awk <file>
+#
+#   go    // and /* */, respecting "..." '...' `...`
+#   hash  #, respecting "..." '...'      (YAML, shell, JSON-with-comments)
+#   css   /* */ only
+#
+# The styles differ only in which markers open a comment; the quoting machinery
+# is shared, because that is the half a hand-rolled stripper gets wrong.
+#
+# strings=blank-single empties only single-quoted bodies, for shell checks about
+# what the interpreter executes: a parameter expansion is performed inside double
+# quotes and is literal text inside single ones.
+#
+# strings=blank additionally empties string bodies, keeping the delimiters. Use
+# it where the gate looks for a CALL or a DECLARATION: a token inside a string
+# literal is neither, so matching it is a false positive. Leave it off where the
+# string content is the subject — a URL, a required tag key, a template name.
+
+BEGIN {
+  if (style == "") style = "hash"
+}
+
+{
+  line = $0
+  out = ""
+  i = 1
+  n = length(line)
+
+  while (i <= n) {
+    c = substr(line, i, 1)
+    two = substr(line, i, 2)
+
+    # Inside a block comment, consume until it closes.
+    if (inblock) {
+      if (two == "*/") { inblock = 0; out = out "  "; i += 2; continue }
+      out = out " "
+      i++
+      continue
+    }
+
+    # Inside a string literal, copy through until it closes.
+    if (instr) {
+      # Which delimiters honour a backslash escape is a property of the LANGUAGE,
+      # not of the delimiter. Go's rune literal uses the same escape set as its
+      # string literal, so `'\''` is one rune — but a stripper that escapes only
+      # inside double quotes reads it as a closed string followed by an opening
+      # quote, and then blanks the rest of the line as if it were string body.
+      # Under strings=blank that silently deletes real code from the view every
+      # go-style gate matches against: a `context.Background()` call after a rune
+      # literal on the same line disappears, and the gate goes green.
+      #
+      # In shell and YAML the opposite holds: a single-quoted string is literal
+      # and a backslash inside it is a backslash. Getting this wrong in the other
+      # direction would desynchronise on `'it'\''s'`, so the rule is per style.
+      escapes = (style == "go") || (quote == "\"")
+      # blank-single empties SINGLE-quoted bodies and keeps double-quoted ones.
+      # In shell the two are not interchangeable views: a parameter expansion in
+      # double quotes is performed and one in single quotes is literal text, so a
+      # check about what the shell EXECUTES must see the first and not the second.
+      blanking = (strings == "blank") || (strings == "blank-single" && quote == "'")
+      if (escapes && c == "\\" && i < n) {
+        out = out (blanking ? "  " : c substr(line, i + 1, 1))
+        i += 2
+        continue
+      }
+      if (c == quote) { instr = 0; out = out c; i++; continue }
+      out = out (blanking ? " " : c)
+      i++
+      continue
+    }
+
+    # A raw string may span lines; a quoted one may not, so an unterminated
+    # quote ends with the line rather than swallowing the file.
+    if (inraw) {
+      if (c == "`") { inraw = 0; out = out c; i++; continue }
+      out = out (strings == "blank" ? " " : c)
+      i++
+      continue
+    }
+
+    if (style == "go" || style == "css") {
+      if (two == "/*") { inblock = 1; out = out "  "; i += 2; continue }
+    }
+    if (style == "go") {
+      if (two == "//") { while (i <= n) { out = out " "; i++ }; continue }
+      if (c == "`") { inraw = 1; out = out c; i++; continue }
+    }
+    if (style == "hash") {
+      if (c == "#") { while (i <= n) { out = out " "; i++ }; continue }
+    }
+
+    if (style != "css" && (c == "\"" || c == "'")) {
+      instr = 1; quote = c; out = out c; i++; continue
+    }
+
+    out = out c
+    i++
+  }
+
+  # A quoted string does not continue onto the next line.
+  instr = 0
+  print out
+}

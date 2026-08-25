@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/spf13/cobra"
@@ -27,7 +26,16 @@ func gate[T any](items []T, sev func(T) cloud.Severity) {
 	if failOn == "" {
 		return
 	}
-	threshold := cloud.SeverityRank(cloud.Severity(strings.ToUpper(failOn)))
+	// The root PersistentPreRunE already refused an unrankable --fail-on, so this
+	// cannot fail here — but it resolves rather than casts anyway, because a cast
+	// would put the threshold at 0 on any path that reached this without the root
+	// hook, and that trips the gate on the first INFO finding. The gate is the
+	// last place to trust an upstream check.
+	minSeverity, err := resolveSeverity(failOn, "")
+	if err != nil {
+		return
+	}
+	threshold := cloud.SeverityRank(minSeverity)
 	for _, it := range items {
 		if cloud.SeverityRank(sev(it)) >= threshold {
 			exitCode = 2

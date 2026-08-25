@@ -39,11 +39,17 @@ func init() {
 	complianceCmd.Flags().StringVar(&complianceNetworkReport, "network-report", "", "path to network audit JSON report")
 	complianceCmd.Flags().StringVar(&complianceCertsReport, "certs-report", "", "path to certs audit JSON report")
 	complianceCmd.Flags().StringVar(&complianceTagsReport, "tags-report", "", "path to tags audit JSON report")
-	complianceCmd.Flags().StringVar(&complianceOutputFmt, "output", "table", "output format: table, json, sarif")
+	complianceCmd.Flags().StringVar(&complianceOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	complianceCmd.Flags().StringVar(&complianceOutputFile, "output-file", "", "write output to file")
 }
 
 func runCompliance(_ *cobra.Command, args []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	complianceFormat, err := tableJSONSARIF.resolve(complianceOutputFmt)
+	if err != nil {
+		return err
+	}
 	benchmarkID := strings.ToLower(args[0])
 	benchmark := compliance.GetBenchmark(benchmarkID)
 	if benchmark == nil {
@@ -51,44 +57,64 @@ func runCompliance(_ *cobra.Command, args []string) error {
 	}
 
 	var input compliance.InputFindings
+	// Every input report's unread record travels with its findings. A benchmark
+	// evaluated over a scan that could not read part of the account must not
+	// report as a benchmark evaluated over the whole of it.
+	var unread []string
 
 	if complianceIAMReport != "" {
-		findings, err := compliance.LoadIAMReport(complianceIAMReport)
+		findings, incomplete, err := compliance.LoadIAMReport(complianceIAMReport)
 		if err != nil {
 			return err
 		}
 		input.IAM = findings
+		for _, entry := range incomplete {
+			unread = append(unread, "iam scan report: "+entry)
+		}
 	}
 	if complianceStorageReport != "" {
-		findings, err := compliance.LoadStorageReport(complianceStorageReport)
+		findings, incomplete, err := compliance.LoadStorageReport(complianceStorageReport)
 		if err != nil {
 			return err
 		}
 		input.Storage = findings
+		for _, entry := range incomplete {
+			unread = append(unread, "storage audit report: "+entry)
+		}
 	}
 	if complianceNetworkReport != "" {
-		findings, err := compliance.LoadNetworkReport(complianceNetworkReport)
+		findings, incomplete, err := compliance.LoadNetworkReport(complianceNetworkReport)
 		if err != nil {
 			return err
 		}
 		input.Network = findings
+		for _, entry := range incomplete {
+			unread = append(unread, "network audit report: "+entry)
+		}
 	}
 	if complianceCertsReport != "" {
-		findings, err := compliance.LoadCertsReport(complianceCertsReport)
+		findings, incomplete, err := compliance.LoadCertsReport(complianceCertsReport)
 		if err != nil {
 			return err
 		}
 		input.Certs = findings
+		for _, entry := range incomplete {
+			unread = append(unread, "certs report: "+entry)
+		}
 	}
 	if complianceTagsReport != "" {
-		findings, err := compliance.LoadTagsReport(complianceTagsReport)
+		findings, incomplete, err := compliance.LoadTagsReport(complianceTagsReport)
 		if err != nil {
 			return err
 		}
 		input.Tags = findings
+		for _, entry := range incomplete {
+			unread = append(unread, "tags report: "+entry)
+		}
 	}
 
 	report := compliance.Evaluate(benchmark, input)
+	report.Incomplete = unread
 
 	gate(report.Results, func(r compliance.ControlResult) cloud.Severity {
 		if r.Status == compliance.StatusFail {
@@ -113,7 +139,10 @@ func runCompliance(_ *cobra.Command, args []string) error {
 				fmt.Sprintf("control %s (%s) not evaluated: %s", r.Control.ID, r.Control.Title, r.Detail))
 		}
 	}
-	gateIncomplete(unevaluated)
+	// An input the scanner could not fully read is the same fact one layer up: a
+	// control evaluated over a partial account is not an evaluated control, and
+	// both reach the caller through the same exit code.
+	gateIncomplete(append(unevaluated, unread...))
 
 	w := os.Stdout
 	if complianceOutputFile != "" {
@@ -125,11 +154,11 @@ func runCompliance(_ *cobra.Command, args []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(complianceOutputFmt) {
+	switch complianceFormat {
 	case "json":
 		return output.WriteCompliance(w, report)
 	case "sarif":
-		return output.WriteComplianceSARIF(w, report, Version)
+		return output.WriteComplianceSARIF(w, report, Version, report.Incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\n%s: %d controls evaluated\n\n", benchmark.Name, report.Summary.Total)

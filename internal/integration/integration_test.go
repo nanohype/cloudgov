@@ -44,7 +44,7 @@ func (f fixtureProvider) AuditNetwork(context.Context) ([]cloud.NetworkFinding, 
 func (f fixtureProvider) ListCertificates(context.Context) ([]cloud.CertFinding, error) {
 	return f.certs, nil
 }
-func (f fixtureProvider) AuditTags(context.Context, []string) ([]cloud.TagFinding, error) {
+func (f fixtureProvider) AuditTags(context.Context, cloud.TagRules) ([]cloud.TagFinding, error) {
 	return f.tags, nil
 }
 func (f fixtureProvider) ScanSecrets(context.Context) ([]cloud.SecretFinding, error) {

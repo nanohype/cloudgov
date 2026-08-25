@@ -9,12 +9,54 @@
 ## Build & test
 
 ```bash
-task build        # compile binary
-go test ./...     # run all tests (no credentials needed)
-go vet ./...      # static analysis
+task build                          # compile binary
+go test ./...                       # run all tests (no credentials needed)
+go vet ./...                        # static analysis
+task lint                           # golangci-lint
+bash scripts/coverage.sh            # tests + the per-package coverage floors
+bash scripts/check-context.sh       # every cloud call threads the signal-aware context
+bash scripts/check-release-urls.sh  # documented download URLs match .goreleaser.yaml
+bash scripts/check-gates.sh         # every gate above is run by a workflow
+bash scripts/check-version-pins.sh  # every pinned version is watched by Renovate
+bash scripts/check-doc-paths.sh     # every file named in markdown exists
+bash scripts/check-shell-portability.sh  # no gate needs a bash newer than a macOS system bash
+bash scripts/check-positive-controls.sh  # every gate rejects the violation it exists to catch
 ```
 
-All three must pass before opening a PR.
+CI blocks a pull request on every one of these, so a change that skips any of
+them here finds out on the PR instead. `.claude/skills/verify` covers build, test
+and lint; the gate scripts are not in it, and the coverage floors are the gate a
+change is most likely to trip.
+
+---
+
+## Proving a gate can reject
+
+Every gate in `scripts/` proves this on each run: it self-tests against fixtures,
+and `scripts/check-positive-controls.sh` introduces the violation it exists to
+catch into this working tree and requires a non-zero exit. A gate with no control
+fails that run, so the suite cannot shrink to the gates someone remembered.
+
+The three third-party scanners in `.github/workflows/security.yml` are outside
+that harness — feeding CI a deliberately vulnerable module to watch a scanner
+fire is not a thing to leave in a repository. Being wired into a workflow is not
+evidence a scanner rejects, so demonstrate each one by hand rather than assuming:
+
+```sh
+# zizmor: a workflow with pull_request_target, write-all, a floating action tag
+# and an interpolated PR title
+zizmor --offline --persona=regular /path/to/a/deliberately-bad/workflows/
+
+# gosec: a package using crypto/md5 and exec.Command("sh", "-c", ...)
+gosec -severity medium -exclude=G304 ./...
+
+# govulncheck: a throwaway module requiring a version with a known advisory
+govulncheck ./...
+```
+
+Each must exit non-zero on the bad input and zero on this repository. Run it when
+you change a scanner's version, its flags, or the shape of what it scans — those
+are the changes that turn a gate into a step that always passes.
 
 ---
 
@@ -391,9 +433,10 @@ response is the only carrier: compute it there too.
 
 Add the tool to the MCP table in `AGENTS.md` and the command to the README
 reference. `cmd/incomplete_contract_test.go` fails the build if the AGENTS.md
-table and the registered tools disagree in either direction — the table drifted
-once already, documenting a tool that was registered nowhere, and an agent
-following a doc that overstates the code gets "unknown tool".
+table and the registered tools disagree in either direction. That table is what
+an agent reads to decide which tool to call, so a table naming a tool nothing
+registers hands the caller an "unknown tool" error, and one omitting a registered
+tool hides it.
 
 ---
 
@@ -430,4 +473,13 @@ following a doc that overstates the code gets "unknown tool".
 3. Run `task build` — it must exit 0.
 4. Run `go test ./...` — all tests must pass.
 5. Run `go vet ./...` — no warnings.
-6. Open a pull request with a clear description of what changes and why.
+6. Run `task lint` — golangci-lint reports no issues.
+7. Run `bash scripts/coverage.sh` — every floor met. Raise the floor of any
+   package whose coverage you raised; a ratchet nobody ratchets is a note, not a
+   floor.
+8. Run every gate script: `bash scripts/check-context.sh`,
+   `bash scripts/check-release-urls.sh`, `bash scripts/check-gates.sh`,
+   `bash scripts/check-version-pins.sh`, `bash scripts/check-doc-paths.sh`,
+   `bash scripts/check-shell-portability.sh` and
+   `bash scripts/check-positive-controls.sh`. CI runs all of them.
+9. Open a pull request with a clear description of what changes and why.

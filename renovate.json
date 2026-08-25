@@ -1,4 +1,16 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>nanohype/.github"]
+  "extends": ["github>nanohype/.github"],
+  "customManagers": [
+    {
+      "description": "Versions pinned as a value rather than as a dependency: a tool version passed to an action, a `go install ...@vX` argument, a `pipx install pkg==X`. No standard manager reads any of these, so without this an unwatched pin goes stale silently while the step it configures still reports green. Each site carries a `renovate:` comment naming its datasource, so the pin says what watches it.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)(?:\\s+versioning=(?<versioning>[^\\s]+))?[^\\n]*\\n[^\\n]*?(?<currentValue>v?[0-9]+\\.[0-9]+\\.[0-9]+[^\\s\"']*)"
+      ]
+    }
+  ]
 }

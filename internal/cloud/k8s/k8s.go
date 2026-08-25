@@ -14,12 +14,47 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
+
+// k8sRequestTimeout bounds a single Kubernetes API request. The command's
+// signal-aware context lets a user Ctrl-C an interactive run, but an unattended
+// one — a CI gate, an MCP tool call — has nobody to press it, so an apiserver
+// that accepts the connection and never answers would hang the scan with no
+// ceiling. This package issues only List and Get calls, never a watch or a log
+// stream, so a per-request deadline is safe to apply to every client it builds.
+const k8sRequestTimeout = 30 * time.Second
+
+// Option configures how a cluster connection is resolved.
+type Option func(*connOptions)
+
+type connOptions struct {
+	denyExecCredentials bool
+}
+
+// WithoutExecCredentials refuses a kubeconfig whose resolved user obtains
+// credentials by running an exec plugin. The plugin's command, arguments and
+// environment come from the file, so whoever names the file chooses which
+// binary runs inside this process — which holds live cloud credentials. An
+// operator naming a path on the command line already has that power. A caller
+// that receives the path across a trust boundary does not, and must not inherit
+// it by passing the string through.
+func WithoutExecCredentials() Option {
+	return func(o *connOptions) { o.denyExecCredentials = true }
+}
+
+func resolveOptions(opts []Option) connOptions {
+	var o connOptions
+	for _, fn := range opts {
+		fn(&o)
+	}
+	return o
+}
 
 // Provider implements CloudGov's Kubernetes provider interfaces.
 type Provider struct {
@@ -31,8 +66,8 @@ type Provider struct {
 // New loads cluster config (kubeconfig or in-cluster) and builds a Provider.
 // If kubeconfig is empty, it falls back to $KUBECONFIG, then ~/.kube/config,
 // then in-cluster config.
-func New(_ context.Context, kubeconfig string) (*Provider, error) {
-	config, contextName, err := loadConfig(kubeconfig)
+func New(_ context.Context, kubeconfig string, opts ...Option) (*Provider, error) {
+	config, contextName, err := loadConfig(kubeconfig, resolveOptions(opts))
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -61,8 +96,8 @@ type Clients struct {
 
 // NewClients resolves cluster config exactly as New does and returns both a
 // typed clientset and a dynamic client.
-func NewClients(_ context.Context, kubeconfig string) (*Clients, error) {
-	config, contextName, err := loadConfig(kubeconfig)
+func NewClients(_ context.Context, kubeconfig string, opts ...Option) (*Clients, error) {
+	config, contextName, err := loadConfig(kubeconfig, resolveOptions(opts))
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig: %w", err)
 	}
@@ -103,8 +138,9 @@ func (p *Provider) Detect(_ context.Context) bool {
 
 // loadConfig resolves a *rest.Config from explicit kubeconfig path,
 // $KUBECONFIG, ~/.kube/config, or in-cluster config, in that order.
-// The returned contextName is empty for in-cluster.
-func loadConfig(kubeconfig string) (*rest.Config, string, error) {
+// The returned contextName is empty for in-cluster. Every config it returns
+// carries k8sRequestTimeout.
+func loadConfig(kubeconfig string, opts connOptions) (*rest.Config, string, error) {
 	if kubeconfig == "" {
 		kubeconfig = os.Getenv("KUBECONFIG")
 	}
@@ -123,6 +159,7 @@ func loadConfig(kubeconfig string) (*rest.Config, string, error) {
 		if err != nil {
 			return nil, "", fmt.Errorf("no kubeconfig and no in-cluster credentials: %w", err)
 		}
+		config.Timeout = k8sRequestTimeout
 		return config, "", nil
 	}
 
@@ -140,5 +177,11 @@ func loadConfig(kubeconfig string) (*rest.Config, string, error) {
 	if err != nil {
 		return nil, "", fmt.Errorf("build client config: %w", err)
 	}
+	if opts.denyExecCredentials && config.ExecProvider != nil {
+		return nil, "", fmt.Errorf(
+			"kubeconfig %s authenticates by running %q; this caller may not name a kubeconfig that executes a credential plugin",
+			kubeconfig, config.ExecProvider.Command)
+	}
+	config.Timeout = k8sRequestTimeout
 	return config, contextName, nil
 }

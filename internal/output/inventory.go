@@ -55,7 +55,7 @@ type inventoryReport struct {
 
 	// Incomplete is what this scan could not read. An empty findings list with a
 	// non-empty Incomplete is "could not tell", not "nothing to report".
-	Incomplete []string `json:"incomplete,omitempty"`
+	Incomplete []string `json:"incomplete"`
 }
 
 // WriteInventory marshals inventory resources as JSON to w.
@@ -63,6 +63,6 @@ func WriteInventory(w io.Writer, resources []cloud.InventoryResource, incomplete
 	return writeJSON(w, inventoryReport{
 		Resources:  resources,
 		Total:      len(resources),
-		Incomplete: incomplete,
+		Incomplete: observed(incomplete),
 	})
 }

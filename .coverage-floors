@@ -27,35 +27,66 @@ file    internal/secrets/scanner.go    100
 # branch here reports a red run as green, which is worse than any single missed
 # finding.
 file    cmd/gate.go                    100
+# The compliance evaluator decides whether an auditor is told a CIS or SOC 2
+# control passed. An untaken branch here is a verdict nobody has proven the tool
+# can reach, and a verdict is the one output a reader cannot check for
+# themselves. The loaders sit at 100 for the same reason one layer down: they
+# decode the reports the verdicts are computed from, and a field that silently
+# fails to decode turns a domain full of findings into a control with nothing to
+# evaluate.
+file    internal/compliance/evaluate.go  100
+file    internal/compliance/loader.go    100
+# The exec-credential guard: the whole control on whether a kubeconfig NAMED BY
+# THE MODEL may run an arbitrary command in a process holding live AWS
+# credentials. It sits in its own file because a package floor cannot reach it —
+# four lines inside cmd, which is at 17%, so it measured 0% while the package sat
+# above its floor.
+file    cmd/mcp_cluster.go               100
 
 # ── packages at or above the org floor ────────────────────────────────────────
+#
+# A floor below 75 does not belong under this heading. internal/audit and
+# internal/output are listed with the section below for that reason: the heading
+# is a claim about the entries under it, and two of them contradicted it.
 package internal/certs              90
+package internal/cloud              78    # capability interfaces, shared types and the tag policy
+package internal/compliance         97
 package internal/cloud/aws          82
 package internal/cost               95
-package internal/drift              85
-package internal/iam                88    # was 50 against 90.3 measured — a stale ratchet permits a 40-point regression
+package internal/drift              88
+package internal/iam                88
 package internal/inventory          85
 package internal/network            94
 package internal/orphans            95
 package internal/output/sinks       84
-package internal/platform           83
-package internal/repo               80
+package internal/platform           86
+package internal/providers          85
+package internal/repo               82
 package internal/quota              95
 package internal/secrets            93
-package internal/storage            90    # was 28 against 93.8 measured — same stale-ratchet problem
+package internal/storage            90
 package internal/tags               94
 
+# ── the total, ratcheted ──────────────────────────────────────────────────────
+#
+# Nothing here compared any number to the org floor: the per-package floors are
+# each set below it, so every one could be met while the tree as a whole sat
+# under 75. The gate printed the total and gated on nothing.
+#
+# This does not assert 75 — the tree does not meet it, and a floor set to a
+# number the tree fails is a gate that is red on arrival and gets removed. It
+# asserts the total cannot REGRESS, and the distance left to the org floor is
+# stated rather than implied.
+total   coverage                    65    # measured 66.3; org floor is 75, so 8.7 points outstanding
+
 # ── packages below the org floor ──────────────────────────────────────────────
-# Each carries what it measures today. These are the repo's real coverage debt,
-# not permission to stay there.
+package internal/audit              73    # 74.2 measured
+package internal/output             73    # 77.0 measured; floored below the org floor
+# These are the repo's real coverage debt. Each carries what it measures, and
+# raising one is a change to this file, not permission to stay.
 package internal/baseline           72    # baseline store + comparison
-package internal/output             70    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
-package internal/compliance         66    # benchmark mapping over saved reports
-package internal/cloud              65    # capability interfaces + shared types; mostly declarations
 package internal/compare            64    # report normalization
-package internal/audit              69    # the orchestrator; each domain it calls is floored on its own
-package internal/providers          85    # registry + Detect wiring, exercised through the resolvers
-package internal/cloud/k8s          45    # most paths need a live apiserver; the RBAC analyzer is the covered part
-package internal/report             42    # aggregation over saved reports
+package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
+package internal/report             60    # aggregation over saved reports
 package internal/fix                39    # Terraform/shell emitters — golden-compared; the policy writer is covered directly
-package cmd                         16    # handlers resolve providers and render; the logic they call is floored above
+package cmd                         17    # handlers resolve providers and render; the logic they call is floored above

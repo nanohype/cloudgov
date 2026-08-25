@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/cost"
@@ -33,7 +32,7 @@ var (
 
 func init() {
 	costDiffCmd.Flags().IntVar(&costDays, "days", 30, "compare last N days vs the N days before that")
-	costDiffCmd.Flags().StringVar(&costOutputFmt, "output", "table", "output format: table, json")
+	costDiffCmd.Flags().StringVar(&costOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	costDiffCmd.Flags().StringVar(&costOutputFile, "output-file", "", "write output to file")
 	costDiffCmd.Flags().Float64Var(&costThreshold, "threshold", 0, "only show services with >N% change (e.g. --threshold 20)")
 
@@ -41,6 +40,12 @@ func init() {
 }
 
 func runCostDiff(cmd *cobra.Command, _ []string) error {
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	costFormat, err := tableJSON.resolve(costOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveCostProviders(ctx)
 	if err != nil {
@@ -65,7 +70,7 @@ func runCostDiff(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
-	switch strings.ToLower(costOutputFmt) {
+	switch costFormat {
 	case "json":
 		return output.WriteCost(w, diffs, incomplete)
 	default:

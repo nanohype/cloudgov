@@ -23,7 +23,9 @@ fab's quality-check skill does that.
 | Cost | `cost diff` (spend delta between two windows) |
 | Infrastructure hygiene | `orphans`, `storage audit`, `network audit`, `certs`, `tags` |
 | Security posture | `secrets scan`, `lambda audit`, `compliance`, `drift`, `audit` (orchestrates all of the above) |
+| Remediation | `remediate` (fix scripts from saved reports) |
 | Cluster | `k8s rbac`, `platform audit` (Platform-tenant conformance) |
+| Repository | `repo audit` (branch protection, required checks, Dependabot state) |
 | Operational | `inventory`, `quota`, `baseline`, `compare`, `report` |
 | Integration | `mcp` (serves the scanners over stdio as an MCP server) |
 
@@ -46,7 +48,7 @@ internal/
   compare/                report normalization for compare/report
   output/                 renderers — one file per domain, shared infra in style.go/jsoncore.go
   integration/            provider→scanner→output end-to-end suite
-scripts/                  coverage.sh, check-context.sh (CI gates)
+scripts/                  CI gates, each self-testing; lib/ holds their shared helpers
 ```
 
 The three seams that matter:
@@ -152,19 +154,23 @@ task test:cover       # coverage profile
 task lint             # golangci-lint
 ```
 
-`.claude/skills/verify` runs the full set. CI (`.github/workflows/ci.yml`) adds
-`go vet`, `scripts/check-context.sh`, and `scripts/coverage.sh` — the floors in
-`.coverage-floors`, which fail on below-floor coverage, a floored package or file
-with no coverage data (stale name), or a tested package with no floor (ungated
-new code).
+`.claude/skills/verify` covers build, test and lint. CI
+(`.github/workflows/ci.yml`) adds `go vet` and every script in `scripts/` —
+`check-gates.sh` fails when one of them is not run by a workflow or not named in
+CONTRIBUTING.md, so the set here does not have to be restated to stay true.
+
+`scripts/coverage.sh` enforces `.coverage-floors`, failing on below-floor
+coverage, a floored package or file with no coverage data (a stale name), or a
+tested package with no floor (ungated new code).
 
 Two kinds of floor. Package floors ratchet: set a few points below current, and
 raised when coverage is raised — a ratchet nobody ratchets stops being a floor.
 File floors do not ratchet; they are pinned at 100 on the paths a package average
 cannot see, because a package sits comfortably above its floor while one branch
-inside it goes untested. Today that is the secret scanner (whether an exposed
-credential is reported at all) and `cmd/gate.go` (the exit code a merge gate
-reads as approve / reject / could-not-tell). A defensive branch that cannot be
+inside it goes untested. The rule for which files earn one: a file whose branch
+decides whether a security finding is reported at all, or what verdict a reader
+is handed. `.coverage-floors` names them with the reason beside each, so the set
+is read there rather than restated here. A defensive branch that cannot be
 reached carries `//coverage:ignore` with the reason, and the gate reports how
 many it honoured so they cannot accumulate.
 

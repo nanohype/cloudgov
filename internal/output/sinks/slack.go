@@ -61,14 +61,26 @@ func buildSlackPayload(d Digest) map[string]interface{} {
 	severity := d.WorstSeverity()
 	emoji := severityEmoji(severity)
 
+	// A partial scan says so in the header, where the count is. This message
+	// reaches a channel, not a terminal: nobody here sees the exit code, and a
+	// bare "0 findings" from an account the scan could not read is the most
+	// misleading sentence this tool can produce.
 	header := fmt.Sprintf("%s %s — %d findings on %s",
 		emoji, d.Source, d.TotalFindings, d.Provider,
 	)
+	if d.Partial() {
+		header = fmt.Sprintf("%s %s — %d findings on %s (PARTIAL: %d observation(s) could not be made)",
+			emoji, d.Source, d.TotalFindings, d.Provider, len(d.Incomplete),
+		)
+	}
 
 	contextLine := fmt.Sprintf("worst: %s • %d critical / %d high / %d medium / %d low • %s",
 		severity, d.Critical, d.High, d.Medium, d.Low,
 		d.Timestamp.UTC().Format(time.RFC3339),
 	)
+	if d.Partial() {
+		contextLine = fmt.Sprintf("%s • incomplete: %s", contextLine, strings.Join(d.Incomplete, "; "))
+	}
 
 	blocks := []map[string]interface{}{
 		{

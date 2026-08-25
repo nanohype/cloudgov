@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/output"
@@ -33,8 +32,8 @@ var (
 )
 
 func init() {
-	storageAuditCmd.Flags().StringVar(&storageSeverity, "severity", "LOW", "minimum severity to report")
-	storageAuditCmd.Flags().StringVar(&storageOutputFmt, "output", "table", "output format: table, json, sarif")
+	storageAuditCmd.Flags().StringVar(&storageSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
+	storageAuditCmd.Flags().StringVar(&storageOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	storageAuditCmd.Flags().StringVar(&storageOutputFile, "output-file", "", "write output to file")
 	storageAuditCmd.Flags().BoolVar(&storageFix, "fix", false, "generate shell remediation scripts for each finding")
 	storageAuditCmd.Flags().StringVar(&storageOutDir, "out", ".", "directory to write fix scripts (used with --fix)")
@@ -43,6 +42,18 @@ func init() {
 }
 
 func runStorageAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(storageSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
+	// Validated before any provider is resolved, so an unrenderable format
+	// fails on the flag rather than after a full account sweep.
+	storageFormat, err := tableJSONSARIF.resolve(storageOutputFmt)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 	providers, err := resolveStorageProviders(ctx)
 	if err != nil {
@@ -50,7 +61,7 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := storage.Scan(ctx, providers, storage.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(storageSeverity)),
+		MinSeverity: minSeverity,
 	})
 	if err != nil {
 		return err
@@ -70,11 +81,11 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 	gate(findings, func(f cloud.BucketFinding) cloud.Severity { return f.Severity })
 	gateIncomplete(incomplete)
 
-	switch strings.ToLower(storageOutputFmt) {
+	switch storageFormat {
 	case "json":
 		return output.WriteStorage(w, findings, incomplete)
 	case "sarif":
-		return output.WriteStorageSARIF(w, findings, Version)
+		return output.WriteStorageSARIF(w, findings, Version, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\nFound %d storage findings\n\n", len(findings))

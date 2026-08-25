@@ -3,6 +3,7 @@ package drift
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -141,5 +142,49 @@ func TestScanEmptyResources(t *testing.T) {
 	}
 	if len(results) != 0 {
 		t.Fatalf("got %d results, want 0", len(results))
+	}
+}
+
+// A scan denied every Describe call must not be indistinguishable from a scan
+// that found a tfstate matching its account. Every DriftError row reaches the
+// incomplete list, which is what carries exit 3 and the JSON report's
+// `incomplete` array.
+func TestIncompleteReportsEveryUnreadResource(t *testing.T) {
+	resources := []ParsedResource{
+		{Address: "aws_security_group.web", Type: "aws_security_group", Provider: "aws", ID: "sg-1"},
+		{Address: "aws_security_group.api", Type: "aws_security_group", Provider: "aws", ID: "sg-2"},
+	}
+	provider := &mockDriftProvider{
+		name:      "aws",
+		supported: []string{"aws_security_group"},
+		err:       errors.New("AccessDenied: not authorized to perform ec2:DescribeSecurityGroups"),
+	}
+
+	results, err := Scan(context.Background(), resources, []cloud.DriftProvider{provider}, ScanOptions{})
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	incomplete := Incomplete(results)
+	if len(incomplete) != len(resources) {
+		t.Fatalf("Incomplete returned %d entries for %d unread resources: %v", len(incomplete), len(resources), incomplete)
+	}
+	for _, entry := range incomplete {
+		if !strings.Contains(entry, "AccessDenied") {
+			t.Errorf("incomplete entry does not carry the reason the read failed: %q", entry)
+		}
+	}
+}
+
+// A resource that was read is not an incomplete observation, whether it matched
+// its state or drifted from it.
+func TestIncompleteIgnoresObservedResources(t *testing.T) {
+	for _, status := range []cloud.DriftStatus{cloud.DriftInSync, cloud.DriftModified, cloud.DriftDeleted} {
+		t.Run(string(status), func(t *testing.T) {
+			got := Incomplete([]cloud.DriftResult{{ResourceType: "aws_security_group", ResourceID: "sg-1", Status: status}})
+			if len(got) != 0 {
+				t.Errorf("Incomplete reported an observed %s resource: %v", status, got)
+			}
+		})
 	}
 }

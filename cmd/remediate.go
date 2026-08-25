@@ -48,18 +48,24 @@ func init() {
 	remediateCmd.Flags().StringVar(&remediateType, "type", "", "report type: storage, network, or orphans (required)")
 	remediateCmd.Flags().StringVar(&remediateFrom, "from", "", "path to JSON scan report (required)")
 	remediateCmd.Flags().StringVar(&remediateOutDir, "out", ".", "directory to write fix scripts")
-	remediateCmd.Flags().StringVar(&remediateMinSev, "severity", "LOW", "minimum severity to include in fix scripts")
+	remediateCmd.Flags().StringVar(&remediateMinSev, "severity", "LOW", severityUsage("minimum severity to include in fix scripts"))
 	_ = remediateCmd.MarkFlagRequired("type")
 	_ = remediateCmd.MarkFlagRequired("from")
 }
 
 func runRemediate(_ *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(remediateMinSev, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	data, err := os.ReadFile(remediateFrom)
 	if err != nil {
 		return fmt.Errorf("read %s: %w", remediateFrom, err)
 	}
 
-	minSev := cloud.Severity(strings.ToUpper(remediateMinSev))
+	minSev := minSeverity
 
 	switch strings.ToLower(remediateType) {
 	case "storage":
