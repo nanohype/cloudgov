@@ -158,6 +158,39 @@ MASKED
   fi
   rm -f "$tmp/internal/cloud/aws/masked.go"
 
+  # The citation must name the line the violation is ON.
+  #
+  # This asserts the property rather than the mechanism. Comment bodies are
+  # blanked rather than removed precisely so line numbers survive — but a later
+  # refactor to joined text, or a pattern anchored with something that can cross
+  # a newline, would shift every citation up by however many blanked lines sit
+  # above the match. The gate would still go red, so a control that only checks
+  # "does it reject" would pass while every file:line it prints points somewhere
+  # else. A citation that names the wrong line is worse than none: it sends the
+  # reader to code that is fine.
+  cat >"$tmp/internal/cloud/aws/cited.go" <<'CITED'
+package aws
+
+/* a block comment
+   spanning several lines
+   so a crossing match has somewhere to land */
+
+// and a line comment directly above
+func cited() {
+	ctx := context.Background()
+	_ = ctx
+}
+CITED
+  citation="$(scan_tree "$tmp" | grep 'cited.go')"
+  if [[ -z "$citation" ]]; then
+    die "the violation in cited.go was not reported at all"
+  fi
+  cited_line="$(printf '%s' "$citation" | head -1 | cut -d: -f2)"
+  if [[ "$cited_line" != "9" ]]; then
+    die "the violation is on line 9 of cited.go and was cited at line ${cited_line}; the citation points at the wrong code"
+  fi
+  rm -f "$tmp/internal/cloud/aws/cited.go"
+
   # A mention inside a comment or a string literal is not a call.
   cat >"$tmp/internal/cloud/aws/mentions.go" <<'MENTIONS'
 package aws

@@ -212,3 +212,33 @@ func TestColorSeverity(t *testing.T) {
 		_ = colorSeverity(sev)
 	}
 }
+
+// An empty findings table must say which of the two empty results it is.
+//
+// This is the same defect the JSON envelope's always-present `incomplete` key
+// closes, in the surface a human actually reads: "0 findings" from a complete
+// scan and "0 findings" from a scan that could not read half the account
+// rendered identically, and an empty table is precisely where a reader stops
+// looking. A table captured with --output-file records only stdout, so the
+// artifact has to carry the distinction itself.
+func TestIncompleteNoteStatesCoverageEitherWay(t *testing.T) {
+	var complete bytes.Buffer
+	IncompleteNote(&complete, nil)
+	if !strings.Contains(complete.String(), "COMPLETE") {
+		t.Errorf("a complete scan printed no coverage statement: %q", complete.String())
+	}
+
+	var partial bytes.Buffer
+	IncompleteNote(&partial, []string{"us-west-2: ec2:DescribeInstances denied"})
+	if !strings.Contains(partial.String(), "INCOMPLETE") {
+		t.Errorf("a partial scan printed no coverage statement: %q", partial.String())
+	}
+	if !strings.Contains(partial.String(), "DescribeInstances") {
+		t.Errorf("the partial-scan note does not name what could not be read: %q", partial.String())
+	}
+
+	// The two must be distinguishable, which is the whole point.
+	if complete.String() == partial.String() {
+		t.Error("a complete scan and a partial one rendered the same coverage statement")
+	}
+}

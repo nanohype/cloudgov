@@ -262,7 +262,7 @@ func TestAGENTSMCPTableMatchesRegisteredTools(t *testing.T) {
 	registered := map[string]bool{}
 	// Scoped to &mcp.Tool{Name: ...} so the server's own name is not mistaken
 	// for a tool.
-	for _, m := range regexp.MustCompile(`mcp\.Tool\{Name:\s*"([a-z_0-9]+)"`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`mcp\.Tool\{Name:[ \t]*"([a-z_0-9]+)"`).FindAllStringSubmatch(string(src), -1) {
 		registered[m[1]] = true
 	}
 	if len(registered) == 0 {
@@ -271,7 +271,7 @@ func TestAGENTSMCPTableMatchesRegisteredTools(t *testing.T) {
 
 	// Table rows look like: | `tool_name` | description | params |
 	documented := map[string]bool{}
-	for _, m := range regexp.MustCompile("(?m)^\\|\\s*`([a-z_0-9]+)`\\s*\\|").FindAllStringSubmatch(string(agents), -1) {
+	for _, m := range regexp.MustCompile("(?m)^\\|[ \\t]*`([a-z_0-9]+)`[ \\t]*\\|").FindAllStringSubmatch(string(agents), -1) {
 		documented[m[1]] = true
 	}
 	if len(documented) == 0 {

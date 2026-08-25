@@ -79,7 +79,13 @@ func TestContrastRatioArithmetic(t *testing.T) {
 }
 
 var (
-	tokenRe      = regexp.MustCompile(`--([a-z-]+):\s*(#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?)\b`)
+	// [ \t]* rather than \s*, and that is load-bearing against a blanked view.
+	// Go's \s includes the newline, and stripCSSComments replaces comment bodies
+	// with spaces while keeping newlines — so \s* would run from a token
+	// declaration, across the blanked remains of the lines beneath it, and attach
+	// whichever colour it reached first. The match would succeed and report the
+	// wrong value, which is worse than failing.
+	tokenRe      = regexp.MustCompile(`--([a-z-]+):[ \t]*(#[0-9a-fA-F]{3}(?:[0-9a-fA-F]{3})?)\b`)
 	cssCommentRe = regexp.MustCompile(`(?s)/\*.*?\*/`)
 )
 
@@ -134,6 +140,41 @@ func TestStripCSSCommentsIgnoresDeclarationsInsideComments(t *testing.T) {
 	}
 	if commented := themeTokens(t, "/* --ghost: #123456 */"); len(commented) != 0 {
 		t.Errorf("a declaration that exists only inside a comment was read: %v", commented)
+	}
+}
+
+// A token declaration must take the value on its own line, never one further
+// down. Against a comment-blanked view a pattern using \s* runs across the
+// blanked lines and pairs a token with a colour that is not its own — a match
+// that succeeds and reports the wrong value, which no failing test would reveal.
+func TestTokenPatternDoesNotSpanLines(t *testing.T) {
+	// The declaration's value sits on a later line with a comment between. After
+	// stripping, that comment is a line of nothing but spaces — which is exactly
+	// the run a newline-crossing pattern walks through to reach a colour that
+	// belongs to a different declaration.
+	source := ":root {\n" +
+		"  --orphan:\n" +
+		"  /* an explanatory comment between a property and its value */\n" +
+		"  #8f6000;\n" +
+		"}\n"
+
+	stripped := stripCSSComments(source)
+	if !strings.Contains(stripped, "\n  "+strings.Repeat(" ", 55)) &&
+		!regexp.MustCompile(`(?m)^\s+$`).MatchString(stripped) {
+		t.Fatal("the fixture produced no blank-but-present line, so it does not exercise the crossing case")
+	}
+
+	tokens := themeTokens(t, source)
+	if got, ok := tokens["orphan"]; ok {
+		t.Errorf("--orphan declares no value on its own line but was paired with %q from further down", got)
+	}
+
+	// The same fixture read with a newline-crossing pattern, to show the fixture
+	// genuinely distinguishes the two. If this ever stops matching, the fixture
+	// has stopped exercising the defect and the assertions above prove nothing.
+	crossing := regexp.MustCompile(`--([a-z-]+):\s*(#[0-9a-fA-F]{6})`)
+	if m := crossing.FindStringSubmatch(stripped); m == nil || m[1] != "orphan" {
+		t.Fatalf("the fixture no longer reproduces the crossing match; got %v", m)
 	}
 }
 

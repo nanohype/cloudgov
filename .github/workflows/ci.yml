@@ -64,6 +64,11 @@ jobs:
         # than described as carrying none.
         run: bash scripts/check-version-pins.sh
 
+      - name: documented paths resolve
+        # Prose that names a file is a claim about this repository, and nothing
+        # keeps it true across a rename. Checked rather than trusted.
+        run: bash scripts/check-doc-paths.sh
+
       - name: positive controls
         # Introduces, into this working tree, the exact violation each gate above
         # exists to catch, and requires the gate to reject it. A gate's own
