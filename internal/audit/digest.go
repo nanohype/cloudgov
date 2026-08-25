@@ -20,13 +20,14 @@ type Example struct {
 // domain the report carries.
 //
 // It lives beside the Report rather than in the command that renders it, so the
-// domain list sits next to the struct that defines it. The version in cmd/
-// covered four of the seven domains while its comment said "across all domains",
-// and nothing made the omission visible: a Slack digest could report Critical: 1
-// with "certs" among its domains and no certificate anywhere in the examples,
-// because a cert finding is a Critical the summary counts and the examples never
-// reached. Adding a domain to Report and not to this function is now a change in
-// one file rather than two.
+// domain list sits next to the struct that defines it — adding a domain to one
+// and not the other is a change in a single file, and TestTopFindings... fails
+// when they disagree.
+//
+// A digest that walks a subset of the domains produces no signal of its own: the
+// summary still counts a CRITICAL certificate, the domain list still names
+// certs, and the examples simply contain no certificate. On the unattended path,
+// where the digest IS the report, that reads as a full account of the run.
 func (r *Report) TopFindings(n int) []Example {
 	if r == nil || n <= 0 {
 		return nil

@@ -34,8 +34,7 @@ jobs:
   # on the weekly schedule as the thing that has to stay green, and it is not a
   # merge-gate dependency.
   #
-  # A scheduled run here CAN be red without any commit being at fault. That is
-  # the point of the split, not a defect in it.
+  # A scheduled run here can therefore be red with no commit at fault.
   govulncheck:
     name: govulncheck (known-vuln reachability — advisory on PRs, gating on schedule)
     runs-on: ubuntu-latest
@@ -84,8 +83,8 @@ jobs:
       - name: gosec
         # Hard gate: gosec exits non-zero on any finding at medium+ severity.
         # G304 (file inclusion via variable) is excluded wholesale: every hit
-        # is an operator-supplied CLI flag path (--from report files, --state
-        # tfstate, benchmark/standard files) — reading files the operator
+        # is an operator-supplied CLI path (--from report files, the drift
+        # tfstate argument, benchmark/standard files) — reading files the operator
         # names is this CLI's contract, not taint. Everything else either got
         # fixed (G301/G306 permissions) or carries an inline, justified
         # `#nosec` at the site (G101 finding-type labels, G204 fixed per-OS

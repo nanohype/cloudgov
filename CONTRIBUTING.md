@@ -16,13 +16,15 @@ task lint                           # golangci-lint
 bash scripts/coverage.sh            # tests + the per-package coverage floors
 bash scripts/check-context.sh       # every cloud call threads the signal-aware context
 bash scripts/check-release-urls.sh  # documented download URLs match .goreleaser.yaml
-bash scripts/check-gates.sh         # every gate above self-tests and is run by CI
+bash scripts/check-gates.sh         # every gate above is run by a workflow
 bash scripts/check-version-pins.sh  # every pinned version is watched by Renovate
+bash scripts/check-doc-paths.sh     # every file named in markdown exists
+bash scripts/check-positive-controls.sh  # every gate rejects the violation it exists to catch
 ```
 
 CI blocks a pull request on every one of these, so a change that skips any of
-them here finds out on the PR instead. `.claude/skills/verify` runs the first
-four; the four scripts are not in it, and the coverage floors are the gate a
+them here finds out on the PR instead. `.claude/skills/verify` covers build, test
+and lint; the gate scripts are not in it, and the coverage floors are the gate a
 change is most likely to trip.
 
 ---
@@ -474,6 +476,8 @@ tool hides it.
 7. Run `bash scripts/coverage.sh` — every floor met. Raise the floor of any
    package whose coverage you raised; a ratchet nobody ratchets is a note, not a
    floor.
-8. Run `bash scripts/check-context.sh`, `bash scripts/check-release-urls.sh`,
-   `bash scripts/check-gates.sh` and `bash scripts/check-version-pins.sh`.
+8. Run every gate script: `bash scripts/check-context.sh`,
+   `bash scripts/check-release-urls.sh`, `bash scripts/check-gates.sh`,
+   `bash scripts/check-version-pins.sh`, `bash scripts/check-doc-paths.sh` and
+   `bash scripts/check-positive-controls.sh`. CI runs all of them.
 9. Open a pull request with a clear description of what changes and why.

@@ -51,11 +51,14 @@ jobs:
         # offline against the committed config.
         run: bash scripts/check-release-urls.sh
 
-      - name: gate conformance
-        # Each gate above self-tests on every run, so a check that has stopped
-        # being able to reject reports that rather than reporting a pass. This
-        # step asserts that property over the population: every script in
-        # scripts/ self-tests, and every one of them is run by a workflow.
+      - name: gate wiring
+        # Every script in scripts/ is run by some workflow and named in
+        # CONTRIBUTING.md. A gate no workflow invokes guards nothing on a pull
+        # request while still passing locally, and one the checklist omits gives
+        # a contributor a list that does not produce a green PR.
+        #
+        # Whether a gate CAN reject is a separate question, asserted by observing
+        # it rather than by reading it — see the positive-controls step below.
         run: bash scripts/check-gates.sh
 
       - name: version-pin coverage

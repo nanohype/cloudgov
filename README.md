@@ -479,7 +479,7 @@ The tag policy comes from `--require` (ad-hoc) or `--standard-file` (a [nanohype
 - **Required** (`content.required_by_surface.aws`) — the keys every resource carries.
 - **Conditional** (`content.conditional_requirements`) — keys required only on certain kinds. The standard declares one: `BackupPolicy`, required on backup-eligible resources. A resource carrying all ten required keys and no `BackupPolicy` is never selected by the tag-matching backup plan, and nothing errors until a restore is attempted — so it is flagged here.
 
-A conditional rule naming a kind cloudgov does not enumerate is reported as an incomplete observation rather than dropped. Two of the standard's five backup-eligible kinds are in that position: there is no EFS auditor, and the RDS auditor paginates `DescribeDBInstances`, which does not return Aurora clusters. Those two are therefore *not* gated, and the run says so rather than reporting a coverage it does not have.
+A conditional rule naming a kind cloudgov does not enumerate is reported as an incomplete observation rather than dropped, so the run states the coverage it has rather than the coverage the standard asks for. Aurora and EFS are in that position: there is no EFS auditor, and the RDS auditor paginates `DescribeDBInstances`, which does not return Aurora clusters. Run the command to see which kinds the standard you point it at leave unenforceable.
 
 **Flags**
 

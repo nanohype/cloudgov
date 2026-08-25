@@ -38,32 +38,32 @@ file    internal/compliance/evaluate.go  100
 file    internal/compliance/loader.go    100
 
 # ── packages at or above the org floor ────────────────────────────────────────
+package internal/audit              73
 package internal/certs              90
 package internal/cloud              78    # capability interfaces, shared types and the tag policy
 package internal/compliance         97
 package internal/cloud/aws          82
 package internal/cost               95
 package internal/drift              88
-package internal/iam                88    # was 50 against 90.3 measured — a stale ratchet permits a 40-point regression
+package internal/iam                88
 package internal/inventory          85
 package internal/network            94
 package internal/orphans            95
+package internal/output             73
 package internal/output/sinks       84
 package internal/platform           86
+package internal/providers          85
 package internal/repo               82
 package internal/quota              95
 package internal/secrets            93
-package internal/storage            90    # was 28 against 93.8 measured — same stale-ratchet problem
+package internal/storage            90
 package internal/tags               94
 
 # ── packages below the org floor ──────────────────────────────────────────────
-# Each carries what it measures today. These are the repo's real coverage debt,
-# not permission to stay there.
+# These are the repo's real coverage debt. Each carries what it measures, and
+# raising one is a change to this file, not permission to stay.
 package internal/baseline           72    # baseline store + comparison
-package internal/output             73    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
 package internal/compare            64    # report normalization
-package internal/audit              73    # the orchestrator; each domain it calls is floored on its own
-package internal/providers          85    # registry + Detect wiring, exercised through the resolvers
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports
 package internal/fix                39    # Terraform/shell emitters — golden-compared; the policy writer is covered directly

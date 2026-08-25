@@ -129,12 +129,19 @@ func TestEveryOutputFlagRejectsAnUnrenderableFormat(t *testing.T) {
 	}
 }
 
-// A SARIF-capable command is one whose renderer produces SARIF. The set a
-// command declares is therefore a claim about what internal/output can emit for
-// it, and AGENTS.md repeats that claim to agents — so the two are pinned here.
+// A SARIF-capable command is one whose renderer produces SARIF, and the set a
+// command declares is a claim about what internal/output can emit for it.
+//
+// The expectation below is transcribed from AGENTS.md rather than parsed from
+// it, which is a real limit: this fails when the tree changes and not when the
+// document does. Parsing the sentence would be the stronger form — the tool
+// table in that file IS parsed, by TestAGENTSMCPTableMatchesRegisteredTools —
+// but the SARIF claim is prose rather than a table, and a parser over prose that
+// silently matches nothing is worse than a transcription that is at least read
+// by whoever edits either side.
 func TestSARIFCapabilityMatchesTheDocumentedSet(t *testing.T) {
-	// AGENTS.md: "SARIF is emitted by iam, storage, certs, secrets, audit, k8s,
-	// lambda, platform, compliance, and drift."
+	// Transcribed from AGENTS.md: "SARIF is emitted by iam, storage, certs,
+	// secrets, audit, k8s, lambda, platform, compliance, and drift."
 	documented := map[string]bool{
 		"cloudgov iam scan":       true,
 		"cloudgov storage audit":  true,

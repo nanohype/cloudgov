@@ -145,6 +145,7 @@ self_test() {
   "customManagers": [
     {
       "customType": "regex",
+      "managerFilePatterns": ["/^.*\\.ya?ml$/"],
       "matchStrings": ["#\\s*renovate:\\s*datasource=(?<datasource>[a-z-]+)\\s+depName=(?<depName>[^\\s]+)[^\\n]*\\n[^\\n]*?(?<currentValue>v?[0-9]+\\.[0-9]+\\.[0-9]+[^\\s\"']*)"]
     }
   ]
@@ -219,11 +220,32 @@ CFG
   ! renovate_covered_lines "$tmp/dead-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
     self_test_die "a customManager matching nothing reported coverage; a dead rule reads the same as a live one"
 
-  printf '{"customManagers": [{"matchStrings": ["(?<currentValue>"]}]}\n' >"$tmp/broken-renovate.json"
+  printf '{"customManagers": [{"customType": "regex", "managerFilePatterns": ["x"], "matchStrings": ["(?<currentValue>"]}]}\n' >"$tmp/broken-renovate.json"
   ! renovate_covered_lines "$tmp/broken-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
     self_test_die "reported coverage from a matchString that does not compile"
 
-  echo "check-version-pins self-test passed: it rejects unwatched pins, per-file over-reach, comment-only mentions, a version in an exempt file, and a renovate.json that is empty, dead or uncompilable."
+  # ── the config's own shape ──
+  #
+  # This gate reads renovate.json, so a manager Renovate would discard still
+  # looks like coverage here. Each of these is a manager that watches nothing in
+  # production while reading as a live rule.
+  printf '{"customManagers": [{"matchStrings": ["renovate: (?<currentValue>v1)"]}]}\n' >"$tmp/notype-renovate.json"
+  ! renovate_covered_lines "$tmp/notype-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "accepted a customManager with no customType, which Renovate ignores"
+
+  printf '{"customManagers": [{"customType": "regex", "matchStrings": ["renovate: (?<currentValue>v1)"]}]}\n' >"$tmp/nopattern-renovate.json"
+  ! renovate_covered_lines "$tmp/nopattern-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "accepted a customManager with no managerFilePatterns, which Renovate applies to no file"
+
+  printf '{"customManagers": "not-a-list"}\n' >"$tmp/badtype-renovate.json"
+  ! renovate_covered_lines "$tmp/badtype-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "accepted a customManagers key of the wrong type"
+
+  printf 'not json at all\n' >"$tmp/notjson-renovate.json"
+  ! renovate_covered_lines "$tmp/notjson-renovate.json" "$tmp/watched-value.yml" >/dev/null 2>&1 ||
+    self_test_die "accepted a renovate.json that is not JSON"
+
+  echo "check-version-pins self-test passed: it rejects unwatched pins, per-file over-reach, comment-only mentions, a version in an exempt file, and a renovate.json that is empty, dead, uncompilable, untyped, patternless, mistyped or not JSON."
 }
 
 self_test

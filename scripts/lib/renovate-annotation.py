@@ -74,6 +74,30 @@ def main() -> int:
         sys.stderr.write(f"cannot read {config_path}: {err}\n")
         return 2
 
+    # ─── the config's own shape, before anything is derived from it ───
+    #
+    # This gate READS renovate.json, so a malformed one is not merely a Renovate
+    # problem: a manager Renovate would discard still looks like coverage here,
+    # and a pin reads as watched by a rule that never runs. The file had no
+    # validation of any kind before this.
+    #
+    # THE COVERAGE IS PARTIAL, deliberately. This checks the shape this gate
+    # depends on: the keys are present, the types are right, the regexes compile,
+    # and each manager matches something real. It does NOT check the file against
+    # Renovate's published schema, and it cannot tell whether a `datasource`
+    # names a datasource Renovate implements — a customManager declaring
+    # datasource=nonesuch passes here and silently watches nothing in production.
+    # Closing that needs the schema vendored or the network, and a validator that
+    # claimed to do it without either would be the defect this gate exists to
+    # catch.
+    if not isinstance(config, dict):
+        sys.stderr.write(f"{config_path} is not a JSON object\n")
+        return 2
+    for key, want in (("customManagers", list), ("extends", list)):
+        if key in config and not isinstance(config[key], want):
+            sys.stderr.write(f"{config_path}: {key} must be a {want.__name__}\n")
+            return 2
+
     managers = config.get("customManagers") or []
     if not managers:
         sys.stderr.write(
@@ -99,6 +123,23 @@ def main() -> int:
     total_match_strings = 0
 
     for index, manager in enumerate(managers):
+        if not isinstance(manager, dict):
+            sys.stderr.write(f"customManagers[{index}] is not an object\n")
+            return 2
+        # Renovate ignores a customManager with no customType and, for the regex
+        # type, one with no file patterns — either way it watches nothing while
+        # reading as a live rule here.
+        if manager.get("customType") != "regex":
+            sys.stderr.write(
+                f"customManagers[{index}] declares customType "
+                f"{manager.get('customType')!r}; this gate only interprets regex managers\n")
+            return 2
+        if not (manager.get("managerFilePatterns") or manager.get("fileMatch")):
+            sys.stderr.write(
+                f"customManagers[{index}] declares no managerFilePatterns, so Renovate applies it "
+                f"to no file — it watches nothing while reading as a live rule\n")
+            return 2
+
         patterns = manager.get("matchStrings") or []
         if not patterns:
             sys.stderr.write(f"customManagers[{index}] declares no matchStrings\n")

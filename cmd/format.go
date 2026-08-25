@@ -32,9 +32,9 @@ func (f outputFormats) usage() string {
 // resolve lowercases and validates a caller-supplied format.
 //
 // An unrecognised value is an error rather than a fall-through to the table
-// renderer. `--output sarif` on a command that emits none used to write an ANSI
-// table into results.sarif and exit 0, and a CI step that redirects output to a
-// file and checks the exit code cannot tell that apart from a scan that worked.
+// renderer. A fall-through writes an ANSI table into results.sarif and exits 0,
+// and a CI step that redirects output to a file and checks the exit code cannot
+// tell that apart from a scan that worked.
 func (f outputFormats) resolve(value string) (string, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
 	for _, accepted := range f {

@@ -33,7 +33,7 @@ patterns that produce real incidents:
 This complements the identity-based IAM scan: ` + "`cloudgov iam scan`" + ` checks who
 can do what *from* identities; this checks who can invoke *into* functions.
 
-Currently AWS only.`,
+AWS only.`,
 	RunE: runLambdaAudit,
 }
 

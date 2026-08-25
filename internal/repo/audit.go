@@ -77,16 +77,14 @@ func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.Rep
 			// skipping is how a sweep reports a clean org over repositories it
 			// never managed to look at.
 			//
-			// But it is recorded as UNREAD, not as a finding. It used to be filed
-			// as RepoNoProtection at HIGH with a remedy telling the operator to
-			// widen their token scope, and an error from `gh` does not carry that
-			// much information: the same failure is returned for an unreachable
-			// API, an unauthenticated CLI, a rate limit, a deadline, and a token
-			// that genuinely lacks the scope. Naming one of those is a guess in
-			// the shape of a diagnosis, and it costs the operator a search that
-			// cannot succeed. Worse, a merge gate reading NO_BRANCH_PROTECTION at
-			// HIGH sees a governance breach where there is only an unread
-			// repository.
+			// It is recorded as UNREAD rather than as a finding, because an
+			// error from `gh` does not carry enough to name a cause: the same
+			// failure is returned for an unreachable API, an unauthenticated CLI,
+			// a rate limit, a deadline, and a token that genuinely lacks the
+			// scope. Filing it as a finding asserts one of those, which is a
+			// guess in the shape of a diagnosis and costs the operator a search
+			// that cannot succeed — and a merge gate reading NO_BRANCH_PROTECTION
+			// at HIGH sees a governance breach where there is an outage.
 			//
 			// So the tool's own distinction applies here as everywhere else: a
 			// thing it could not observe is not a thing it found. The message

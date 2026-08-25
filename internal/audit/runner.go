@@ -131,11 +131,10 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 				findings = append(findings, result.Findings...)
 				// The scanner records per-principal read failures on its own
 				// Result, not through the provider's warn channel, so
-				// cloud.Incomplete(providers.IAM) never sees them. `iam scan`
-				// carries them and `audit` used to drop them — the same fact
-				// reaching a caller through one command and erased through the
-				// other, on the command AGENTS.md names first among the fourteen
-				// that honour the contract.
+				// cloud.Incomplete(providers.IAM) does not see them. Without this
+				// line the same fact reaches a caller through `iam scan` and is
+				// erased through `audit` — and a run denied on every principal
+				// reports zero findings with an empty incomplete array.
 				unread = append(unread, result.Incomplete...)
 			}
 			mu.Lock()

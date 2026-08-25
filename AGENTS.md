@@ -137,12 +137,14 @@ only carrier. Every tool that reads a cloud account populates it.
 The key is always present, and a run that observed everything reports it as `[]`.
 An omitted key and a `null` are the same ambiguity — neither can be told apart
 from a tool that does not describe its own coverage — so an empty array is how a
-tool says "I looked at all of it", positively rather than by silence. The three
-tools that read no cloud account (`k8s_rbac`, `repo_audit`, `compliance`) are
-exempt by name, and `cmd/mcp_incomplete_test.go` pairs every registered tool with
-its own handler to enforce that: an exemption naming a tool that does not exist
-fails the build, as does a tool that reads an account and never reaches the
-record.
+tool says "I looked at all of it", positively rather than by silence. Tools that
+do not populate the array in their own handler are exempt by name, each with the
+reason on file: `k8s_rbac` and `compliance` read no cloud account, and `audit`
+carries the record on its report struct instead. `cmd/mcp_incomplete_test.go`
+pairs every registered tool with its own handler to enforce that — an exemption
+naming a tool that does not exist fails the build, as does a tool that reads an
+account and never reaches the record, and as does an exempt tool that computes
+the array anyway.
 
 The `severity` parameter is validated rather than coerced. An unrecognised value
 is refused, because severity ranking treats an unknown level as below every real

@@ -6,14 +6,12 @@
 # gate reject, and does it accept a clean tree — is asserted BEHAVIOURALLY by
 # scripts/check-positive-controls.sh, which runs each gate against this tree.
 #
-# The split is deliberate, and it is a correction. This script used to also check
-# that each gate declared and called a `self_test` function, by matching its
-# source text. That check fails open in the way every text-based floor does: a
-# `self_test() { :; }` that does nothing satisfies it exactly as well as one that
-# proves anything. A floor that reads source can be satisfied by prose or by an
-# empty body; a floor that runs the gate cannot. So the capability half moved to
-# where it can be observed rather than read, and what is left here is a question
-# about CI configuration, which is genuinely a text question.
+# Capability is not asserted here, because it cannot be asserted by reading. A
+# check that a gate DECLARES a self_test is satisfied just as well by
+# `self_test() { :; }` as by one that proves something — a floor that reads source
+# can be satisfied by prose or by an empty body, and only a floor that runs the
+# gate cannot. What remains here is a question about CI configuration, which is
+# genuinely a text question.
 #
 # Even here the text is read with comments stripped: a commented-out `run:` step
 # is not a step, and a gate "run" only by a comment is a gate CI never executes.
@@ -77,12 +75,22 @@ WF
   ! workflow_runs "absent.sh" "$tmp/workflows" 2>/dev/null ||
     self_test_die "reported a gate no workflow mentions as wired"
 
+  # The contributor-checklist half uses the same matcher, so one control covers
+  # both: a name present is found, a name absent is not.
+  printf 'Run `bash scripts/wired.sh` before opening a PR.
+' >"$tmp/CONTRIBUTING.md"
+  grep -qF "scripts/wired.sh" "$tmp/CONTRIBUTING.md" ||
+    self_test_die "a gate named in a checklist was not found in it"
+  if grep -qF "scripts/absent.sh" "$tmp/CONTRIBUTING.md"; then
+    self_test_die "a gate the checklist does not name was found in it"
+  fi
+
   # An empty workflow directory means nothing is wired, not that everything is.
   mkdir -p "$tmp/empty"
   ! workflow_runs "wired.sh" "$tmp/empty" 2>/dev/null ||
     self_test_die "reported a gate as wired against a directory with no workflows"
 
-  echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, and an empty workflow directory."
+  echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, an empty workflow directory, and a gate missing from the contributor checklist."
 }
 
 self_test
@@ -105,6 +113,23 @@ if ! workflow_runs "$self" ".github/workflows"; then
   fail=1
 fi
 
+# ─── the contributor checklist must name every gate CI runs ───
+#
+# A contributor who runs everything CONTRIBUTING.md lists and still fails CI has
+# been given a checklist that does not do its job, and the omission is invisible
+# from either document alone. The checklist drifted this way once already: it
+# named five gates while CI ran seven.
+#
+# CONTRIBUTING is read raw. A gate named only inside a fenced block is still
+# named to the reader, and stripping comments from markdown would strip nothing.
+for script in scripts/*.sh; do
+  name="$(basename "$script")"
+  if ! grep -qF "scripts/${name}" CONTRIBUTING.md; then
+    echo "::error::${name} is run by CI and is not named in CONTRIBUTING.md; a contributor following the checklist would fail on it" >&2
+    fail=1
+  fi
+done
+
 # A verdict over nothing is not a pass: an empty scripts/ directory, or a glob
 # that stopped matching, would otherwise report every gate as wired.
 if [ "$checked" -eq 0 ]; then
@@ -116,4 +141,4 @@ if [ "$fail" -ne 0 ]; then
   echo "== gate wiring NOT met =="
   exit 1
 fi
-printf 'ok: %s gate script(s) run by CI (capability proven separately by check-positive-controls.sh)\n' "$checked"
+printf 'ok: %s gate script(s) run by CI and named in CONTRIBUTING.md (capability proven separately by check-positive-controls.sh)\n' "$checked"

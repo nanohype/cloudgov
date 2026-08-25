@@ -549,11 +549,11 @@ func buildOrphanRules() []sarifRule {
 
 // WriteAuditSARIF renders a full audit report as SARIF.
 //
-// Every domain the Report declares is rendered. It used to cover four of seven —
-// IAM, storage, network and secrets — while `cloudgov audit --output sarif`
-// exited 2 on a critical expired certificate whose result was nowhere in the
-// file the merge gate uploaded to code scanning. The exit code and the artifact
-// disagreed, and the artifact is the half a reviewer looks at.
+// Every domain the Report declares is rendered, because the exit code and the
+// artifact are two halves of one answer to a merge gate. A writer covering a
+// subset makes them disagree silently: the run exits 2 on a critical expired
+// certificate and the file uploaded to code scanning contains no such result,
+// and the artifact is the half a reviewer looks at.
 //
 // TestAuditSARIFCoversEveryDomain counts the Report's own finding slices by
 // reflection, so a domain added there and not here fails the build rather than

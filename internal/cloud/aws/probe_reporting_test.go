@@ -28,12 +28,11 @@ import (
 // ── Why this is a per-site check and not a per-file one ──
 //
 // The tempting version greps each provider file for `warnf` and passes the file
-// if it finds one. That version is worthless here, and the numbers say why:
-// iam.go had five silent drops alongside eight warnf calls, orphans.go one
-// alongside four. A file-level gate passes both files while six sites keep
-// dropping — it proves the mechanism exists in the file, not that this site
-// uses it. Presence of the remedy somewhere is not application of the remedy
-// here.
+// if it finds one. It is worthless here for a structural reason: a file holds
+// many probe sites, and one of them calling warnf says nothing about the rest.
+// A file-level gate proves the mechanism exists in the file, not that THIS site
+// uses it — and presence of the remedy somewhere is not application of the
+// remedy here.
 
 // probeSite is one `if <error condition> { ... continue }` block.
 type probeSite struct {
