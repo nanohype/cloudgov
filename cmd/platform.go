@@ -60,7 +60,7 @@ func init() {
 		"path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config, falls back to in-cluster)")
 	platformCmd.PersistentFlags().StringVar(&platformOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	platformCmd.PersistentFlags().StringVar(&platformOutputFile, "output-file", "", "write output to file instead of stdout")
-	platformCmd.PersistentFlags().StringVar(&platformSeverity, "severity", "LOW", "minimum severity to report")
+	platformCmd.PersistentFlags().StringVar(&platformSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 
 	platformCmd.AddCommand(platformAuditCmd)
 }

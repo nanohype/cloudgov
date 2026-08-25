@@ -32,7 +32,7 @@ var (
 )
 
 func init() {
-	networkAuditCmd.Flags().StringVar(&networkSeverity, "severity", "LOW", "minimum severity to report (CRITICAL, HIGH, MEDIUM, LOW)")
+	networkAuditCmd.Flags().StringVar(&networkSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 	networkAuditCmd.Flags().StringVar(&networkOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	networkAuditCmd.Flags().StringVar(&networkOutputFile, "output-file", "", "write output to file")
 	networkAuditCmd.Flags().BoolVar(&networkFix, "fix", false, "generate shell remediation scripts for each finding")

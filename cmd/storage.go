@@ -32,7 +32,7 @@ var (
 )
 
 func init() {
-	storageAuditCmd.Flags().StringVar(&storageSeverity, "severity", "LOW", "minimum severity to report")
+	storageAuditCmd.Flags().StringVar(&storageSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 	storageAuditCmd.Flags().StringVar(&storageOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	storageAuditCmd.Flags().StringVar(&storageOutputFile, "output-file", "", "write output to file")
 	storageAuditCmd.Flags().BoolVar(&storageFix, "fix", false, "generate shell remediation scripts for each finding")

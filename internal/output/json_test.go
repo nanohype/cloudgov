@@ -67,7 +67,7 @@ func TestWriteIAM(t *testing.T) {
 	}
 
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, findings, 5, nil, nil)
+		return WriteIAM(buf, findings, 5, 5, nil, nil)
 	})
 
 	if out.Total != len(findings) {
@@ -114,7 +114,7 @@ func TestWriteIAMEmpty(t *testing.T) {
 		Principals int               `json:"principals_scanned"`
 	}
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, nil, 0, nil, nil)
+		return WriteIAM(buf, nil, 0, 0, nil, nil)
 	})
 	if out.Total != 0 {
 		t.Errorf("total: got %d, want 0", out.Total)
@@ -133,7 +133,7 @@ func TestWriteIAMPrincipalNil(t *testing.T) {
 		Total    int               `json:"total"`
 	}
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, findings, 1, nil, nil)
+		return WriteIAM(buf, findings, 1, 1, nil, nil)
 	})
 	if out.Total != 1 {
 		t.Errorf("total: got %d, want 1", out.Total)
@@ -453,7 +453,7 @@ func TestReportsCarryIncompleteIndependentOfFlags(t *testing.T) {
 		"lambda":    func(w *bytes.Buffer) error { return WriteLambdaPolicy(w, nil, incomplete) },
 		"cost":      func(w *bytes.Buffer) error { return WriteCost(w, nil, incomplete) },
 		"drift":     func(w *bytes.Buffer) error { return WriteDrift(w, nil, incomplete) },
-		"iam":       func(w *bytes.Buffer) error { return WriteIAM(w, nil, 0, nil, incomplete) },
+		"iam":       func(w *bytes.Buffer) error { return WriteIAM(w, nil, 0, 0, nil, incomplete) },
 		"storage":   func(w *bytes.Buffer) error { return WriteStorage(w, nil, incomplete) },
 	}
 
@@ -530,7 +530,7 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		"drift":     func(w io.Writer) error { return WriteDrift(w, nil, nil) },
 		"lambda":    func(w io.Writer) error { return WriteLambdaPolicy(w, nil, nil) },
 		"platform":  func(w io.Writer) error { return WritePlatform(w, nil, nil) },
-		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, nil, nil) },
+		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
 		"k8s":       func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
 		"repo":      func(w io.Writer) error { return WriteRepo(w, nil, nil) },
 	}

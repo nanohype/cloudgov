@@ -20,6 +20,12 @@ var acceptedSeverities = []cloud.Severity{
 
 // severityUsage renders the help text for a severity flag from the vocabulary it
 // validates against, so a flag cannot advertise a level the tool refuses.
+//
+// Every severity flag takes its help from here, which is what makes that a
+// property rather than a habit: hand-written help drifts silently, and three
+// flags had come to name a narrower set than resolveSeverity accepts.
+// TestEverySeverityFlagTakesItsHelpFromTheVocabulary fails on a flag that does
+// not.
 func severityUsage(what string) string {
 	names := make([]string, 0, len(acceptedSeverities))
 	for _, s := range acceptedSeverities {

@@ -62,7 +62,7 @@ func init() {
 		"path to the committed expected settings")
 	repoCmd.PersistentFlags().StringVar(&repoOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	repoCmd.PersistentFlags().StringVar(&repoOutputFile, "output-file", "", "write output to a file instead of stdout")
-	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", "minimum severity to report")
+	repoCmd.PersistentFlags().StringVar(&repoSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 
 	// Marked required so cobra rejects the omission by name. Without this an
 	// empty org reaches checkName and fails with `org "" is not a valid GitHub

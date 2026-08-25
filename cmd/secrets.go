@@ -30,7 +30,7 @@ var (
 )
 
 func init() {
-	secretsScanCmd.Flags().StringVar(&secretsSeverity, "severity", "LOW", "minimum severity to report")
+	secretsScanCmd.Flags().StringVar(&secretsSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 	secretsScanCmd.Flags().StringVar(&secretsOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	secretsScanCmd.Flags().StringVar(&secretsOutputFile, "output-file", "", "write output to file")
 

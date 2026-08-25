@@ -504,3 +504,111 @@ func register(s *mcp.Server) {
 		t.Errorf("found %d registrations in a fixture carrying one live and one commented out", len(names))
 	}
 }
+
+// The README names which commands can exit 3 and which cannot. That is a claim
+// about the code, and it was wrong: it listed `compliance` and `repo audit`
+// among the commands that exit 0/1/2 only, while both call gateIncomplete.
+//
+// Derived rather than restated. A list in prose is right when written and
+// silently wrong at the first command that starts or stops gating, which is
+// exactly what happened.
+func TestREADMEExitThreeListMatchesTheCode(t *testing.T) {
+	gating := commandsCallingGateIncomplete(t)
+	if len(gating) == 0 {
+		t.Fatal("no command calls gateIncomplete; the detector has stopped reading cmd/")
+	}
+
+	readme, err := os.ReadFile(filepath.Join("..", "README.md"))
+	if err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	text := string(readme)
+
+	// The paragraph that makes the claim, isolated so a command name appearing
+	// elsewhere in a 1000-line document does not satisfy it.
+	const marker = "Every command that can observe less than it was asked to honours this"
+	start := strings.Index(text, marker)
+	if start < 0 {
+		t.Fatalf("the README no longer carries the exit-3 paragraph beginning %q; "+
+			"this check is asserting against prose that has moved", marker)
+	}
+	end := strings.Index(text[start:], "\n---")
+	if end < 0 {
+		end = len(text) - start
+	}
+	claim := text[start : start+end]
+
+	// The paragraph makes two lists and only one of them is the claim under test.
+	// Taking everything before the describing phrase sweeps in the first list as
+	// well and reports every gating command as a contradiction; taking everything
+	// after it finds only the trailing clause and reports none. The list is the
+	// parenthesis between the two.
+	const cannotOpen = "Commands that read no cloud account ("
+	const cannotClose = ")"
+	openAt := strings.Index(claim, cannotOpen)
+	if openAt < 0 {
+		t.Fatalf("the exit-3 paragraph no longer names the commands that cannot exit 3; " +
+			"this check is asserting against prose that has been rewritten")
+	}
+	rest := claim[openAt+len(cannotOpen):]
+	closeAt := strings.Index(rest, cannotClose)
+	if closeAt < 0 {
+		t.Fatalf("the list of commands that cannot exit 3 is not closed")
+	}
+	cannotList := rest[:closeAt]
+
+	// The names of the commands that cannot exit 3 are listed BEFORE the phrase
+	// that describes them, so that is the text to search. Searching after it
+	// finds only the trailing clause and reports every command as consistent —
+	// a check that passes while reading the wrong half of the sentence.
+	for _, name := range gating {
+		// Commands are named in the paragraph as `iam scan`, `repo audit`, etc.,
+		// and a cmd/ file is named for the first word of the command.
+		if strings.Contains(cannotList, "`"+name+"`") ||
+			strings.Contains(cannotList, "`"+name+" ") {
+			t.Errorf("cmd/%s.go calls gateIncomplete, so that command can exit 3, and the README "+
+				"lists it among the commands that exit 0/1/2 only", name)
+		}
+	}
+	t.Logf("%d command file(s) call gateIncomplete", len(gating))
+}
+
+// commandsCallingGateIncomplete returns the cmd/ file base names (without .go)
+// containing a call to gateIncomplete.
+func commandsCallingGateIncomplete(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	var out []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		if name == "gate.go" {
+			continue // where it is defined, not where it is used
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		found := false
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "gateIncomplete" {
+				found = true
+			}
+			return true
+		})
+		if found {
+			out = append(out, strings.TrimSuffix(name, ".go"))
+		}
+	}
+	return out
+}

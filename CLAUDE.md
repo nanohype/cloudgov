@@ -23,7 +23,9 @@ fab's quality-check skill does that.
 | Cost | `cost diff` (spend delta between two windows) |
 | Infrastructure hygiene | `orphans`, `storage audit`, `network audit`, `certs`, `tags` |
 | Security posture | `secrets scan`, `lambda audit`, `compliance`, `drift`, `audit` (orchestrates all of the above) |
+| Remediation | `remediate` (fix scripts from saved reports) |
 | Cluster | `k8s rbac`, `platform audit` (Platform-tenant conformance) |
+| Repository | `repo audit` (branch protection, required checks, Dependabot state) |
 | Operational | `inventory`, `quota`, `baseline`, `compare`, `report` |
 | Integration | `mcp` (serves the scanners over stdio as an MCP server) |
 

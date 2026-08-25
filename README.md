@@ -1016,13 +1016,18 @@ Exit `3` exists because `0` gets read as evidence *for* approval. A denied
 dropped, so a scan run with partial permissions has to be distinguishable from
 one that found nothing.
 
-**Every command that reads a cloud account honours this** — `audit`, `iam scan`,
-`storage audit`, `network audit`, `certs`, `tags`, `secrets scan`, `orphans`,
-`quota`, `inventory`, `cost diff`, `drift`, `lambda audit`, and
-`platform audit`. Commands that read no cloud account (`compare`, `report`,
-`baseline`, `remediate`, `compliance`, `repo audit`) exit `0`/`1`/`2` only, as
-does `k8s rbac` — the Kubernetes client reports errors rather than partial
-observations.
+**Every command that can observe less than it was asked to honours this** —
+`audit`, `iam scan`, `storage audit`, `network audit`, `certs`, `tags`,
+`secrets scan`, `orphans`, `quota`, `inventory`, `cost diff`, `drift`,
+`lambda audit`, `platform audit`, `repo audit` and `compliance`. The last two
+read no cloud account and still qualify: `repo audit` reports a GitHub probe that
+did not answer, and `compliance` carries forward whatever the scan reports it
+loads could not read, because a control evaluated over a partial account is not
+an evaluated control.
+
+Commands that read no cloud account (`compare`, `report`, `baseline`,
+`remediate`) exit `0`/`1`/`2` only, as does `k8s rbac` — its two reads return an
+error rather than a short list, so there is no partial state to report.
 
 ---
 

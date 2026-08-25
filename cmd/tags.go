@@ -29,7 +29,7 @@ var (
 func init() {
 	tagsCmd.Flags().StringSliceVar(&tagsRequired, "require", []string{}, "required tag/label keys (comma-separated, e.g. owner,env,cost-center)")
 	tagsCmd.Flags().StringVar(&tagsStandardFile, "standard-file", "", "path to a nanohype resource-tagging standard JSON; gates on its whole AWS tag policy — the required keys and the conditional rules")
-	tagsCmd.Flags().StringVar(&tagsSeverity, "severity", "MEDIUM", "minimum severity to report")
+	tagsCmd.Flags().StringVar(&tagsSeverity, "severity", "MEDIUM", severityUsage("minimum severity to report"))
 	tagsCmd.Flags().StringVar(&tagsOutputFmt, "output", tableJSON[0], tableJSON.usage())
 	tagsCmd.Flags().StringVar(&tagsOutputFile, "output-file", "", "write output to file")
 }

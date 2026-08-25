@@ -44,7 +44,7 @@ var (
 )
 
 func init() {
-	lambdaAuditCmd.Flags().StringVar(&lambdaSeverity, "severity", "LOW", "minimum severity to report")
+	lambdaAuditCmd.Flags().StringVar(&lambdaSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	lambdaAuditCmd.Flags().StringVar(&lambdaOutputFile, "output-file", "", "write output to file")
 

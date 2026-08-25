@@ -41,7 +41,7 @@ var (
 
 func init() {
 	auditCmd.Flags().StringSliceVar(&auditSkip, "skip", []string{}, "domains to skip (iam,storage,network,orphans,certs,tags,secrets)")
-	auditCmd.Flags().StringVar(&auditSeverity, "severity", "LOW", "minimum severity to report")
+	auditCmd.Flags().StringVar(&auditSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 	auditCmd.Flags().StringVar(&auditOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	auditCmd.Flags().StringVar(&auditOutputFile, "output-file", "", "write output to file")
 	auditCmd.Flags().IntVar(&auditIAMDays, "iam-days", 90, "IAM audit log lookback period in days")

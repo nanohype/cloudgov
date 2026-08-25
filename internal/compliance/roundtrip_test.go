@@ -124,7 +124,7 @@ func TestLoadIAMReportRoundTrip(t *testing.T) {
 		Resource: "role/admin", Detail: "AdministratorAccess attached",
 	}
 	path := writeReport(t, "iam.json", func(b *bytes.Buffer) error {
-		return output.WriteIAM(b, []cloud.Finding{want}, 1, nil, nil)
+		return output.WriteIAM(b, []cloud.Finding{want}, 1, 1, nil, nil)
 	})
 
 	got, _, err := compliance.LoadIAMReport(path)

@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -225,4 +226,83 @@ func good() { _ = cloud.Severity("HIGH") }
 		t.Fatalf("the detector found %d unvalidated casts in a fixture carrying exactly one "+
 			"(plus one in a comment and one legitimate literal); a clean sweep would prove nothing", found)
 	}
+}
+
+// A severity flag must take its help from the vocabulary it validates against.
+//
+// Hand-written help is the same defect as a hand-written rule, one surface over:
+// it is right when written and drifts silently. Three flags advertised
+// "(CRITICAL, HIGH, MEDIUM, LOW)" while the tool accepted INFO as well, so the
+// help named a narrower vocabulary than the validator and a caller reading it
+// would not know INFO was available.
+func TestEverySeverityFlagTakesItsHelpFromTheVocabulary(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+
+	flags := 0
+	offenders := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) != 4 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel == nil || sel.Sel.Name != "StringVar" {
+				return true
+			}
+			flagName, ok := call.Args[1].(*ast.BasicLit)
+			if !ok || flagName.Kind != token.STRING {
+				return true
+			}
+			if literal, err := strconv.Unquote(flagName.Value); err != nil ||
+				(literal != "severity" && literal != "fail-on") {
+				return true
+			}
+			flags++
+			// The usage argument must MENTION severityUsage rather than be a
+			// literal. Checking the call rather than the rendered text is what
+			// keeps this about the source of the string.
+			if !mentionsSeverityUsage(call.Args[3]) {
+				offenders++
+				t.Errorf("%s:%d gives the severity flag hand-written help; take it from "+
+					"severityUsage so the flag cannot advertise a vocabulary the validator refuses",
+					name, fset.Position(call.Pos()).Line)
+			}
+			return true
+		})
+	}
+
+	if flags == 0 {
+		t.Fatal("no severity flags found in cmd/; this check would pass vacuously")
+	}
+	t.Logf("examined %d severity flag(s), %d with hand-written help", flags, offenders)
+}
+
+// mentionsSeverityUsage reports whether e contains a call to severityUsage,
+// anywhere in it — the string is sometimes concatenated with a prefix.
+func mentionsSeverityUsage(e ast.Expr) bool {
+	found := false
+	ast.Inspect(e, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "severityUsage" {
+			found = true
+		}
+		return true
+	})
+	return found
 }

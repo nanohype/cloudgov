@@ -51,7 +51,7 @@ var (
 func init() {
 	iamScanCmd.Flags().IntVar(&iamDays, "days", 90, "audit log lookback period in days")
 	iamScanCmd.Flags().StringVar(&iamPrincipal, "principal", "", "scan a specific principal by name or ID")
-	iamScanCmd.Flags().StringVar(&iamSeverity, "severity", "LOW", "minimum severity to report (CRITICAL,HIGH,MEDIUM,LOW,INFO)")
+	iamScanCmd.Flags().StringVar(&iamSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 	iamScanCmd.Flags().StringVar(&iamOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	iamScanCmd.Flags().StringVar(&iamOutputFile, "output-file", "", "write output to file instead of stdout")
 	iamScanCmd.Flags().IntVar(&iamConcurrency, "concurrency", 10, "max parallel goroutines for scanning principals")
@@ -60,7 +60,7 @@ func init() {
 	iamFixCmd.Flags().StringVar(&iamFromFile, "from", "", "path to JSON report from 'cloudgov iam scan --output json'")
 	iamFixCmd.Flags().StringVar(&iamFixFormat, "format", "terraform", "fix format: terraform, json")
 	iamFixCmd.Flags().StringVar(&iamFixOut, "out", "./cloudgov-fixes", "output directory")
-	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", "minimum severity to generate fixes for")
+	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", severityUsage("minimum severity to generate fixes for"))
 	iamFixCmd.Flags().StringVar(&iamFixProfile, "profile", "", "AWS named profile to use for credentials (match the profile used for the scan)")
 	_ = iamFixCmd.MarkFlagRequired("from")
 
@@ -97,6 +97,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	var incomplete []string
 	allUsedPerms := make(map[string][]cloud.Permission)
 	totalPrincipals := 0
+	totalScanned := 0
 	for _, p := range providers {
 		providerName := p.Name()
 		if !quiet {
@@ -117,6 +118,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 		allFindings = append(allFindings, result.Findings...)
 		incomplete = append(incomplete, result.Incomplete...)
 		totalPrincipals += result.Principals
+		totalScanned += result.Scanned
 		for pid, used := range result.UsedPermissions {
 			allUsedPerms[pid] = used
 		}
@@ -139,7 +141,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 
 	switch iamFormat {
 	case "json":
-		return output.WriteIAM(w, allFindings, totalPrincipals, allUsedPerms, incomplete)
+		return output.WriteIAM(w, allFindings, totalPrincipals, totalScanned, allUsedPerms, incomplete)
 	case "sarif":
 		return output.WriteSARIF(w, allFindings, Version, incomplete)
 	default:

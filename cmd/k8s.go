@@ -46,7 +46,7 @@ func init() {
 		"path to kubeconfig file (default: $KUBECONFIG or ~/.kube/config, falls back to in-cluster)")
 	k8sCmd.PersistentFlags().StringVar(&k8sOutputFmt, "output", tableJSONSARIF[0], tableJSONSARIF.usage())
 	k8sCmd.PersistentFlags().StringVar(&k8sOutputFile, "output-file", "", "write output to file instead of stdout")
-	k8sCmd.PersistentFlags().StringVar(&k8sMinSeverity, "severity", "LOW", "minimum severity to report")
+	k8sCmd.PersistentFlags().StringVar(&k8sMinSeverity, "severity", "LOW", severityUsage("minimum severity to report"))
 
 	k8sCmd.AddCommand(k8sRBACCmd)
 }

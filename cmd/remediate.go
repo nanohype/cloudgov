@@ -48,7 +48,7 @@ func init() {
 	remediateCmd.Flags().StringVar(&remediateType, "type", "", "report type: storage, network, or orphans (required)")
 	remediateCmd.Flags().StringVar(&remediateFrom, "from", "", "path to JSON scan report (required)")
 	remediateCmd.Flags().StringVar(&remediateOutDir, "out", ".", "directory to write fix scripts")
-	remediateCmd.Flags().StringVar(&remediateMinSev, "severity", "LOW", "minimum severity to include in fix scripts")
+	remediateCmd.Flags().StringVar(&remediateMinSev, "severity", "LOW", severityUsage("minimum severity to include in fix scripts"))
 	_ = remediateCmd.MarkFlagRequired("type")
 	_ = remediateCmd.MarkFlagRequired("from")
 }
