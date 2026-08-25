@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/output"
@@ -36,6 +35,12 @@ func init() {
 }
 
 func runTags(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(tagsSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	tagsFormat, err := tableJSON.resolve(tagsOutputFmt)
@@ -70,7 +75,7 @@ func runTags(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := tags.Scan(ctx, providers, tags.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(tagsSeverity)),
+		MinSeverity: minSeverity,
 		Rules:       rules,
 	})
 	if err != nil {

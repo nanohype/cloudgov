@@ -97,6 +97,13 @@ func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.Rep
 		if s.Archived {
 			continue
 		}
+		// A probe that did not answer is recorded as unread rather than left to
+		// be read as "off" by the checks below. Every boolean on RepoSettings has
+		// a false that means the setting is disabled and, without this, a false
+		// that means the read failed.
+		for probe, reason := range s.Unread {
+			unread = append(unread, fmt.Sprintf("%s/%s: %s could not be read: %s", org, name, probe, reason))
+		}
 		out = append(out, auditOne(s, exp)...)
 	}
 	return out, unread, nil
@@ -120,6 +127,11 @@ func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {
 			"Either make the repository public, or upgrade the plan, or record in the "+
 				"ledger that this repository is permanently unprotected by choice. The one "+
 				"unacceptable outcome is leaving it unstated.")
+
+	case s.Unread["branch protection"] != "":
+		// The read failed, so `Protected` is a zero value rather than an answer.
+		// The unread record carries this; emitting NO_BRANCH_PROTECTION here
+		// would report a breach derived from a field nothing filled in.
 
 	case !s.Protected:
 		add(cloud.SeverityHigh, cloud.RepoNoProtection,
@@ -170,23 +182,24 @@ func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {
 		}
 	}
 
-	if exp.AlertsEnabled && !s.AlertsEnabled {
+	if exp.AlertsEnabled && !s.AlertsEnabled && s.Unread["Dependabot alerts"] == "" {
 		add(cloud.SeverityHigh, cloud.RepoAlertsDisabled,
 			"Dependabot vulnerability alerts are disabled",
 			"Enable them. Without alerts an advisory against this dependency tree is "+
 				"reported to nobody, and is found only when a PR happens to touch the repo.")
 	}
-	if exp.SecurityUpdatesEnabled && !s.SecurityUpdatesEnabled {
+	if exp.SecurityUpdatesEnabled && !s.SecurityUpdatesEnabled && s.Unread["Dependabot security updates"] == "" {
 		add(cloud.SeverityMedium, cloud.RepoSecurityUpdatesDisabled,
 			"Dependabot security updates are disabled — no remediation PR opens by itself",
-			"Enable automated security fixes. Alerts alone tell somebody; they do not fix "+
-				"anything, and the same advisory has now been found by hand in five repos.")
+			"Enable automated security fixes. Alerts alone tell somebody; they do not "+
+				"fix anything, so the same advisory is resolved by hand once per repository "+
+				"that carries the dependency.")
 	}
 	if s.OpenAlerts > 0 {
 		add(cloud.SeverityHigh, cloud.RepoOpenAlerts,
 			fmt.Sprintf("%d open Dependabot alert(s)", s.OpenAlerts),
-			"Read them. Open alerts sat unread for weeks while the same advisory was "+
-				"fixed by hand in other repos.")
+			"Read them. An open alert is an advisory nobody has decided about, and the "+
+				"decision does not get easier with age.")
 	}
 
 	return out

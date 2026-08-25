@@ -81,6 +81,12 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 	var wg sync.WaitGroup
 	errs := make([]error, 0)
 
+	// Observations a domain SCANNER could not make, as distinct from a whole
+	// domain that failed (errs) or a provider-level warning (cloud.Incomplete).
+	// A scanner that reads per-resource records its misses on its own result, and
+	// neither of the other two channels carries them.
+	scannerUnread := make([]string, 0)
+
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
 		concurrency = 10
@@ -109,6 +115,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 			defer wg.Done()
 			progress("iam", "scanning...")
 			var findings []cloud.Finding
+			var unread []string
 			for _, p := range providers.IAM {
 				result, err := iam.Scan(ctx, p, iam.ScanOptions{
 					Days:        iamDays,
@@ -122,9 +129,18 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 					continue
 				}
 				findings = append(findings, result.Findings...)
+				// The scanner records per-principal read failures on its own
+				// Result, not through the provider's warn channel, so
+				// cloud.Incomplete(providers.IAM) never sees them. `iam scan`
+				// carries them and `audit` used to drop them — the same fact
+				// reaching a caller through one command and erased through the
+				// other, on the command AGENTS.md names first among the fourteen
+				// that honour the contract.
+				unread = append(unread, result.Incomplete...)
 			}
 			mu.Lock()
 			report.IAM = findings
+			scannerUnread = append(scannerUnread, unread...)
 			mu.Unlock()
 			progress("iam", fmt.Sprintf("done (%d findings)", len(findings)))
 		}()
@@ -266,7 +282,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 
 	report.Duration = time.Since(start).Truncate(time.Millisecond).String()
 	report.Summary = buildSummary(report, opts)
-	report.Incomplete = collectIncomplete(providers, opts, errs)
+	report.Incomplete = collectIncomplete(providers, opts, errs, scannerUnread)
 
 	if len(errs) > 0 && !opts.Quiet {
 		for _, err := range errs {
@@ -284,7 +300,7 @@ func Run(ctx context.Context, providers Providers, opts Options) (*Report, error
 // Skipped domains are deliberately absent. The operator asked not to look
 // there, which the summary already reports as DomainsSkipped; treating it as an
 // unobserved domain would make `--skip` raise the incomplete exit code.
-func collectIncomplete(providers Providers, opts Options, errs []error) []string {
+func collectIncomplete(providers Providers, opts Options, errs []error, scannerUnread []string) []string {
 	var out []string
 	ran := func(domain string, n int) bool { return !opts.Skip[domain] && n > 0 }
 
@@ -313,6 +329,7 @@ func collectIncomplete(providers Providers, opts Options, errs []error) []string
 	for _, err := range errs {
 		out = append(out, err.Error())
 	}
+	out = append(out, scannerUnread...)
 	// A run that observed everything reports an empty list, never a nil one. The
 	// JSON envelope always carries the key, and `null` there is indistinguishable
 	// from a report that does not describe its own coverage — which is the

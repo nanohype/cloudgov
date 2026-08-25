@@ -3,6 +3,8 @@ package output
 import (
 	"encoding/json"
 	"io"
+	"strings"
+	"unicode"
 
 	"github.com/nanohype/cloudgov/internal/audit"
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -489,12 +491,82 @@ func buildSecretsRules() []sarifRule {
 }
 
 // WriteAuditSARIF writes all audit findings combined into a single SARIF 2.1.0 report.
+// buildTagRules and buildOrphanRules give the two domains with no standalone
+// SARIF writer the rule entries the audit report needs.
+//
+// A SARIF result whose ruleId is not declared in the driver's rule table is
+// dropped by some consumers and rendered without a name by others, so a domain
+// cannot be added to the results without being added here.
+func buildTagRules() []sarifRule {
+	return []sarifRule{{
+		ID:               tagRuleID,
+		Name:             "MissingRequiredTags",
+		ShortDescription: sarifMessage{Text: "Resource is missing one or more required tags"},
+		DefaultConfig:    sarifRuleConfig{Level: "warning"},
+	}}
+}
+
+// camelCase turns an OrphanKind's snake_case id into a SARIF rule name.
+func camelCase(id string) string {
+	var b strings.Builder
+	upper := true
+	for _, r := range id {
+		if r == '_' {
+			upper = true
+			continue
+		}
+		if upper {
+			b.WriteRune(unicode.ToUpper(r))
+			upper = false
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// tagRuleID is the single rule every tag finding reports under. Tag findings do
+// not carry a type — the finding IS "these keys are absent" — so the missing
+// keys travel in the message rather than in the rule.
+const tagRuleID = "MISSING_REQUIRED_TAGS"
+
+func buildOrphanRules() []sarifRule {
+	kinds := []cloud.OrphanKind{
+		cloud.OrphanDisk, cloud.OrphanIP, cloud.OrphanLoadBalancer,
+		cloud.OrphanSnapshot, cloud.OrphanImage, cloud.OrphanDBSnapshot,
+	}
+	rules := make([]sarifRule, 0, len(kinds))
+	for _, kind := range kinds {
+		rules = append(rules, sarifRule{
+			ID:               string(kind),
+			Name:             "Orphan" + camelCase(string(kind)),
+			ShortDescription: sarifMessage{Text: "Unused resource still incurring cost"},
+			DefaultConfig:    sarifRuleConfig{Level: "note"},
+		})
+	}
+	return rules
+}
+
+// WriteAuditSARIF renders a full audit report as SARIF.
+//
+// Every domain the Report declares is rendered. It used to cover four of seven —
+// IAM, storage, network and secrets — while `cloudgov audit --output sarif`
+// exited 2 on a critical expired certificate whose result was nowhere in the
+// file the merge gate uploaded to code scanning. The exit code and the artifact
+// disagreed, and the artifact is the half a reviewer looks at.
+//
+// TestAuditSARIFCoversEveryDomain counts the Report's own finding slices by
+// reflection, so a domain added there and not here fails the build rather than
+// silently vanishing from the upload.
 func WriteAuditSARIF(w io.Writer, report *audit.Report, version string) error {
 	var allRules []sarifRule
 	allRules = append(allRules, buildRules()...)
 	allRules = append(allRules, buildStorageRules()...)
 	allRules = append(allRules, buildSecretsRules()...)
 	allRules = append(allRules, buildNetworkRules()...)
+	allRules = append(allRules, buildCertRules()...)
+	allRules = append(allRules, buildTagRules()...)
+	allRules = append(allRules, buildOrphanRules()...)
 
 	var results []sarifResult
 	for _, f := range report.IAM {
@@ -526,6 +598,33 @@ func WriteAuditSARIF(w io.Writer, report *audit.Report, version string) error {
 			RuleID:  string(f.Type),
 			Level:   sarifLevel(f.Severity),
 			Message: sarifMessage{Text: "[secrets] " + f.Detail},
+			Kind:    "open",
+		})
+	}
+	for _, f := range report.Certs {
+		results = append(results, sarifResult{
+			RuleID:  string(f.Status),
+			Level:   sarifLevel(f.Severity),
+			Message: sarifMessage{Text: "[certs] " + f.Domain + ": " + f.Detail},
+			Kind:    "open",
+		})
+	}
+	for _, f := range report.Tags {
+		results = append(results, sarifResult{
+			RuleID:  tagRuleID,
+			Level:   sarifLevel(f.Severity),
+			Message: sarifMessage{Text: "[tags] " + f.ResourceID + ": missing " + strings.Join(f.MissingTags, ", ")},
+			Kind:    "open",
+		})
+	}
+	// An orphan carries a cost rather than a severity, and the audit summary
+	// counts it at LOW. Rendering it at the same level keeps the artifact and the
+	// counts telling one story.
+	for _, o := range report.Orphans {
+		results = append(results, sarifResult{
+			RuleID:  string(o.Kind),
+			Level:   sarifLevel(cloud.SeverityLow),
+			Message: sarifMessage{Text: "[orphans] " + o.ID + ": " + o.Detail},
 			Kind:    "open",
 		})
 	}

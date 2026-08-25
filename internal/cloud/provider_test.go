@@ -30,12 +30,16 @@ func TestSeverityRank(t *testing.T) {
 		sev  Severity
 		want int
 	}{
-		{SeverityCritical, 4},
-		{SeverityHigh, 3},
-		{SeverityMedium, 2},
-		{SeverityLow, 1},
-		{SeverityInfo, 0},
+		{SeverityCritical, 5},
+		{SeverityHigh, 4},
+		{SeverityMedium, 3},
+		{SeverityLow, 2},
+		{SeverityInfo, 1},
+		// Rank 0 is reserved for a severity this tool does not recognise. Every
+		// real level ranks above it, so a filter can never treat a typo as a
+		// legitimate level — which is what INFO sharing rank 0 used to allow.
 		{Severity("unknown"), 0},
+		{Severity(""), 0},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.sev), func(t *testing.T) {
@@ -44,6 +48,18 @@ func TestSeverityRank(t *testing.T) {
 				t.Errorf("SeverityRank(%v): got %d, want %d", tt.sev, got, tt.want)
 			}
 		})
+	}
+
+	// The ordering is what every filter and gate depends on, so it is asserted
+	// as an ordering rather than only as five numbers.
+	ordered := []Severity{SeverityInfo, SeverityLow, SeverityMedium, SeverityHigh, SeverityCritical}
+	for i := 1; i < len(ordered); i++ {
+		if SeverityRank(ordered[i]) <= SeverityRank(ordered[i-1]) {
+			t.Errorf("%s does not rank above %s", ordered[i], ordered[i-1])
+		}
+	}
+	if SeverityRank(ordered[0]) <= SeverityRank(Severity("unknown")) {
+		t.Error("the least severe real level does not rank above an unrecognised one")
 	}
 }
 

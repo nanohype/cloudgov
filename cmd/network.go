@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/network"
@@ -43,6 +42,12 @@ func init() {
 }
 
 func runNetworkAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(networkSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	networkFormat, err := tableJSON.resolve(networkOutputFmt)
@@ -56,7 +61,7 @@ func runNetworkAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := network.Scan(ctx, providers, network.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(networkSeverity)),
+		MinSeverity: minSeverity,
 	})
 	if err != nil {
 		return err

@@ -68,6 +68,12 @@ func init() {
 }
 
 func runIAMScan(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(iamSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	iamFormat, err := tableJSONSARIF.resolve(iamOutputFmt)
@@ -83,7 +89,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	opts := iam.ScanOptions{
 		Days:            iamDays,
 		PrincipalFilter: iamPrincipal,
-		MinSeverity:     cloud.Severity(strings.ToUpper(iamSeverity)),
+		MinSeverity:     minSeverity,
 		Concurrency:     iamConcurrency,
 	}
 
@@ -147,6 +153,10 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 }
 
 func runIAMFix(cmd *cobra.Command, _ []string) error {
+	fixSeverity, err := resolveSeverity(iamFixSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	ctx := cmd.Context()
 
 	data, err := os.ReadFile(iamFromFile)
@@ -200,7 +210,7 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 
 	opts := fix.Options{
 		OutputDir: iamFixOut,
-		Severity:  cloud.Severity(strings.ToUpper(iamFixSeverity)),
+		Severity:  fixSeverity,
 	}
 
 	switch strings.ToLower(iamFixFormat) {

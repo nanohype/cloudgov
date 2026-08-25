@@ -84,7 +84,7 @@ func runK8sRBAC(cmd *cobra.Command, _ []string) error {
 
 	switch k8sFormat {
 	case "json":
-		return output.WriteK8sFindings(w, findings)
+		return output.WriteK8sFindings(w, findings, nil)
 	case "sarif":
 		return output.WriteK8sSARIF(w, findings, Version)
 	default:

@@ -76,15 +76,25 @@ const (
 )
 
 // SeverityRank returns a numeric rank for ordering (higher = more severe).
+//
+// Rank 0 is reserved for a severity this tool does not recognise, and every real
+// level — INFO included — ranks above it. INFO used to fall through to the
+// default, which made a legitimate INFO finding and a misspelled severity the
+// same number: `--severity INFO` then admitted findings whose severity was a
+// typo, and no caller could tell the two apart. A vocabulary that cannot
+// distinguish its own members from a mistake is the same conflation this tool
+// exists to prevent, one layer down.
 func SeverityRank(s Severity) int {
 	switch s {
 	case SeverityCritical:
-		return 4
+		return 5
 	case SeverityHigh:
-		return 3
+		return 4
 	case SeverityMedium:
-		return 2
+		return 3
 	case SeverityLow:
+		return 2
+	case SeverityInfo:
 		return 1
 	default:
 		return 0

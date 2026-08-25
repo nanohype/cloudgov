@@ -55,6 +55,12 @@ func init() {
 }
 
 func runAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(auditSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	auditFormat, err := tableJSONSARIF.resolve(auditOutputFmt)
@@ -75,7 +81,7 @@ func runAudit(cmd *cobra.Command, _ []string) error {
 
 	report, err := audit.Run(ctx, providers, audit.Options{
 		Skip:        skip,
-		MinSeverity: cloud.Severity(strings.ToUpper(auditSeverity)),
+		MinSeverity: minSeverity,
 		IAMDays:     auditIAMDays,
 		CertDays:    auditCertDays,
 		TagRules:    cloud.RequiredOnly(auditRequiredTags...),

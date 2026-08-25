@@ -274,3 +274,76 @@ func TestAudit_ListFailureIsAnError(t *testing.T) {
 		t.Fatal("a failed org listing must be an error, not an empty clean report")
 	}
 }
+
+// A probe that did not answer must not be read as a negative answer.
+//
+// `gh` returns the same non-zero exit for a repository with no protection rule,
+// an unreachable API, an unauthenticated CLI and a rate limit. Reading every one
+// of them as "unprotected" filed an outage as NO_BRANCH_PROTECTION at HIGH — a
+// governance breach reported where nothing was read. Only the message separates
+// them, so the message is what gets read.
+func TestAuditDoesNotDeriveFindingsFromUnreadProbes(t *testing.T) {
+	unread := cloud.RepoSettings{
+		Name:       "portal",
+		DefaultRef: "main",
+		Unread: map[string]string{
+			"branch protection":           "dial tcp: connection refused",
+			"Dependabot alerts":           "dial tcp: connection refused",
+			"Dependabot security updates": "dial tcp: connection refused",
+		},
+	}
+	r := &fakeReader{
+		repos:    []string{"portal"},
+		settings: map[string]cloud.RepoSettings{"portal": unread},
+	}
+
+	got, recorded, err := Audit(context.Background(), r, "nanohype", defaults())
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+
+	for _, f := range got {
+		switch f.Type {
+		case cloud.RepoNoProtection, cloud.RepoAlertsDisabled, cloud.RepoSecurityUpdatesDisabled:
+			t.Errorf("a probe that did not answer produced %s, which asserts a setting is off "+
+				"when nothing read it: %+v", f.Type, f)
+		}
+	}
+
+	if len(recorded) != len(unread.Unread) {
+		t.Fatalf("recorded %d unread observations for %d failed probes: %v",
+			len(recorded), len(unread.Unread), recorded)
+	}
+	for _, entry := range recorded {
+		if !strings.Contains(entry, "connection refused") {
+			t.Errorf("the record does not carry what the tool said: %q", entry)
+		}
+	}
+}
+
+// The complement, and the reason the check above is not vacuous: a probe that
+// DID answer, negatively, still produces its finding.
+func TestAuditStillReportsAGenuinelyUnprotectedRepo(t *testing.T) {
+	r := &fakeReader{
+		repos: []string{"portal"},
+		settings: map[string]cloud.RepoSettings{
+			"portal": {Name: "portal", DefaultRef: "main", Protected: false},
+		},
+	}
+	got, recorded, err := Audit(context.Background(), r, "nanohype", defaults())
+	if err != nil {
+		t.Fatalf("Audit: %v", err)
+	}
+	if len(recorded) != 0 {
+		t.Errorf("a repository whose probes all answered reported %d unread: %v", len(recorded), recorded)
+	}
+	found := false
+	for _, f := range got {
+		if f.Type == cloud.RepoNoProtection {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a genuinely unprotected repository produced no NO_BRANCH_PROTECTION finding")
+	}
+}

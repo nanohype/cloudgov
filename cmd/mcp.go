@@ -361,6 +361,10 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "k8s_rbac", Description: "Scan cluster-scoped Kubernetes RBAC for over-privileged ClusterRoles and broad bindings."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			p, err := cloudk8s.New(ctx, in.Kubeconfig, mcpClusterOptions(in.Kubeconfig)...)
 			if err != nil {
 				return nil, nil, err
@@ -369,8 +373,8 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings = filterK8sBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
-			return jsonResult(func(w io.Writer) error { return output.WriteK8sFindings(w, findings) })
+			findings = filterK8sBySeverity(findings, string(minSeverity))
+			return jsonResult(func(w io.Writer) error { return output.WriteK8sFindings(w, findings, nil) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "lambda_audit", Description: "Audit AWS Lambda resource-based policies for public-invoke and confused-deputy risk."},
@@ -448,6 +452,10 @@ func registerMCPTools(s *mcp.Server) {
 
 	mcp.AddTool(s, &mcp.Tool{Name: "platform_audit", Description: "Audit nanohype Platform tenants for conformance to the eks-agent-platform contract: namespace + PSS, ResourceQuota, tenant-egress NetworkPolicy, and the tenant role + EKS Pod Identity binding."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in k8sInput) (*mcp.CallToolResult, any, error) {
+			minSeverity, serr := resolveMCPSeverity(in.Severity)
+			if serr != nil {
+				return nil, nil, serr
+			}
 			clients, err := cloudk8s.NewClients(ctx, in.Kubeconfig, mcpClusterOptions(in.Kubeconfig)...)
 			if err != nil {
 				return nil, nil, err
@@ -462,7 +470,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			findings = filterPlatformBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
+			findings = filterPlatformBySeverity(findings, string(minSeverity))
 			incomplete := append(cloud.Incomplete(awsProviders), unread...)
 			if roles == nil {
 				incomplete = append(incomplete,
@@ -538,43 +546,17 @@ func mcpClusterOptions(kubeconfig string) []cloudk8s.Option {
 	return []cloudk8s.Option{cloudk8s.WithoutExecCredentials()}
 }
 
-// resolveMCPSeverity converts a tool's `severity` argument into a level, or
-// refuses it.
+// resolveMCPSeverity resolves a tool's `severity` argument, defaulting to LOW.
 //
-// The conversion used to be a bare string cast. cloud.SeverityRank returns 0 for
-// anything it does not recognise, and 0 is below LOW, so a caller asking for
-// HIGH-and-above with a typo silently received every finding at every level —
-// and an agent has no way to tell that apart from the account genuinely being
-// that bad. Failing open on a filter argument turns a narrowing request into a
-// widening one.
-//
-// An empty argument is not a typo: it means the caller expressed no preference,
-// and LOW is the documented default.
+// LOW is the documented default for every MCP tool, so it lives here rather than
+// at each call site: fourteen handlers each choosing their own fallback is
+// fourteen chances for one of them to differ from the table in AGENTS.md.
 func resolveMCPSeverity(s string) (cloud.Severity, error) {
-	if strings.TrimSpace(s) == "" {
-		return cloud.SeverityLow, nil
-	}
-	normalized := cloud.Severity(strings.ToUpper(strings.TrimSpace(s)))
-	for _, accepted := range []cloud.Severity{
-		cloud.SeverityCritical, cloud.SeverityHigh, cloud.SeverityMedium,
-		cloud.SeverityLow, cloud.SeverityInfo,
-	} {
-		if normalized == accepted {
-			return normalized, nil
-		}
-	}
-	return "", fmt.Errorf("unknown severity %q; want one of: CRITICAL, HIGH, MEDIUM, LOW, INFO", s)
+	return resolveSeverity(s, cloud.SeverityLow)
 }
 
 func orDefault(v, def int) int {
 	if v == 0 {
-		return def
-	}
-	return v
-}
-
-func orString(v, def string) string {
-	if v == "" {
 		return def
 	}
 	return v

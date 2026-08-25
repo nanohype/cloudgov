@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -53,6 +52,12 @@ func init() {
 }
 
 func runLambdaAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(lambdaSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	lambdaFormat, err := tableJSONSARIF.resolve(lambdaOutputFmt)
@@ -75,7 +80,7 @@ func runLambdaAudit(cmd *cobra.Command, _ []string) error {
 		allFindings = append(allFindings, found...)
 	}
 
-	allFindings = filterLambdaBySeverity(allFindings, cloud.Severity(strings.ToUpper(lambdaSeverity)))
+	allFindings = filterLambdaBySeverity(allFindings, minSeverity)
 
 	incomplete := cloud.Incomplete(providers)
 	gate(allFindings, func(f cloud.LambdaPolicyFinding) cloud.Severity { return f.Severity })

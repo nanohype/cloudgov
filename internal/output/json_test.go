@@ -3,7 +3,12 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -526,6 +531,8 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		"lambda":    func(w io.Writer) error { return WriteLambdaPolicy(w, nil, nil) },
 		"platform":  func(w io.Writer) error { return WritePlatform(w, nil, nil) },
 		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, nil, nil) },
+		"k8s":       func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
+		"repo":      func(w io.Writer) error { return WriteRepo(w, nil, nil) },
 	}
 
 	for domain, write := range writers {
@@ -564,8 +571,64 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 
 	// The list must cover every writer that takes an incomplete argument, or a
 	// domain could ship outside it and read as covered.
-	if len(writers) != 13 {
-		t.Errorf("this check covers %d writers; internal/output has a different number taking an "+
-			"incomplete argument, so one of them is unexercised", len(writers))
+	// Every writer in internal/output that takes an incomplete argument must be
+	// here. Counting rather than trusting the list is what makes a new domain
+	// fail here instead of shipping outside the check.
+	declared := writersTakingIncomplete(t)
+	if len(writers) != declared {
+		t.Errorf("this check covers %d writers; %d in internal/output take an incomplete "+
+			"argument, so the difference is unexercised", len(writers), declared)
 	}
+}
+
+// writersTakingIncomplete counts the exported writers in this package whose last
+// parameter is the incomplete record, by reading the source rather than a list.
+//
+// The list above is maintained by hand, and a hand-maintained list of "every X"
+// is the thing that silently stops being every X. This is the denominator that
+// makes it check itself.
+func writersTakingIncomplete(t *testing.T) int {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || !fn.Name.IsExported() || fn.Type.Params == nil {
+				continue
+			}
+			// Only the JSON writers. IncompleteNote takes the same argument and
+			// renders it to a table, which is a different surface with its own
+			// check (TestIncompleteNoteStatesCoverageEitherWay).
+			if !strings.HasPrefix(fn.Name.Name, "Write") {
+				continue
+			}
+			params := fn.Type.Params.List
+			if len(params) == 0 {
+				continue
+			}
+			last := params[len(params)-1]
+			for _, ident := range last.Names {
+				if ident.Name == "incomplete" {
+					count++
+				}
+			}
+		}
+	}
+	if count == 0 {
+		t.Fatal("no writers take an incomplete argument; the denominator is broken, not the package")
+	}
+	return count
 }

@@ -651,7 +651,7 @@ func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstru
 	}
 
 	if hipaa {
-		out = append(out, auditHipaaGuardrails(ctx, dyn, p, f)...)
+		out = append(out, auditHipaaGuardrails(ctx, dyn, p, f, note)...)
 	}
 	return out
 }
@@ -670,13 +670,19 @@ func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstru
 // anonymizes is a question about Bedrock state, which this audit does not read;
 // declaring HIPAA and silently inheriting a default is answerable from the CRs
 // alone.
-func auditHipaaGuardrails(ctx context.Context, dyn dynamic.Interface, p *unstructured.Unstructured, f findingFunc) []cloud.PlatformFinding {
+func auditHipaaGuardrails(ctx context.Context, dyn dynamic.Interface, p *unstructured.Unstructured, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	ns := p.GetNamespace()
 	gws, err := dyn.Resource(gatewayGVR).Namespace(ns).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		// A gateway the audit cannot read is not a gateway the audit can clear.
-		// Reporting nothing here would read as "no finding" on a Platform whose
-		// routes were never examined.
+		//
+		// The finding alone was not enough: it is emitted at SeverityLow, and the
+		// severity filter every caller applies erases it at MEDIUM or above — the
+		// exact failure the noteFunc doc above this file's auditors describes. A
+		// gate run with --severity HIGH --fail-on HIGH against a HIPAA platform
+		// whose gateways cannot be listed exited 0 with nothing recorded. The note
+		// survives every filter; the finding is what a reader sees in context.
+		note("hipaa platform's ModelGateways could not be listed, so no route guardrail was checked", err)
 		return []cloud.PlatformFinding{f(cloud.SeverityLow, cloud.PlatformHipaaGuardrailInherited, "",
 			"hipaa platform's ModelGateways could not be listed, so their guardrails were not checked",
 			"Re-run with permission to list modelgateways in this namespace.")}

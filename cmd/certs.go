@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/certs"
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -34,6 +33,12 @@ func init() {
 }
 
 func runCerts(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(certsSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	certsFormat, err := tableJSONSARIF.resolve(certsOutputFmt)
@@ -47,7 +52,7 @@ func runCerts(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := certs.Scan(ctx, providers, certs.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(certsSeverity)),
+		MinSeverity: minSeverity,
 		Days:        certsDays,
 	})
 	if err != nil {

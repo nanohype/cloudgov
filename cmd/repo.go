@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
@@ -74,6 +73,12 @@ func init() {
 }
 
 func runRepoAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(repoSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	repoFormat, err := tableJSON.resolve(repoOutputFmt)
@@ -94,7 +99,7 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	minRank := cloud.SeverityRank(cloud.Severity(strings.ToUpper(repoSeverity)))
+	minRank := cloud.SeverityRank(minSeverity)
 	var kept []cloud.RepoFinding
 	for _, f := range findings {
 		if cloud.SeverityRank(f.Severity) >= minRank {

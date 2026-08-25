@@ -51,9 +51,21 @@ func K8sFindings(w io.Writer, findings []cloud.K8sFinding) {
 type k8sReport struct {
 	Findings []cloud.K8sFinding `json:"findings"`
 	Total    int                `json:"total"`
+
+	// Incomplete matches every other domain envelope. The RBAC provider returns
+	// errors rather than partial observations today, so this is empty on every
+	// path — but the field's absence was itself a claim: a consumer reading
+	// fifteen envelopes and finding the key in fourteen cannot tell whether this
+	// one observed everything or does not report coverage. An always-present
+	// empty array says which.
+	Incomplete []string `json:"incomplete"`
 }
 
 // WriteK8sFindings marshals Kubernetes findings as JSON to w.
-func WriteK8sFindings(w io.Writer, findings []cloud.K8sFinding) error {
-	return writeJSON(w, k8sReport{Findings: findings, Total: len(findings)})
+func WriteK8sFindings(w io.Writer, findings []cloud.K8sFinding, incomplete []string) error {
+	return writeJSON(w, k8sReport{
+		Findings:   findings,
+		Total:      len(findings),
+		Incomplete: observed(incomplete),
+	})
 }

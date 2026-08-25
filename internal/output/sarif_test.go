@@ -3,6 +3,8 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/audit"
@@ -293,6 +295,103 @@ func TestWriteCertsSARIF(t *testing.T) {
 	} {
 		if got := ruleLevel[string(status)]; got != want {
 			t.Errorf("rule %s defaultConfiguration.level = %q, want %q", status, got, want)
+		}
+	}
+}
+
+// Every domain the audit Report declares reaches the SARIF artifact.
+//
+// The exit code and the artifact are two halves of one answer to a merge gate,
+// and they used to disagree: `cloudgov audit --output sarif` exited 2 on a
+// critical expired certificate while the file uploaded to code scanning
+// contained no such result. Certs, tags and orphans were never rendered.
+//
+// Counting the Report's own finding slices by reflection rather than a written
+// list is what makes this a class: a domain added to Report and not to the writer
+// fails here.
+func TestAuditSARIFCoversEveryDomain(t *testing.T) {
+	report := &audit.Report{
+		IAM:     []cloud.Finding{{Severity: cloud.SeverityHigh, Type: cloud.FindingAdminAccess, Detail: "admin"}},
+		Storage: []cloud.BucketFinding{{Severity: cloud.SeverityHigh, Type: cloud.BucketPublicAccess, Bucket: "docs", Detail: "public"}},
+		Network: []cloud.NetworkFinding{{Severity: cloud.SeverityHigh, Type: cloud.NetworkAdminPortOpen, Resource: "sg-1", Detail: "ssh open"}},
+		Secrets: []cloud.SecretFinding{{Severity: cloud.SeverityCritical, Type: cloud.SecretAWSAccessKey, Resource: "fn-1", Detail: "AKIA****"}},
+		Certs:   []cloud.CertFinding{{Severity: cloud.SeverityCritical, Status: cloud.CertExpired, Domain: "api.example.test", Detail: "expired"}},
+		Tags:    []cloud.TagFinding{{Severity: cloud.SeverityMedium, ResourceID: "raw", MissingTags: []string{"Team"}}},
+		Orphans: []cloud.OrphanResource{{Kind: cloud.OrphanDisk, ID: "vol-1", Detail: "unattached", MonthlyCost: 8}},
+	}
+
+	domainFields := 0
+	rt := reflect.TypeOf(*report)
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		if f.Type.Kind() == reflect.Slice && f.Name != "Incomplete" {
+			domainFields++
+		}
+	}
+	if domainFields == 0 {
+		t.Fatal("audit.Report declares no finding slices; this check would pass vacuously")
+	}
+
+	var buf bytes.Buffer
+	if err := WriteAuditSARIF(&buf, report, "test"); err != nil {
+		t.Fatalf("WriteAuditSARIF: %v", err)
+	}
+
+	var log struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID string `json:"id"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID  string `json:"ruleId"`
+				Message struct {
+					Text string `json:"text"`
+				} `json:"message"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &log); err != nil {
+		t.Fatalf("the SARIF artifact is not valid JSON: %v", err)
+	}
+	if len(log.Runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(log.Runs))
+	}
+	results := log.Runs[0].Results
+
+	if len(results) != domainFields {
+		t.Fatalf("audit.Report declares %d finding domains and the SARIF carries %d results; "+
+			"a domain the writer misses is a finding the merge gate never sees", domainFields, len(results))
+	}
+
+	// Each result must be tagged with the domain it came from, so a reviewer can
+	// tell which scan produced it.
+	for _, domain := range []string{"[iam]", "[storage]", "[network]", "[secrets]", "[certs]", "[tags]", "[orphans]"} {
+		found := false
+		for _, r := range results {
+			if strings.Contains(r.Message.Text, domain) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no SARIF result carries the %s domain tag", domain)
+		}
+	}
+
+	// A result whose ruleId is not declared is dropped or unnamed by consumers.
+	declared := map[string]bool{}
+	for _, rule := range log.Runs[0].Tool.Driver.Rules {
+		declared[rule.ID] = true
+	}
+	if len(declared) == 0 {
+		t.Fatal("the driver declares no rules; every result would be unnamed")
+	}
+	for _, r := range results {
+		if !declared[r.RuleID] {
+			t.Errorf("result ruleId %q is not declared in the driver's rule table", r.RuleID)
 		}
 	}
 }

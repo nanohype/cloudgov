@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	"github.com/nanohype/cloudgov/internal/output"
@@ -43,6 +42,12 @@ func init() {
 }
 
 func runStorageAudit(cmd *cobra.Command, _ []string) error {
+	// Refused rather than coerced: an unrecognised level ranks below every
+	// real one, so a typo widens a reporting floor instead of failing.
+	minSeverity, err := resolveSeverity(storageSeverity, cloud.SeverityLow)
+	if err != nil {
+		return err
+	}
 	// Validated before any provider is resolved, so an unrenderable format
 	// fails on the flag rather than after a full account sweep.
 	storageFormat, err := tableJSONSARIF.resolve(storageOutputFmt)
@@ -56,7 +61,7 @@ func runStorageAudit(cmd *cobra.Command, _ []string) error {
 	}
 
 	findings, err := storage.Scan(ctx, providers, storage.ScanOptions{
-		MinSeverity: cloud.Severity(strings.ToUpper(storageSeverity)),
+		MinSeverity: minSeverity,
 	})
 	if err != nil {
 		return err

@@ -120,6 +120,18 @@ type ghProtection struct {
 	Message          string                  `json:"message"`
 }
 
+// isNotFound reports whether a gh error is a 404 — the API's way of saying the
+// feature is off — rather than a failure to reach the API at all.
+//
+// gh writes the HTTP status into its stderr, which Run carries through. Matching
+// on that is narrower than matching on "any error", and narrower is the whole
+// point: everything this does NOT match is recorded as unread instead of being
+// read as a negative answer.
+func isNotFound(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "HTTP 404") || strings.Contains(msg, "Not Found")
+}
+
 // Settings reads one repository's protection and Dependabot state.
 //
 // The three ways protection can be absent are kept distinct, because they are
@@ -156,13 +168,23 @@ func (g *GHReader) Settings(ctx context.Context, org, name string) (cloud.RepoSe
 		s.DefaultRef = m.Def
 	}
 
+	// The protection endpoint answers with an error in three different situations
+	// and gh returns the same non-zero exit for all of them: the branch is
+	// genuinely unprotected, the plan does not offer protection, or the read did
+	// not happen. Only the first two are answers.
+	//
+	// Treating every error as "unprotected" filed an unreachable API, an
+	// unauthenticated CLI and a rate limit as NO_BRANCH_PROTECTION at HIGH — a
+	// governance breach reported where there was an outage. The message is the
+	// only thing that separates them, so it is read rather than the exit status.
 	prot, perr := g.Run(ctx, "api", fmt.Sprintf("repos/%s/%s/branches/%s/protection", org, name, s.DefaultRef))
 	switch {
 	case perr != nil && strings.Contains(perr.Error(), "Upgrade to GitHub Pro"):
 		s.ProtectionUnavailable = true
-	case perr != nil:
-		// "Branch not protected" is the ordinary unprotected case, not an error.
+	case perr != nil && strings.Contains(perr.Error(), "Branch not protected"):
 		s.Protected = false
+	case perr != nil:
+		s.MarkUnread("branch protection", perr)
 	default:
 		var p ghProtection
 		if err := json.Unmarshal(prot, &p); err != nil {
@@ -191,13 +213,20 @@ func (g *GHReader) Settings(ctx context.Context, org, name string) (cloud.RepoSe
 		}
 	}
 
-	// 204 = enabled, 404 = disabled. gh exits non-zero on 404, so absence of an
-	// error is the signal.
+	// 204 = enabled, 404 = disabled. gh exits non-zero on both a 404 and on every
+	// failure to reach the endpoint at all, so "no error" is a usable signal for
+	// enabled and "an error" is not a usable signal for disabled: a 404 is an
+	// answer, anything else is silence. Reading the message is what separates
+	// them.
 	if _, err := g.Run(ctx, "api", fmt.Sprintf("repos/%s/%s/vulnerability-alerts", org, name)); err == nil {
 		s.AlertsEnabled = true
+	} else if !isNotFound(err) {
+		s.MarkUnread("Dependabot alerts", err)
 	}
 	if _, err := g.Run(ctx, "api", fmt.Sprintf("repos/%s/%s/automated-security-fixes", org, name)); err == nil {
 		s.SecurityUpdatesEnabled = true
+	} else if !isNotFound(err) {
+		s.MarkUnread("Dependabot security updates", err)
 	}
 	if alerts, err := g.Run(ctx, "api",
 		fmt.Sprintf("repos/%s/%s/dependabot/alerts?state=open&per_page=100", org, name),
