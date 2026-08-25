@@ -86,15 +86,17 @@ func runPlatformAudit(cmd *cobra.Command, _ []string) error {
 		awsProviders = append(awsProviders, awsP)
 	}
 
-	findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
+	findings, unread, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 	if err != nil {
 		return err
 	}
 	findings = filterPlatformBySeverity(findings, strings.ToUpper(platformSeverity))
 
 	// Warnings raised while reading tenant roles accumulate on the provider and
-	// are only a record if something reads them.
-	incomplete := cloud.Incomplete(awsProviders)
+	// are only a record if something reads them. The cluster side has no
+	// provider to accumulate on, so the auditor returns its own unread list;
+	// both are the same fact and both must survive the severity filter above.
+	incomplete := append(cloud.Incomplete(awsProviders), unread...)
 	if roles == nil {
 		incomplete = append(incomplete,
 			"AWS credentials not detected; tenant-role and Pod Identity conformance were not checked")

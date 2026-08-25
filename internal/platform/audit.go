@@ -95,6 +95,16 @@ const podIdentityPrincipal = "pods.eks.amazonaws.com"
 // namespace context for the platform under audit.
 type findingFunc func(sev cloud.Severity, t cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding
 
+// noteFunc records an observation the audit was asked to make and could not, so
+// it reaches the run's incomplete list and its exit code.
+//
+// A finding cannot carry this. Findings are severity-filtered, and the severity
+// that fits "I could not look" is below the floor every caller sets, so the
+// record is dropped exactly when it matters. The consequence is the one this
+// tool exists to prevent: a tenant whose egress policy could not be read renders
+// identically to a tenant whose egress policy is correct.
+type noteFunc func(what string, err error)
+
 // IdentityReader fetches the AWS-side tenant identity: the IAM role, and the
 // Pod Identity association that binds it to a ServiceAccount. The AWS provider
 // implements it; pass nil to skip AWS-side checks (e.g. no credentials).
@@ -107,19 +117,27 @@ type IdentityReader interface {
 
 // Audit lists every Platform CR in the cluster and reports conformance gaps in
 // each tenant's namespace and identity wiring. Read-only.
-func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles IdentityReader) ([]cloud.PlatformFinding, error) {
+//
+// The second return is the run's incomplete list: one entry per conformance
+// check that could not be performed. It is separate from the findings because
+// findings are severity-filtered and this record must survive every filter — an
+// unexamined tenant is not a conformant tenant.
+func Audit(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles IdentityReader) ([]cloud.PlatformFinding, []string, error) {
 	list, err := dyn.Resource(platformGVR).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("list Platform CRs (platform.nanohype.dev/v1alpha1): %w", err)
+		return nil, nil, fmt.Errorf("list Platform CRs (platform.nanohype.dev/v1alpha1): %w", err)
 	}
 	var findings []cloud.PlatformFinding
+	var incomplete []string
 	for i := range list.Items {
-		findings = append(findings, auditPlatform(ctx, typed, dyn, roles, &list.Items[i])...)
+		f, inc := auditPlatform(ctx, typed, dyn, roles, &list.Items[i])
+		findings = append(findings, f...)
+		incomplete = append(incomplete, inc...)
 	}
-	return findings, nil
+	return findings, incomplete, nil
 }
 
-func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles IdentityReader, p *unstructured.Unstructured) []cloud.PlatformFinding {
+func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, roles IdentityReader, p *unstructured.Unstructured) ([]cloud.PlatformFinding, []string) {
 	name := p.GetName()
 	tenant, _, _ := unstructured.NestedString(p.Object, "spec", "tenant")
 	persona, _, _ := unstructured.NestedString(p.Object, "spec", "persona")
@@ -141,25 +159,36 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 		}
 	}
 
+	var incomplete []string
+	note := func(what string, err error) {
+		if err != nil {
+			incomplete = append(incomplete, fmt.Sprintf("platform %s (%s): %s: %v", name, ns, what, err))
+			return
+		}
+		incomplete = append(incomplete, fmt.Sprintf("platform %s (%s): %s", name, ns, what))
+	}
+
 	var out []cloud.PlatformFinding
 	out = append(out, auditIdentity(p, f)...)
-	out = append(out, auditBudgetCompliance(ctx, dyn, p, f)...)
+	out = append(out, auditBudgetCompliance(ctx, dyn, p, f, note)...)
 
 	// Only Ready/Suspended platforms are expected to be fully provisioned. For
 	// the rest, namespace conformance gaps are expected (still provisioning).
 	if phase != "Ready" && phase != "Suspended" {
+		note(fmt.Sprintf("phase is %s, so namespace conformance was not checked", orUnset(phase)), nil)
 		return append(out, f(cloud.SeverityInfo, cloud.PlatformNotReady, "",
 			fmt.Sprintf("phase is %q; skipping namespace conformance checks", orUnset(phase)),
-			"Re-run once the Platform reaches Ready."))
+			"Re-run once the Platform reaches Ready.")), incomplete
 	}
 
 	nsObj, err := typed.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return append(out, f(cloud.SeverityCritical, cloud.PlatformNamespaceMissing, ns,
-				"tenant namespace does not exist", "Check the Platform reconcile status; the operator provisions the namespace."))
+				"tenant namespace does not exist", "Check the Platform reconcile status; the operator provisions the namespace.")), incomplete
 		}
-		return append(out, f(cloud.SeverityInfo, cloud.PlatformNotReady, ns, "could not read tenant namespace: "+err.Error(), ""))
+		note("tenant namespace could not be read, so no namespace conformance check ran", err)
+		return append(out, f(cloud.SeverityInfo, cloud.PlatformNotReady, ns, "could not read tenant namespace: "+err.Error(), "")), incomplete
 	}
 
 	if nsObj.Labels[pssEnforce] != "restricted" {
@@ -180,24 +209,30 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 		}
 	}
 
-	if _, err := typed.CoreV1().ResourceQuotas(ns).Get(ctx, defaultName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+	switch _, err := typed.CoreV1().ResourceQuotas(ns).Get(ctx, defaultName, metav1.GetOptions{}); {
+	case apierrors.IsNotFound(err):
 		out = append(out, f(cloud.SeverityHigh, cloud.PlatformQuotaMissing, ns+"/"+defaultName,
 			"tenant ResourceQuota is missing; the namespace can consume unbounded cluster resources",
 			"Restore the tenant-default ResourceQuota."))
+	case err != nil:
+		note("tenant ResourceQuota could not be read", err)
 	}
-	if _, err := typed.CoreV1().LimitRanges(ns).Get(ctx, defaultName, metav1.GetOptions{}); apierrors.IsNotFound(err) {
+	switch _, err := typed.CoreV1().LimitRanges(ns).Get(ctx, defaultName, metav1.GetOptions{}); {
+	case apierrors.IsNotFound(err):
 		out = append(out, f(cloud.SeverityMedium, cloud.PlatformLimitRangeMissing, ns+"/"+defaultName,
 			"tenant LimitRange is missing; pods without explicit resources may breach the quota",
 			"Restore the tenant-default LimitRange."))
+	case err != nil:
+		note("tenant LimitRange could not be read", err)
 	}
 
-	out = append(out, auditNetworkPolicy(ctx, typed, dyn, ns, f)...)
-	out = append(out, auditServiceAccount(ctx, typed, binding, f)...)
+	out = append(out, auditNetworkPolicy(ctx, typed, dyn, ns, f, note)...)
+	out = append(out, auditServiceAccount(ctx, typed, binding, f, note)...)
 	if roles != nil && roleArn != "" {
-		out = append(out, auditRole(ctx, roles, roleArn, suspended, extras, f)...)
-		out = append(out, auditPodIdentity(ctx, roles, binding, roleArn, f)...)
+		out = append(out, auditRole(ctx, roles, roleArn, suspended, extras, f, note)...)
+		out = append(out, auditPodIdentity(ctx, roles, binding, roleArn, f, note)...)
 	}
-	return out
+	return out, incomplete
 }
 
 // tenantBinding is the Pod Identity binding a Platform reports on
@@ -275,12 +310,13 @@ func auditIdentity(p *unstructured.Unstructured, f findingFunc) []cloud.Platform
 // It also still reports missing when the operator silently skipped the policy
 // because the CiliumNetworkPolicy CRD was absent — in that case neither kind
 // exists and the tenant genuinely has no containment.
-func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, ns string, f findingFunc) []cloud.PlatformFinding {
+func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, dyn dynamic.Interface, ns string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	np, err := typed.NetworkingV1().NetworkPolicies(ns).Get(ctx, netpolName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return auditCiliumNetworkPolicy(ctx, dyn, ns, f)
+		return auditCiliumNetworkPolicy(ctx, dyn, ns, f, note)
 	}
 	if err != nil {
+		note("tenant-egress NetworkPolicy could not be read, so egress containment was not checked", err)
 		return nil
 	}
 
@@ -321,7 +357,7 @@ func auditNetworkPolicy(ctx context.Context, typed kubernetes.Interface, dyn dyn
 // stronger than omitting the key — so only a non-empty rule set is a weakening.
 // Flagging the key's presence, as the vanilla branch flags the Ingress policy
 // type, would report the stronger configuration as the weaker one.
-func auditCiliumNetworkPolicy(ctx context.Context, dyn dynamic.Interface, ns string, f findingFunc) []cloud.PlatformFinding {
+func auditCiliumNetworkPolicy(ctx context.Context, dyn dynamic.Interface, ns string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	ref := ns + "/" + netpolName
 	cnp, err := dyn.Resource(ciliumNetworkPolicyGVR).Namespace(ns).Get(ctx, netpolName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
@@ -330,6 +366,7 @@ func auditCiliumNetworkPolicy(ctx context.Context, dyn dynamic.Interface, ns str
 			"Restore the tenant-egress default-deny + allow-list policy for the cluster's network engine.")}
 	}
 	if err != nil {
+		note("tenant-egress CiliumNetworkPolicy could not be read, so egress containment was not checked", err)
 		return nil
 	}
 
@@ -364,7 +401,7 @@ func auditCiliumNetworkPolicy(ctx context.Context, dyn dynamic.Interface, ns str
 // actually binds — not a fixed name. Under vcluster isolation the bound
 // ServiceAccount is a syncer-translated host name, so a fixed tenant-runtime
 // lookup would report every conformant vcluster tenant as missing its SA.
-func auditServiceAccount(ctx context.Context, typed kubernetes.Interface, b tenantBinding, f findingFunc) []cloud.PlatformFinding {
+func auditServiceAccount(ctx context.Context, typed kubernetes.Interface, b tenantBinding, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	if !b.derivable {
 		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformPodIdentityUnknown, b.namespace,
 			"Platform reports no status.podIdentity and uses vcluster isolation; the bound ServiceAccount is syncer-translated and cannot be derived",
@@ -379,6 +416,7 @@ func auditServiceAccount(ctx context.Context, typed kubernetes.Interface, b tena
 			"Restore the tenant ServiceAccount; the operator reconciles it from the Platform.")}
 	}
 	if err != nil {
+		note("tenant ServiceAccount could not be read, so the Pod Identity binding was not checked", err)
 		return nil
 	}
 
@@ -406,13 +444,14 @@ func orUnset(s string) string {
 // policies and nothing hand-attached, has a suspension tag consistent with
 // Platform.status, and carries the declared extraPolicyArns plus a baseline when
 // active.
-func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspended bool, extras []string, f findingFunc) []cloud.PlatformFinding {
+func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspended bool, extras []string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	name := roleNameFromARN(roleArn)
 	if name == "" {
 		return nil
 	}
 	info, err := roles.GetRoleInfo(ctx, name)
 	if err != nil {
+		note("tenant IAM role "+name+" could not be read, so trust and inline-policy conformance were not checked", err)
 		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformNotReady, roleArn, "could not read IAM role: "+err.Error(), "")}
 	}
 	if info == nil {
@@ -513,8 +552,9 @@ func auditInlinePolicies(names []string, roleArn string, suspended bool, f findi
 // tenant role to tenant pods. This is the only place tenancy is observable: the
 // role's trust policy carries no subject, so a conformant trust document is
 // identical for every tenant in the account.
-func auditPodIdentity(ctx context.Context, roles IdentityReader, b tenantBinding, roleArn string, f findingFunc) []cloud.PlatformFinding {
+func auditPodIdentity(ctx context.Context, roles IdentityReader, b tenantBinding, roleArn string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	if !b.published || b.clusterName == "" {
+		note("Platform publishes no status.podIdentity, so the Pod Identity association was not verified", nil)
 		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformPodIdentityUnknown, b.namespace,
 			"Platform reports no status.podIdentity binding; the Pod Identity association was not verified",
 			"Re-run once the operator has published status.podIdentity.")}
@@ -523,6 +563,7 @@ func auditPodIdentity(ctx context.Context, roles IdentityReader, b tenantBinding
 	ref := b.namespace + "/" + b.serviceAccount
 	assoc, err := roles.GetPodIdentityAssociation(ctx, b.clusterName, b.namespace, b.serviceAccount)
 	if err != nil {
+		note("Pod Identity association for "+ref+" could not be read", err)
 		return []cloud.PlatformFinding{f(cloud.SeverityInfo, cloud.PlatformNotReady, ref,
 			"could not read the Pod Identity association: "+err.Error(), "")}
 	}
@@ -560,7 +601,7 @@ func roleNameFromARN(arn string) string {
 // referenced BudgetPolicy exists, SOC2 platforms have the kill-switch enabled,
 // and the Platform is at least as strict as its owning Tenant. These are spec
 // consistency checks, so they run regardless of phase.
-func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstructured.Unstructured, f findingFunc) []cloud.PlatformFinding {
+func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstructured.Unstructured, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	var out []cloud.PlatformFinding
 	ns := p.GetNamespace()
 	soc2, _, _ := unstructured.NestedBool(p.Object, "spec", "compliance", "soc2")
@@ -581,6 +622,8 @@ func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstru
 				out = append(out, f(cloud.SeverityHigh, cloud.PlatformKillSwitchDisabled, ns+"/"+budgetName,
 					"SOC2 platform's BudgetPolicy has killSwitchEnabled=false", "Enable the budget kill-switch; SOC2 requires it."))
 			}
+		case err != nil:
+			note("BudgetPolicy "+budgetName+" could not be read, so the kill-switch was not checked", err)
 		}
 	}
 
@@ -602,6 +645,8 @@ func auditBudgetCompliance(ctx context.Context, dyn dynamic.Interface, p *unstru
 				out = append(out, f(cloud.SeverityHigh, cloud.PlatformComplianceWeaker, tenantName,
 					"Tenant requires hipaa but this Platform does not set compliance.hipaa", "Set compliance.hipaa=true to match the Tenant baseline."))
 			}
+		default:
+			note("Tenant "+tenantName+" could not be read, so the Platform-is-at-least-as-strict check did not run", err)
 		}
 	}
 

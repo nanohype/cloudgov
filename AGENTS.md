@@ -83,17 +83,31 @@ account honours it — all 14: `audit`, `iam scan`, `storage audit`,
 `network audit`, `certs`, `tags`, `secrets scan`, `orphans`, `quota`,
 `inventory`, `cost diff`, `drift`, `lambda audit`, `platform audit`.
 
-`platform audit` reads an AWS account for the tenant-role and Pod Identity
-checks, and reports absent credentials as an incomplete observation rather than
-a note: skipping a whole class of conformance checks is not the same as passing
-them.
+Two commands reach the contract by a route other than a provider's recorded
+warnings, because the fact they must report does not arrive there.
+
+`drift` compares a tfstate against live AWS. A resource whose live state cannot
+be read is recorded as a `DriftError` row, and `drift.Incomplete` lifts every
+such row into the run's incomplete list. Without that lift the row is a table
+cell: the exit code and the `incomplete` array would report a tfstate as
+matching an account the scan never saw.
+
+`platform audit` reads both a cluster and an AWS account. It returns its own
+list of conformance checks it could not perform, alongside the findings, and the
+command appends it to the AWS provider's warnings. The list is separate from the
+findings because findings are severity-filtered and the severity that fits "I
+could not look" sits below the floor every caller sets — so carrying the record
+as a finding would delete it exactly when it matters. Absent AWS credentials are
+recorded the same way: skipping a whole class of conformance checks is not the
+same as passing them.
 
 The conformance test (`cmd/incomplete_contract_test.go`) enumerates every
 `cmd/` file that imports a provider package and fails the build on any that is
-neither gated nor explicitly exempt. It enumerates by import rather than by
-construction idiom, because an earlier version matched three registry idioms and
-silently excluded the two commands that build a provider directly — a coverage
-claim about what the check recognised, stated as a claim about what existed.
+neither gated nor explicitly exempt. Enumerating by import rather than by
+construction idiom is what makes the population the set of commands that exist
+rather than the set the check knows how to recognise: a command that builds a
+provider by an idiom nobody has written yet is still counted, and must still be
+gated or exempted by name.
 
 It does not apply to commands that read no cloud account: `compare`, `report`,
 `baseline`, `remediate`, `compliance` and `repo audit` work from files or the

@@ -298,7 +298,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err != nil {
 				return nil, nil, err
 			}
-			incomplete := cloud.Incomplete(providers)
+			incomplete := append(cloud.Incomplete(providers), drift.Incomplete(results)...)
 			return jsonResult(func(w io.Writer) error { return output.WriteDrift(w, results, incomplete) })
 		})
 
@@ -418,12 +418,12 @@ func registerMCPTools(s *mcp.Server) {
 				roles = awsP
 				awsProviders = append(awsProviders, awsP)
 			}
-			findings, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
+			findings, unread, err := platform.Audit(ctx, clients.Typed, clients.Dynamic, roles)
 			if err != nil {
 				return nil, nil, err
 			}
 			findings = filterPlatformBySeverity(findings, strings.ToUpper(orString(in.Severity, "LOW")))
-			incomplete := cloud.Incomplete(awsProviders)
+			incomplete := append(cloud.Incomplete(awsProviders), unread...)
 			if roles == nil {
 				incomplete = append(incomplete,
 					"AWS credentials not detected; tenant-role and Pod Identity conformance were not checked")

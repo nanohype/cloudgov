@@ -32,13 +32,13 @@ file    cmd/gate.go                    100
 package internal/certs              90
 package internal/cloud/aws          82
 package internal/cost               95
-package internal/drift              85
+package internal/drift              88
 package internal/iam                88    # was 50 against 90.3 measured — a stale ratchet permits a 40-point regression
 package internal/inventory          85
 package internal/network            94
 package internal/orphans            95
 package internal/output/sinks       84
-package internal/platform           83
+package internal/platform           86
 package internal/repo               80
 package internal/quota              95
 package internal/secrets            93

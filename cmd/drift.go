@@ -70,7 +70,7 @@ func runDrift(cmd *cobra.Command, args []string) error {
 			break
 		}
 	}
-	incomplete := cloud.Incomplete(providers)
+	incomplete := append(cloud.Incomplete(providers), drift.Incomplete(results)...)
 	gateBool(drifted)
 	gateIncomplete(incomplete)
 

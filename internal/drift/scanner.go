@@ -89,6 +89,25 @@ func Scan(ctx context.Context, resources []ParsedResource, providers []cloud.Dri
 	return final, nil
 }
 
+// Incomplete returns one not-observed reason per resource whose live state could
+// not be read.
+//
+// A DriftError row already records that the comparison did not happen, but on
+// its own it is a table cell: a caller reading the exit code, or the JSON report's
+// incomplete array, sees a scan that found no drift. They are the same fact and
+// must reach both, or a run denied every Describe call reports a tfstate as
+// matching an account it never saw.
+func Incomplete(results []cloud.DriftResult) []string {
+	var out []string
+	for _, r := range results {
+		if r.Status != cloud.DriftError {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s %s: live state could not be read (%s)", r.ResourceType, r.ResourceID, r.Detail))
+	}
+	return out
+}
+
 func driftStatusRank(s cloud.DriftStatus) int {
 	switch s {
 	case cloud.DriftDeleted:
