@@ -9,7 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
+	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 	cloudaws "github.com/nanohype/cloudgov/internal/cloud/aws"
@@ -28,6 +28,11 @@ type Factory interface {
 // (NewRegistry / Default) — there is no package-level mutable registry.
 type Registry struct {
 	factories []Factory
+	// failed names the providers whose credentials were detected and whose
+	// construction then failed. Each is a capability the run could not cover, so
+	// it belongs in the incomplete record rather than on stderr — where --quiet
+	// hides it, the JSON envelope never sees it, and the exit code stays 0.
+	failed []string
 }
 
 // NewRegistry returns a Registry over the given factories.
@@ -36,8 +41,9 @@ func NewRegistry(factories ...Factory) *Registry {
 }
 
 // Available returns every provider whose credentials are detected. A factory
-// that detects but fails to construct is skipped with a warning rather than
-// failing the whole run, so one misconfigured cloud doesn't sink the others.
+// that detects but fails to construct is skipped rather than failing the whole
+// run, so one misconfigured cloud does not sink the others — and Incomplete()
+// reports it, so the skip is a recorded gap rather than a silent one.
 func (r *Registry) Available(ctx context.Context) []cloud.Provider {
 	var out []cloud.Provider
 	for _, f := range r.factories {
@@ -46,7 +52,11 @@ func (r *Registry) Available(ctx context.Context) []cloud.Provider {
 		}
 		p, err := f.New(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "warning: %s credentials detected but initialization failed: %v\n", f.Name(), err)
+			// Recorded, not merely printed. A provider that failed to initialise
+			// is a whole capability the run cannot cover, and a bare write to
+			// stderr is invisible to --quiet, to the JSON envelope and to the
+			// exit code alike — the three places a caller looks.
+			r.failed = append(r.failed, fmt.Sprintf("%s credentials detected but initialization failed: %v", f.Name(), err))
 			continue
 		}
 		out = append(out, p)
@@ -64,6 +74,15 @@ func Capable[T any](ctx context.Context, r *Registry) ([]T, error) {
 		}
 	}
 	if len(out) == 0 {
+		// A provider whose credentials were detected and whose construction then
+		// failed is not the same as no provider at all, and saying "no cloud
+		// provider detected" for it sends the caller to check credentials that
+		// were found. The distinction also decides whether there is any coverage
+		// left: with nothing built, the run reports on an account it never
+		// reached.
+		if failed := r.Incomplete(); len(failed) > 0 {
+			return nil, fmt.Errorf("no usable cloud provider: %s", strings.Join(failed, "; "))
+		}
 		return nil, errors.New("no cloud provider detected")
 	}
 	return out, nil
@@ -142,4 +161,17 @@ func (f awsFactory) Detect(ctx context.Context) bool {
 
 func (f awsFactory) New(ctx context.Context) (cloud.Provider, error) {
 	return cloudaws.NewWithProfile(ctx, f.profile, f.opts()...)
+}
+
+// Incomplete names the capabilities this registry could not supply.
+//
+// A provider whose credentials were present and whose construction failed is not
+// an absent provider: the caller asked for a cloud the tool could see and could
+// not read. Reported through the same channel as every other unread observation,
+// so it reaches the incomplete array and the exit code.
+func (r *Registry) Incomplete() []string {
+	if r.failed == nil {
+		return []string{}
+	}
+	return r.failed
 }

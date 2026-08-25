@@ -187,6 +187,12 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		providerMap[p.Name()] = p
 	}
 
+	// A principal this pass could not generate a policy for is a principal the
+	// fix set does not cover. Without this record the caller gets a smaller fix
+	// set than the report it was built from, exit 0, and nothing saying which
+	// principals were left out.
+	var unfixed []string
+
 	policies := make(map[string]cloud.Policy)
 	for _, f := range r.Findings {
 		if f.Principal == nil {
@@ -197,11 +203,15 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		}
 		p, ok := providerMap[f.Provider]
 		if !ok {
+			unfixed = append(unfixed, fmt.Sprintf("%s: no %s provider is available, so no policy was generated",
+				f.Principal.Name, f.Provider))
 			continue
 		}
 		usedPerms := r.UsedPermissions[f.Principal.ID]
 		pol, err := p.MinimalPolicy(ctx, *f.Principal, usedPerms)
 		if err != nil {
+			unfixed = append(unfixed, fmt.Sprintf("%s: minimal policy could not be generated: %v",
+				f.Principal.Name, err))
 			continue
 		}
 		policies[f.Principal.ID] = pol
@@ -209,6 +219,12 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 			writePolicyFallbackWarnings(os.Stderr, f.Principal.Name, pol.Fallbacks)
 		}
 	}
+
+	// The same contract as every command that reads an account: a fix set built
+	// from a partial pass must not report as a complete one. The provider's own
+	// unread observations count too — a scan that could not read a principal's
+	// policies produces a fix for it that is not a fix.
+	gateIncomplete(append(cloud.Incomplete(providers), unfixed...))
 
 	opts := fix.Options{
 		OutputDir: iamFixOut,

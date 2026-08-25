@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"sort"
 	"strings"
@@ -96,17 +97,24 @@ type policyStatement struct {
 }
 
 // toStringSlice converts a JSON string or []string to []string.
-func toStringSlice(raw json.RawMessage) []string {
+//
+// A field that is neither is an error rather than an empty list. Returning
+// nothing would report a permission the scanner could not read as a permission
+// the principal does not have — a wildcard grant read as a clean principal,
+// which is the inversion this scanner exists to prevent.
+func toStringSlice(raw json.RawMessage) ([]string, error) {
 	if len(raw) == 0 {
-		return nil
+		return nil, nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return []string{s}
+		return []string{s}, nil
 	}
 	var ss []string
-	_ = json.Unmarshal(raw, &ss)
-	return ss
+	if err := json.Unmarshal(raw, &ss); err != nil {
+		return nil, fmt.Errorf("policy field is neither a string nor a list of strings: %w", err)
+	}
+	return ss, nil
 }
 
 // parseDocument decodes a URL-encoded IAM policy document JSON.
@@ -123,14 +131,24 @@ func parseDocument(encoded string) (*policyDocument, error) {
 }
 
 // documentToPermissions converts a policy document to a slice of Permissions.
-func documentToPermissions(doc *policyDocument) []cloud.Permission {
+//
+// A statement this cannot decode is returned as an error rather than skipped:
+// the permissions it grants are then unknown, and a principal with an unreadable
+// statement must not report as one whose statements were all read.
+func documentToPermissions(doc *policyDocument) ([]cloud.Permission, error) {
 	var perms []cloud.Permission
-	for _, stmt := range doc.Statement {
+	for i, stmt := range doc.Statement {
 		if !strings.EqualFold(stmt.Effect, "Allow") {
 			continue
 		}
-		actions := toStringSlice(stmt.Action)
-		resources := toStringSlice(stmt.Resource)
+		actions, err := toStringSlice(stmt.Action)
+		if err != nil {
+			return nil, fmt.Errorf("statement %d Action: %w", i, err)
+		}
+		resources, err := toStringSlice(stmt.Resource)
+		if err != nil {
+			return nil, fmt.Errorf("statement %d Resource: %w", i, err)
+		}
 		for _, action := range actions {
 			for _, resource := range resources {
 				perms = append(perms, cloud.Permission{
@@ -140,7 +158,7 @@ func documentToPermissions(doc *policyDocument) []cloud.Permission {
 			}
 		}
 	}
-	return perms
+	return perms, nil
 }
 
 // GrantedPermissions returns all effective permissions for an IAM principal.
@@ -192,7 +210,12 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 					p.warnf("warn: parse inline policy %s for role %s: %v\n", policyName, principal.Name, err)
 					continue
 				}
-				perms = append(perms, documentToPermissions(doc)...)
+				statementPerms, err := documentToPermissions(doc)
+				if err != nil {
+					p.warnf("inline policy %s for role %s: %v; its permissions were not analysed", policyName, principal.Name, err)
+					continue
+				}
+				perms = append(perms, statementPerms...)
 			}
 		}
 
@@ -240,7 +263,12 @@ func (p *Provider) GrantedPermissions(ctx context.Context, principal cloud.Princ
 					p.warnf("warn: parse inline policy %s for user %s: %v\n", policyName, principal.Name, err)
 					continue
 				}
-				perms = append(perms, documentToPermissions(doc)...)
+				statementPerms, err := documentToPermissions(doc)
+				if err != nil {
+					p.warnf("inline policy %s for user %s: %v; its permissions were not analysed", policyName, principal.Name, err)
+					continue
+				}
+				perms = append(perms, statementPerms...)
 			}
 		}
 	}
@@ -279,7 +307,7 @@ func (p *Provider) getManagedPolicyPermissions(ctx context.Context, policyArn st
 	if err != nil {
 		return nil, err
 	}
-	return documentToPermissions(doc), nil
+	return documentToPermissions(doc)
 }
 
 // UsedPermissions returns permissions that appeared in CloudTrail during [since, now].

@@ -33,7 +33,23 @@ type Digest struct {
 	Domains       []string  // ["iam", "storage", "network", ...]
 	Top           []Finding // bounded list (typically top 10) for inline display
 	ReportURL     string    // optional link to full report
+
+	// Incomplete names what the scan could not read.
+	//
+	// This is the one output that reaches a person who never sees the exit code
+	// and never opens the report: it arrives in a chat channel or a pager as a
+	// count. Without this field a scan denied on every principal and every bucket
+	// posts zero findings at severity INFO — indistinguishable from an account
+	// that is clean, delivered to the audience least able to check.
+	//
+	// Always present, empty when the scan read everything.
+	Incomplete []string
 }
+
+// Partial reports whether the scan behind this digest was unable to read
+// everything it was asked to. Sinks use it to say so rather than leaving a zero
+// count to speak for itself.
+func (d Digest) Partial() bool { return len(d.Incomplete) > 0 }
 
 // Finding is a per-issue line for inclusion in the digest body.
 type Finding struct {

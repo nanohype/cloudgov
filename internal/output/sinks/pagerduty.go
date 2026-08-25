@@ -24,6 +24,18 @@ type PagerDutySink struct {
 	HTTPClient *http.Client
 }
 
+// summaryLine is the one line a pager shows. A scan that could not read part of
+// the account says so here: a count alone, delivered to someone woken by it, is
+// read as the state of the account rather than as the state of the scan.
+func summaryLine(d Digest) string {
+	base := fmt.Sprintf("%s: %d findings on %s (%d critical, %d high)",
+		d.Source, d.TotalFindings, d.Provider, d.Critical, d.High)
+	if d.Partial() {
+		return fmt.Sprintf("%s — PARTIAL, %d observation(s) could not be made", base, len(d.Incomplete))
+	}
+	return base
+}
+
 func (s *PagerDutySink) Name() string { return "pagerduty" }
 
 func (s *PagerDutySink) Send(ctx context.Context, d Digest) error {
@@ -46,7 +58,7 @@ func (s *PagerDutySink) Send(ctx context.Context, d Digest) error {
 		"event_action": "trigger",
 		"dedup_key":    fmt.Sprintf("cloudgov-%s-%s", d.Source, d.Provider),
 		"payload": map[string]interface{}{
-			"summary":   fmt.Sprintf("%s: %d findings on %s (%d critical, %d high)", d.Source, d.TotalFindings, d.Provider, d.Critical, d.High),
+			"summary":   summaryLine(d),
 			"source":    d.Source,
 			"severity":  severity,
 			"timestamp": d.Timestamp.UTC().Format(time.RFC3339),

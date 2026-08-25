@@ -87,7 +87,7 @@ file_cov=$(awk -v m="${module}/" -v root="$PWD" '
 # Returns 1 when any floor is unmet, a floored target produced no data, or a
 # covered package carries no floor.
 evaluate_floors() {
-  local out="$1" file_cov="$2"
+  local out="$1" file_cov="$2" total="${3:-}"
   local fail=0
   local floored_pkgs=" "
   local evaluated=0
@@ -130,6 +130,13 @@ evaluate_floors() {
     fi
 
     case "$kind" in
+    total)
+      # The whole-tree number, which no per-package floor can constrain: every
+      # package can sit above its own floor while the total sits under the org
+      # floor, because each package floor was set from its own measurement.
+      cov="$total"
+      label="total   coverage"
+      ;;
     package)
       floored_pkgs="${floored_pkgs}${target} "
       line=$(printf '%s\n' "$out" | grep -E "[[:space:]]${module}/${target}[[:space:]]" || true)
@@ -143,7 +150,7 @@ evaluate_floors() {
       [ "${ign:-0}" -gt 0 ] 2>/dev/null && label="${label} (${ign} stmt ignored)"
       ;;
     *)
-      echo "::error::${floors_file}: unknown floor kind '${kind}' (want 'package' or 'file')"
+      echo "::error::${floors_file}: unknown floor kind '${kind}' (want 'total', 'package' or 'file')"
       fail=1
       continue
       ;;
@@ -278,12 +285,36 @@ self_test() {
     self_test_die "accepted an unknown floor kind"
   fi
 
+  # ── the total floor, both directions ──
+  #
+  # The whole-tree number is the one no per-package floor can constrain: each
+  # package floor was set from its own measurement, so all of them can be met
+  # while the total sits under the org floor.
+  if ! evaluate_floors "$clean_out" "$clean_files" 80 >/dev/null <<-'EOF'
+	total    coverage             75
+	package  internal/alpha       85
+	file     internal/alpha/a.go  100
+	EOF
+  then
+    self_test_die "rejected a tree whose total meets its floor"
+  fi
+  # Every package still meets its own floor; only the total is short. This is the
+  # case a per-package floor set cannot see, and it is why the entry exists.
+  if evaluate_floors "$clean_out" "$clean_files" 70 >/dev/null <<-'EOF'
+	total    coverage             75
+	package  internal/alpha       85
+	file     internal/alpha/a.go  100
+	EOF
+  then
+    self_test_die "accepted a total below its floor while every package met its own"
+  fi
+
   echo "coverage self-test passed: the gate rejects below-floor, stale-path, unfloored and malformed entries."
 }
 
 self_test
 
-if ! evaluate_floors "$out" "$file_cov" <"$floors_file"; then
+if ! evaluate_floors "$out" "$file_cov" "$total" <"$floors_file"; then
   echo "== coverage floors NOT met =="
   exit 1
 fi

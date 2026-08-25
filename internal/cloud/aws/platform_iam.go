@@ -88,9 +88,17 @@ func (p *Provider) GetPodIdentityAssociation(ctx context.Context, clusterName, n
 		ServiceAccount: awssdk.String(serviceAccount),
 	})
 	if err != nil {
+		// ResourceNotFoundException here is about the CLUSTER, not the
+		// association: a tenant with no association comes back as an empty list,
+		// handled below. EKS returns this same exception for a cluster in another
+		// region, and this call binds no region — so mapping it to "no
+		// association" turned a cluster the tool could not reach into a definite
+		// HIGH saying Pod Identity was missing. An unread probe must not become a
+		// verdict; the caller notes an error and reports the tenant unexamined.
 		var notFound *ekstypes.ResourceNotFoundException
 		if errors.As(err, &notFound) {
-			return nil, nil
+			return nil, fmt.Errorf("cluster %s was not found from this client's region, so the Pod Identity association for %s/%s could not be read: %w",
+				clusterName, namespace, serviceAccount, err)
 		}
 		return nil, fmt.Errorf("list pod identity associations for %s/%s on %s: %w", namespace, serviceAccount, clusterName, err)
 	}

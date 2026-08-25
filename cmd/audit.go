@@ -163,6 +163,11 @@ func auditDigest(r *audit.Report) sinks.Digest {
 		Low:           s.BySeverity["LOW"],
 		Info:          s.BySeverity["INFO"],
 		ReportURL:     auditReportURL,
+		// The scan's own coverage travels with its counts. A digest carrying
+		// zero findings from an account it could not read is the failure this
+		// record exists to prevent, delivered to the audience least able to
+		// check it.
+		Incomplete: r.Incomplete,
 	}
 	for domain, count := range s.ByDomain {
 		if count > 0 {

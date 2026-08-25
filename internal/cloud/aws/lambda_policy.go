@@ -110,7 +110,14 @@ func (p *Provider) classifyLambdaPolicy(fnName, fnArn string, doc lambdaResource
 		}
 
 		// Wildcard action — Action: "*" or lambda:*
-		actions := toStringSlice(stmt.Action)
+		actions, err := toStringSlice(stmt.Action)
+		if err != nil {
+			// The statement's actions are unknown, so whether it grants a
+			// wildcard invoke is unknown. Skipping it silently would report the
+			// function as carrying no wildcard action.
+			p.warnf("lambda %s policy statement %s: %v; its actions were not analysed", fnName, stmt.Sid, err)
+			continue
+		}
 		for _, a := range actions {
 			if a == "*" || a == "lambda:*" {
 				findings = append(findings, cloud.LambdaPolicyFinding{
@@ -148,7 +155,11 @@ func (p *Provider) classifyLambdaPolicy(fnName, fnArn string, doc lambdaResource
 		var pObj map[string]json.RawMessage
 		if err := json.Unmarshal(stmt.Principal, &pObj); err == nil {
 			for kind, raw := range pObj {
-				principals := toStringSlice(raw)
+				principals, perr := toStringSlice(raw)
+				if perr != nil {
+					p.warnf("lambda %s policy statement %s principal %q: %v; it was not analysed", fnName, stmt.Sid, kind, perr)
+					continue
+				}
 				for _, principal := range principals {
 					switch kind {
 					case "AWS":

@@ -612,3 +612,132 @@ func commandsCallingGateIncomplete(t *testing.T) []string {
 	}
 	return out
 }
+
+// The file is not the unit; the HANDLER is.
+//
+// TestEveryCloudCommandGatesOnIncomplete matches its regexes against whole file
+// text, so one gating handler buys the whole file a pass. cmd/iam.go carries two
+// commands: runIAMScan gated, runIAMFix resolved a live provider, generated
+// policies per principal, dropped failures with a bare continue and gated
+// nothing. A denied account produced a fix set smaller than the report it came
+// from, exit 0, and no record of which principals were left out.
+//
+// Every function that resolves providers must itself reach a gate.
+func TestEveryProviderResolvingHandlerGatesOnIncomplete(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+
+	handlers := 0
+	offenders := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			if !callsAny(fn, resolvesProviders) {
+				continue
+			}
+			if reason, ok := exemptFromIncompleteGate[name]; ok {
+				t.Logf("%s (%s) exempt: %s", fn.Name.Name, name, reason)
+				continue
+			}
+			handlers++
+			if !callsAny(fn, func(n string) bool { return n == "gateIncomplete" }) {
+				offenders++
+				t.Errorf("%s:%d %s resolves cloud providers and never reaches gateIncomplete. "+
+					"Another handler in the same file doing so does not cover this one: a partial "+
+					"account produces a partial answer here and exits 0",
+					name, fset.Position(fn.Pos()).Line, fn.Name.Name)
+			}
+		}
+	}
+
+	if handlers == 0 {
+		t.Fatal("no provider-resolving handler found; the detector has stopped reading cmd/")
+	}
+	t.Logf("examined %d provider-resolving handler(s), %d ungated", handlers, offenders)
+}
+
+// resolvesProviders reports whether a called name is one of the resolvers that
+// hands back live cloud providers.
+func resolvesProviders(name string) bool {
+	return strings.HasPrefix(name, "resolve") && strings.HasSuffix(name, "Providers")
+}
+
+// callsAny reports whether fn contains a call whose function name satisfies
+// match. Nested function literals count: a resolver inside a closure is still
+// this handler resolving providers.
+func callsAny(fn *ast.FuncDecl, match func(string) bool) bool {
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch f := call.Fun.(type) {
+		case *ast.Ident:
+			if match(f.Name) {
+				found = true
+			}
+		case *ast.SelectorExpr:
+			if f.Sel != nil && match(f.Sel.Name) {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
+}
+
+// The detector must find a handler that resolves and does not gate, or the sweep
+// above proves nothing.
+func TestHandlerGateDetectorFindsAnUngatedHandler(t *testing.T) {
+	fset := token.NewFileSet()
+	src := "package cmd\n\n" +
+		"func gated() error {\n" +
+		"\tp, _ := resolveIAMProviders(nil, \"\")\n" +
+		"\t_ = p\n" +
+		"\tgateIncomplete(nil)\n" +
+		"\treturn nil\n" +
+		"}\n\n" +
+		"func ungated() error {\n" +
+		"\tp, _ := resolveStorageProviders(nil, \"\")\n" +
+		"\t_ = p\n" +
+		"\treturn nil\n" +
+		"}\n\n" +
+		"func unrelated() error { return nil }\n"
+	file, err := parser.ParseFile(fset, "probe.go", src, 0)
+	if err != nil {
+		t.Fatalf("parse probe: %v", err)
+	}
+
+	resolving, ungated := 0, 0
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil || !callsAny(fn, resolvesProviders) {
+			continue
+		}
+		resolving++
+		if !callsAny(fn, func(n string) bool { return n == "gateIncomplete" }) {
+			ungated++
+		}
+	}
+	if resolving != 2 {
+		t.Errorf("found %d provider-resolving handler(s) in a fixture with two", resolving)
+	}
+	if ungated != 1 {
+		t.Errorf("found %d ungated handler(s) in a fixture with exactly one", ungated)
+	}
+}
