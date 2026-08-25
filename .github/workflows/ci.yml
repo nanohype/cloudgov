@@ -98,10 +98,19 @@ jobs:
         # command's output where they mean its status. Default severity, because
         # everything it reports here is at note or warning level — a gate set to
         # fail on errors alone would exit 0 over all of them.
+        #
+        # PINNED, not the runner image's. The image shipped 0.9.0 while a
+        # contributor's machine had 0.11.0, and the two disagree about which
+        # findings exist — so the gate's verdict was a function of the runner
+        # rather than of the commit, and a clean local run meant nothing. The
+        # version is printed for the same reason the other pins are.
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # renovate: datasource=github-releases depName=koalaman/shellcheck
+          SHELLCHECK_VERSION=v0.11.0
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJf - --strip-components=1 -C /usr/local/bin "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
           shellcheck --version
-          shellcheck scripts/*.sh
+          shellcheck scripts/*.sh scripts/lib/*.sh
 
       - name: positive controls
         # Introduces, into this working tree, the exact violation each gate above

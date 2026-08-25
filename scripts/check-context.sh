@@ -505,8 +505,10 @@ MENTIONS
   # the assertion — an untracked file under the repo root is not examined.
   local untracked="internal/cloud/aws/zzuntracked_probe.go"
   printf 'package aws\n\nfunc zzUntrackedProbe() {}\n' >"${repo_root}/${untracked}"
-  local listed
-  listed="$(cd "$repo_root" && tracked_files . -name '*.go' -type f | grep -c 'zzuntracked_probe' || true)"
+  local listed=0
+  if (cd "$repo_root" && tracked_files . -name '*.go' -type f) | grep -q 'zzuntracked_probe'; then
+    listed=1
+  fi
   rm -f "${repo_root}/${untracked}"
   [ "$listed" -eq 0 ] ||
     self_test_die "an untracked file under the repo root was enumerated; this gate would grade whatever CI places beside the checkout"
