@@ -333,7 +333,7 @@ while IFS= read -r script; do
     printf '%s\n' "$found" | sed 's/^/    /' >&2
     fail=1
   fi
-done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
 
 if [ "$checked" -eq 0 ]; then
   echo "error: no bash scripts found in scripts/ — the enumeration is broken, not the tree." >&2
@@ -382,7 +382,7 @@ if [ -n "$old_bash" ]; then
       fail=1
       probe_failures=$((probe_failures + 1))
     fi
-  done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
+  done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
   printf 'ok: %s bash script(s) carry no bash 4 construct; %s of them were also RUN under %s\n' \
     "$checked" "$probed" "$("$old_bash" --version | head -1 | sed 's/ (.*//')"
 else

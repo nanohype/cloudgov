@@ -432,6 +432,24 @@ YML
   [ "$vacuous_rc" -eq 2 ] ||
     self_test_die "a directory whose workflows carry no merge gate must be an unanswerable question, not a pass (got ${vacuous_rc})"
 
+  # ── the gate population is scripts/*.sh, not everything under scripts/ ──
+  #
+  # A shared library is a .sh file and is not a gate. The enumeration must stay
+  # top-level: widened to recurse, it demanded that scripts/lib/tracked-files.sh
+  # be run by a workflow and named in the contributor checklist.
+  #
+  # That widening PASSED on the seat and failed in CI, because the library was
+  # untracked locally and committed there — the tracked set is the same in both
+  # places only once everything is committed, and a file being added is exactly
+  # when it is not.
+  local population
+  population="$(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' || true)"
+  if printf '%s\n' "$population" | grep -q '^scripts/lib/'; then
+    self_test_die "the gate population includes scripts/lib/; a shared library is not a gate and would be required to have a workflow step and a checklist line"
+  fi
+  printf '%s\n' "$population" | grep -q '^scripts/check-gates\.sh$' ||
+    self_test_die "the gate population does not include this gate; the enumeration has stopped matching scripts/"
+
   echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, an empty workflow directory, and a gate missing from the contributor checklist."
 }
 
@@ -447,7 +465,7 @@ while IFS= read -r script; do
     echo "::error::${name} is not run by any workflow; it guards nothing on a pull request" >&2
     fail=1
   fi
-done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
 
 # This script is a gate too, and a gate nothing runs is the case it exists for.
 if ! workflow_runs "$self" ".github/workflows"; then
@@ -475,7 +493,7 @@ while IFS= read -r script; do
     echo "::error::${name} is run by CI and is not named in CONTRIBUTING.md; a contributor following the checklist would fail on it" >&2
     fail=1
   fi
-done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
 
 # A verdict over nothing is not a pass: an empty scripts/ directory, or a glob
 # that stopped matching, would otherwise report every gate as wired.

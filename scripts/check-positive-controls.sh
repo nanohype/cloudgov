@@ -777,7 +777,7 @@ while IFS= read -r script; do
     echo "::error::${name} reads a shared library and has no dependency control; nothing proves it rejects when that library cannot run" >&2
     fail=1
   fi
-done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
 
 # ─── the anti-vacuity floor ───
 #
@@ -799,7 +799,7 @@ while IFS= read -r script; do
     echo "::error::${name} is a gate with no positive control; nothing proves it can reject" >&2
     fail=1
   fi
-done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/' | sed 's|^\./||' | sort)
+done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
 
 if [ "${#controlled[@]}" -eq 0 ]; then
   echo "error: no controls ran — the suite is empty, which is not a pass." >&2
