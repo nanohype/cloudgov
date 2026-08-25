@@ -65,9 +65,16 @@ func NewGHReader() *GHReader {
 		// here or a name checkName has already accepted. No shell is involved.
 		out, err := exec.CommandContext(cctx, "gh", args...).Output() // #nosec G204 -- constant command; args are literals plus ghName-validated tokens
 		if err != nil {
+			// Both the text and the type are carried. The text is what an
+			// operator reads; the type is what any future classifier would need,
+			// and an error that has lost it forces the next layer to decide from
+			// an exit status — which conflates an unreachable API, a denied
+			// request and a missing object into one number. Wrapping with %w
+			// keeps errors.As working through this boundary.
 			var ee *exec.ExitError
 			if ok := asExitError(err, &ee); ok && len(ee.Stderr) > 0 {
-				return out, fmt.Errorf("gh %s: %s", strings.Join(args, " "), strings.TrimSpace(string(ee.Stderr)))
+				return out, fmt.Errorf("gh %s: %s: %w",
+					strings.Join(args, " "), strings.TrimSpace(string(ee.Stderr)), err)
 			}
 			return out, fmt.Errorf("gh %s: %w", strings.Join(args, " "), err)
 		}

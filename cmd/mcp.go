@@ -418,7 +418,7 @@ func registerMCPTools(s *mcp.Server) {
 			if err := yaml.Unmarshal(raw, &exp); err != nil {
 				return nil, nil, fmt.Errorf("parse %s: %w", expectedPath, err)
 			}
-			findings, err := repo.Audit(ctx, repo.NewGHReader(), org, exp)
+			findings, unread, err := repo.Audit(ctx, repo.NewGHReader(), org, exp)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -429,7 +429,7 @@ func registerMCPTools(s *mcp.Server) {
 					kept = append(kept, f)
 				}
 			}
-			return jsonResult(func(w io.Writer) error { return output.WriteRepo(w, kept) })
+			return jsonResult(func(w io.Writer) error { return output.WriteRepo(w, kept, unread) })
 		})
 
 	mcp.AddTool(s, &mcp.Tool{Name: "compliance", Description: "Map prior scan JSON reports to a compliance benchmark (cis-aws-v3 or soc2)."},

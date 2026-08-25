@@ -60,7 +60,7 @@ package internal/tags               94
 # Each carries what it measures today. These are the repo's real coverage debt,
 # not permission to stay there.
 package internal/baseline           72    # baseline store + comparison
-package internal/output             70    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
+package internal/output             73    # renderers; the table/JSON writers are exercised, the SARIF rule tables less so
 package internal/compare            64    # report normalization
 package internal/audit              73    # the orchestrator; each domain it calls is floored on its own
 package internal/providers          85    # registry + Detect wiring, exercised through the resolvers

@@ -50,32 +50,48 @@ type Expected struct {
 }
 
 // Audit compares every repository in the org against the expected shape.
-func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.RepoFinding, error) {
+// Audit compares an organization's repositories against the committed expected
+// shape.
+//
+// The second return is the run's unread list: repositories the sweep was asked to
+// examine and could not. It is separate from the findings because it answers a
+// different question — a repository nobody could read is not a repository with a
+// governance gap, and reporting it as one hands a merge gate a breach that is
+// really an outage.
+func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.RepoFinding, []string, error) {
 	names, err := r.ListRepos(ctx, org)
 	if err != nil {
-		return nil, fmt.Errorf("list repos in %s: %w", org, err)
+		return nil, nil, fmt.Errorf("list repos in %s: %w", org, err)
 	}
 	sort.Strings(names)
 
 	var out []cloud.RepoFinding
+	var unread []string
 	for _, name := range names {
 		if _, ok := exp.Exempt[name]; ok {
 			continue
 		}
 		s, err := r.Settings(ctx, org, name)
 		if err != nil {
-			// A repo whose settings cannot be read is reported, never skipped.
-			// Skipping is how a sweep reports a clean org over repositories it
+			// A repo whose settings cannot be read is recorded, never skipped —
+			// skipping is how a sweep reports a clean org over repositories it
 			// never managed to look at.
-			out = append(out, cloud.RepoFinding{
-				Severity: cloud.SeverityHigh,
-				Type:     cloud.RepoNoProtection,
-				Repo:     name,
-				Detail:   fmt.Sprintf("settings could not be read: %v", err),
-				Remediation: "Re-run with a token carrying repo admin scope. An unreadable " +
-					"repository is reported rather than skipped, because a skipped one is " +
-					"indistinguishable from a compliant one.",
-			})
+			//
+			// But it is recorded as UNREAD, not as a finding. It used to be filed
+			// as RepoNoProtection at HIGH with a remedy telling the operator to
+			// widen their token scope, and an error from `gh` does not carry that
+			// much information: the same failure is returned for an unreachable
+			// API, an unauthenticated CLI, a rate limit, a deadline, and a token
+			// that genuinely lacks the scope. Naming one of those is a guess in
+			// the shape of a diagnosis, and it costs the operator a search that
+			// cannot succeed. Worse, a merge gate reading NO_BRANCH_PROTECTION at
+			// HIGH sees a governance breach where there is only an unread
+			// repository.
+			//
+			// So the tool's own distinction applies here as everywhere else: a
+			// thing it could not observe is not a thing it found. The message
+			// carries what gh actually said, and nothing else.
+			unread = append(unread, fmt.Sprintf("%s/%s: settings could not be read: %v", org, name, err))
 			continue
 		}
 		if s.Archived {
@@ -83,7 +99,7 @@ func Audit(ctx context.Context, r Reader, org string, exp Expected) ([]cloud.Rep
 		}
 		out = append(out, auditOne(s, exp)...)
 	}
-	return out, nil
+	return out, unread, nil
 }
 
 func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {

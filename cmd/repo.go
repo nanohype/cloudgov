@@ -89,7 +89,7 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("parse %s: %w", repoExpectedFile, err)
 	}
 
-	findings, err := repo.Audit(cmd.Context(), repo.NewGHReader(), repoOrg, exp)
+	findings, unread, err := repo.Audit(cmd.Context(), repo.NewGHReader(), repoOrg, exp)
 	if err != nil {
 		return err
 	}
@@ -118,9 +118,16 @@ func runRepoAudit(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	// The exit-3 contract applies here for the same reason it applies to every
+	// command that reads an account: a repository nobody could read is not a
+	// repository that conforms.
+	gate(kept, func(f cloud.RepoFinding) cloud.Severity { return f.Severity })
+	gateIncomplete(unread)
+
 	if repoFormat == "json" {
-		return output.WriteRepo(w, kept)
+		return output.WriteRepo(w, kept, unread)
 	}
 	output.RepoFindings(w, kept)
+	output.IncompleteNote(w, unread)
 	return nil
 }

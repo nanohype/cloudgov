@@ -81,7 +81,8 @@ JSON report's `incomplete` array.
 **Scope of the contract, stated exactly.** Every command that reads a cloud
 account honours it — all 14: `audit`, `iam scan`, `storage audit`,
 `network audit`, `certs`, `tags`, `secrets scan`, `orphans`, `quota`,
-`inventory`, `cost diff`, `drift`, `lambda audit`, `platform audit`.
+`inventory`, `cost diff`, `drift`, `lambda audit`, `platform audit`. `repo audit`
+honours it too, over the GitHub API rather than a cloud account.
 
 Two commands reach the contract by a route other than a provider's recorded
 warnings, because the fact they must report does not arrive there.
@@ -109,9 +110,19 @@ rather than the set the check knows how to recognise: a command that builds a
 provider by an idiom nobody has written yet is still counted, and must still be
 gated or exempted by name.
 
-It does not apply to commands that read no cloud account: `compare`, `report`,
-`baseline`, `remediate`, `compliance` and `repo audit` work from files or the
-GitHub API. `k8s rbac` is exempt for a different reason — the Kubernetes
+It does not apply to commands that read no account at all: `compare`, `report`,
+`baseline`, `remediate` and `compliance` work from files already on disk.
+
+`repo audit` reads the GitHub API rather than a cloud account and honours the
+contract anyway. A repository `gh` cannot read produces no finding, and the tool
+used to file that as `NO_BRANCH_PROTECTION` at HIGH — but `gh` returns the same
+error for an unreachable API, an unauthenticated CLI, a rate limit and a token
+genuinely missing the scope, so naming one of those was a guess in the shape of a
+diagnosis. Worse, a gate reading that finding sees a governance breach where
+there is an unread repository. Unreadable repositories are recorded as incomplete
+observations carrying what `gh` actually said.
+
+`k8s rbac` is exempt for a different reason — the Kubernetes
 provider returns errors rather than partial observations and implements no
 `IncompleteReporter`, so gating it would assert a guarantee the layer beneath
 cannot supply. Those exit 0/1/2 only.

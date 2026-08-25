@@ -37,8 +37,6 @@ var mcpIncompleteExempt = map[string]string{
 	"k8s_rbac": "Reads a cluster, not a cloud account. The Kubernetes provider returns errors " +
 		"rather than partial observations and implements no IncompleteReporter, so populating " +
 		"the array here would assert a guarantee the layer beneath cannot supply.",
-	"repo_audit": "Reads the GitHub API through the gh CLI, not a cloud account. A failed read " +
-		"surfaces as a finding, since an unreadable repository is itself the governance gap.",
 	"compliance": "Maps saved JSON reports to a benchmark. It reads files, not an account; " +
 		"whatever was incomplete about the scans it reads is recorded in those reports.",
 	"audit": "Reads a cloud account and does carry the record, but on audit.Report rather than " +
