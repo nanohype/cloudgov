@@ -116,8 +116,10 @@ jobs:
           make --quiet -j"$(nproc)"
           # Installed where the gate looks, and asserted to be what was asked
           # for: a build that silently produced bash 5 would restore the skip.
-          install -m 0755 bash /usr/bin/bash-3.2
-          ln -sf /usr/bin/bash-3.2 /usr/bin/bash32
+          # sudo: a runner step is not root, and /usr/bin is not writable by it.
+          # The build succeeding and the install failing are different failures
+          # and the second one is silent if the install is not checked.
+          sudo install -m 0755 bash /usr/bin/bash-3.2
           /usr/bin/bash-3.2 --version | head -1
           test "$(/usr/bin/bash-3.2 -c 'echo "${BASH_VERSINFO[0]}"')" = 3
 
