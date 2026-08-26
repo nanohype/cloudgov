@@ -8,9 +8,10 @@
 # of those exist, and grades someone else's code in CI — and the tell is a
 # denominator that differs between the two.
 #
-# The tracked set is the same on both. Where git cannot answer — a scratch tree
-# built by a self-test, an exported tarball — it falls back to find, which is the
-# right answer there because such a tree holds only what the test put in it.
+# The tracked set is the same on both, and there is no other mode: a caller that
+# needs to enumerate a scratch tree makes that tree a repository. A fallback to
+# find would be the walk this exists to replace, reachable whenever git is absent
+# or the working directory is not what the caller assumed.
 #
 # Usage: tracked_files [root] [find-args...]
 #   tracked_files . -name '*.go'
@@ -34,7 +35,14 @@ tracked_files() {
     fi
   fi
 
-  find "$root" -type f -not -path '*/.git/*' "$@" 2>/dev/null
+  # NO FILESYSTEM FALLBACK. A tree that is not a repository used to fall back to
+  # walking it, which is precisely the behaviour scoping to the tracked set was
+  # introduced to stop — the same defect behind a new door, and silent. A caller
+  # that needs to enumerate a scratch tree makes it a repository; that is two
+  # commands, and it means every caller exercises the path CI runs.
+  echo "tracked_files: ${root} is not the root of a git working tree, so the tracked set" >&2
+  echo "               cannot be determined. It has NOT enumerated anything." >&2
+  return 2
 }
 
 # filter_find_args applies the subset of find predicates the callers use to a
@@ -113,6 +121,30 @@ require_tracked_source() {
   if [ "${n:-0}" -eq 0 ]; then
     echo "error: git reports no tracked files under ${root}; ${what} would examine nothing and" >&2
     echo "       report it as a clean tree." >&2
+    return 2
+  fi
+}
+
+# require_tools fails unless every named executable is present.
+#
+# A GATE THAT DIES ON A MISSING TOOL EXITS NON-ZERO, WHICH IS THE SAFE DIRECTION,
+# AND BLAMES THE SHELL. "grep: command not found" tells a reader the interpreter
+# is unhappy; it does not tell them the gate CHECKED NOTHING, which is a
+# different fact from finding nothing and is the one they need.
+#
+# Asserted UP FRONT and for the whole run rather than at each call site: a tool
+# that decides which files a gate examines, or whether a pattern can match at
+# all, is upstream of every assertion the gate makes. Discovering it missing
+# halfway through means the earlier assertions were made by a process that could
+# not have failed them.
+require_tools() {
+  local missing=() t
+  for t in "$@"; do
+    command -v "$t" >/dev/null 2>&1 || missing+=("$t")
+  done
+  if [ "${#missing[@]}" -ne 0 ]; then
+    echo "error: not on PATH: ${missing[*]}" >&2
+    echo "       This gate has NOT examined anything, which is different from finding nothing." >&2
     return 2
   fi
 }

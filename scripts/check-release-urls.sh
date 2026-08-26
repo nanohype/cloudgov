@@ -24,6 +24,11 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 lib_dir="${repo_root}/scripts/lib"
 cd "$repo_root"
+# shellcheck disable=SC1091  # resolved at run time
+. "${repo_root}/scripts/lib/tracked-files.sh"
+
+require_tools grep sed python3 || exit 2
+
 
 note() { printf '  %s\n' "$1" >&2; }
 
@@ -129,7 +134,12 @@ compare_urls() {
   # A verdict over nothing is not a pass. Every match being a link to the releases
   # page means no documented download URL was compared against the config, which is
   # the one thing this script exists to do.
-  if [ "$checked" -eq 0 ]; then
+  # The default is the FAILING value, and that direction is the fix. An empty
+  # operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+  # reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+  # skip looks exactly like a pass. Defaulting to 0 would be the defect written
+  # into its own fix: 0 is a clean count and is what an absent tool most resembles.
+  if [ "${checked:-0}" -eq 0 ]; then
     echo "error: $skipped release link(s) found, none of them a download URL — nothing was compared." >&2
     echo "       The install section documents no asset this can check against $goreleaser." >&2
     return 2

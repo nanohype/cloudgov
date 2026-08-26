@@ -30,6 +30,8 @@ cd "$repo_root"
 # shellcheck disable=SC1091  # resolved at run time from repo_root, not at parse time
 . "${repo_root}/scripts/lib/tracked-files.sh"
 
+require_tools grep sed awk find git || exit 2
+
 # extract_paths prints one repo-relative FILE path per line from the markdown file
 # $1, as "line:path".
 #
@@ -219,7 +221,12 @@ MD
   # position, a name is not distinguishable from prose.
   printf 'The word `LICENSE` appears in running text.
 ' >"$tmp/bareword.md"
-  [ -z "$(extract_paths "$tmp/bareword.md" "$SELF_TEST_EXTS")" ] ||
+  # Captured, then tested. `[ -z "$(producer ...)" ]` cannot tell a producer that
+  # FOUND nothing from one that PRODUCED nothing: an absent tool or a broken
+  # helper yields empty, and empty is the passing value here. The assignment
+  # carries the status; the test carries the answer.
+  probe_0="$(extract_paths "$tmp/bareword.md" "$SELF_TEST_EXTS")" || self_test_die "extract_paths could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_0" ] ||
     self_test_die "a bare word in backticks was treated as a path claim"
 
   # The extension set is derived from the tree, so the derivation needs its own
@@ -235,7 +242,8 @@ MD
 
   # A document naming no paths must extract nothing rather than something.
   printf 'Prose with no code spans at all.\n' >"$tmp/bare.md"
-  [ -z "$(extract_paths "$tmp/bare.md" "$SELF_TEST_EXTS")" ] ||
+  probe_1="$(extract_paths "$tmp/bare.md" "$SELF_TEST_EXTS")" || self_test_die "extract_paths could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_1" ] ||
     self_test_die "extracted a path from a document that names none"
 
   echo "check-doc-paths self-test passed: it extracts repo paths and markdown link targets, skips URLs, anchors, flags, placeholders, citations and bare words, and cites the right line."
@@ -291,11 +299,16 @@ fi
 
 readonly DOC_FILE_FLOOR=4   # measured 5 markdown files
 readonly DOC_CLAIM_FLOOR=15 # measured 23 path claims
-if [ "$checked" -lt "$DOC_FILE_FLOOR" ]; then
+# The default is the FAILING value, and that direction is the fix. An empty
+# operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+# reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+# skip looks exactly like a pass. Defaulting to 0 would be the defect written
+# into its own fix: 0 is a clean count and is what an absent tool most resembles.
+if [ "${checked:--1}" -lt "$DOC_FILE_FLOOR" ]; then
   echo "error: read ${checked} markdown file(s), under the floor of ${DOC_FILE_FLOOR} — the enumeration collapsed." >&2
   exit 2
 fi
-if [ "$claims" -lt "$DOC_CLAIM_FLOOR" ]; then
+if [ "${claims:--1}" -lt "$DOC_CLAIM_FLOOR" ]; then
   echo "error: extracted ${claims} path claim(s) from ${checked} file(s), under the floor of ${DOC_CLAIM_FLOOR} — the extractor stopped matching." >&2
   exit 2
 fi

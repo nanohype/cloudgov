@@ -52,6 +52,8 @@ cd "$repo_root"
 # shellcheck disable=SC1091  # resolved at run time from repo_root
 . "${repo_root}/scripts/lib/tracked-files.sh"
 
+require_tools grep sed awk git || exit 2
+
 backup_dir="$(mktemp -d)"
 # ── an abort must not read as a pass ────────────────────────────────────────
 #

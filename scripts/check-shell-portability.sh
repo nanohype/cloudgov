@@ -31,6 +31,8 @@ cd "$repo_root"
 
 # shellcheck disable=SC1091  # resolved at run time from repo_root
 . "${repo_root}/scripts/lib/tracked-files.sh"
+
+require_tools grep sed awk git || exit 2
 lib_dir="${repo_root}/scripts/lib"
 
 # THREE PARALLEL ARRAYS, indexed together: label, pattern, fixture.
@@ -257,7 +259,12 @@ self_test() {
     printf '#!/usr/bin/env bash\ncat >/tmp/x <<%s\n' "'FIX'"
     printf 'mapfile -t y < /dev/null\nFIX\ntrue\n'
   } >"$tmp/heredoc.sh"
-  [ -z "$(scanned "$tmp/heredoc.sh")" ] ||
+  # Captured, then tested. `[ -z "$(producer ...)" ]` cannot tell a producer that
+  # FOUND nothing from one that PRODUCED nothing: an absent tool or a broken
+  # helper yields empty, and empty is the passing value here. The assignment
+  # carries the status; the test carries the answer.
+  probe_0="$(scanned "$tmp/heredoc.sh")" || self_test_die "scanned could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_0" ] ||
     self_test_die "a construct inside a heredoc body was counted as a use by the writing script"
   {
     printf '#!/usr/bin/env bash\ncat >/tmp/x <<%s\n' "'FIX'"
@@ -269,7 +276,8 @@ self_test() {
   # A construct NAMED IN PROSE is not a use of it. Without this the only way to
   # explain the rule is to stop explaining it.
   printf '#!/usr/bin/env bash\n# mapfile is deliberately not used here.\ntrue\n' >"$tmp/prose.sh"
-  [ -z "$(scanned "$tmp/prose.sh")" ] ||
+  probe_1="$(scanned "$tmp/prose.sh")" || self_test_die "scanned could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_1" ] ||
     self_test_die "a construct named in a comment was counted as a use of it"
 
   # The denominator, and which of the two answers this machine gave. A table
@@ -376,7 +384,12 @@ done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | 
 # catches an enumeration that collapsed, and is set low enough that ordinary
 # growth or deletion does not trip it.
 readonly PORTABILITY_SCRIPT_FLOOR=6 # measured 8 bash scripts
-if [ "$checked" -lt "$PORTABILITY_SCRIPT_FLOOR" ]; then
+# The default is the FAILING value, and that direction is the fix. An empty
+# operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+# reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+# skip looks exactly like a pass. Defaulting to 0 would be the defect written
+# into its own fix: 0 is a clean count and is what an absent tool most resembles.
+if [ "${checked:--1}" -lt "$PORTABILITY_SCRIPT_FLOOR" ]; then
   echo "error: examined ${checked} bash script(s), under the floor of ${PORTABILITY_SCRIPT_FLOOR} — the enumeration collapsed." >&2
   exit 2
 fi

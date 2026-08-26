@@ -33,6 +33,11 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 lib_dir="${repo_root}/scripts/lib"
 cd "$repo_root"
+# shellcheck disable=SC1091  # resolved at run time
+. "${repo_root}/scripts/lib/tracked-files.sh"
+
+require_tools grep sed awk python3 || exit 2
+
 
 # ─── the classification ───
 #
@@ -185,7 +190,12 @@ CFG
   # github-actions manager, so no customManager needs to cover it.
   printf '      - uses: actions/checkout@%040d # v7.0.1\n' 0 >"$tmp/watched-action.yml"
   : >"$covered"
-  [ -z "$(scan_unwatched "$tmp/watched-action.yml" "$covered")" ] ||
+  # Captured, then tested. `[ -z "$(producer ...)" ]` cannot tell a producer that
+  # FOUND nothing from one that PRODUCED nothing: an absent tool or a broken
+  # helper yields empty, and empty is the passing value here. The assignment
+  # carries the status; the test carries the answer.
+  probe_0="$(scan_unwatched "$tmp/watched-action.yml" "$covered")" || self_test_die "scan_unwatched could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_0" ] ||
     self_test_die "reported a sha-pinned action with a version comment as unwatched"
 
   # A value pin the configured manager actually matches is watched — and the
@@ -195,7 +205,8 @@ CFG
     self_test_die "the coverage reporter refused a config and a file that plainly match"
   grep -q ':2$' "$covered" ||
     self_test_die "the manager covers the pin on line 2 and the reporter said otherwise: $(cat "$covered")"
-  [ -z "$(scan_unwatched "$tmp/watched-value.yml" "$covered")" ] ||
+  probe_1="$(scan_unwatched "$tmp/watched-value.yml" "$covered")" || self_test_die "scan_unwatched could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_1" ] ||
     self_test_die "reported a pin the configured manager matches as unwatched"
 
   # The same pin with nothing covering it is not.
@@ -225,12 +236,14 @@ CFG
   # A version appearing only inside a comment is a mention, not a pin.
   printf '          # bumped past v9.9.9 in the changelog\n          image: alpine\n' >"$tmp/mention.yml"
   : >"$covered"
-  [ -z "$(scan_unwatched "$tmp/mention.yml" "$covered")" ] ||
+  probe_2="$(scan_unwatched "$tmp/mention.yml" "$covered")" || self_test_die "scan_unwatched could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_2" ] ||
     self_test_die "a version mentioned in a comment was reported as an unwatched pin"
 
   # The no-version assertion detects a version appearing in an exempted file.
   printf 'tasks:\n  build:\n    cmds:\n      - go build ./...\n' >"$tmp/clean.yml"
-  [ -z "$(scan_versions "$tmp/clean.yml")" ] ||
+  probe_3="$(scan_versions "$tmp/clean.yml")" || self_test_die "scan_versions could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_3" ] ||
     self_test_die "found a version in a file that carries none"
 
   printf 'image: alpine:3.21.0\n' >"$tmp/dirty.yml"
