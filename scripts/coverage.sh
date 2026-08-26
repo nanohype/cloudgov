@@ -25,6 +25,12 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+repo_root="$(pwd)"
+
+# shellcheck disable=SC1091  # resolved at run time
+. "${repo_root}/scripts/lib/tracked-files.sh"
+
+require_tools grep awk go || exit 2
 
 profile="${1:-coverage.out}"
 floors_file=".coverage-floors"
@@ -194,7 +200,12 @@ evaluate_floors() {
 
   # The denominator. A floors file that stopped being read, or a glob that stopped
   # matching, produces the same silence as a tree that meets every floor.
-  if [ "$evaluated" -eq 0 ]; then
+  # The default is the FAILING value, and that direction is the fix. An empty
+  # operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+  # reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+  # skip looks exactly like a pass. Defaulting to 0 would be the defect written
+  # into its own fix: 0 is a clean count and is what an absent tool most resembles.
+  if [ "${evaluated:-0}" -eq 0 ]; then
     echo "::error::no floors were evaluated — ${floors_file} was not read, which is not the same as every floor being met" >&2
     return 1
   fi

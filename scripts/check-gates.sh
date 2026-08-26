@@ -30,6 +30,8 @@ cd "$repo_root"
 # shellcheck disable=SC1091  # resolved at run time from repo_root
 . "${repo_root}/scripts/lib/tracked-files.sh"
 
+require_tools grep sed awk git || exit 2
+
 self="$(basename "${BASH_SOURCE[0]}")"
 
 # workflow_runs reports whether any workflow in $2 EXECUTES the script named $1.
@@ -186,7 +188,7 @@ check_merge_gate_coverage() {
     done < <(printf '%s\n' "$records" | awk '$1 == "JOB" { print $2 }')
 
   done
-  if [ "$gates_seen" -eq 0 ]; then
+  if [ "${gates_seen:-0}" -eq 0 ]; then
     echo "error: no merge gate was found in any workflow — the detector is broken, or nothing gates a merge." >&2
     return 2
   fi
@@ -453,6 +455,11 @@ YML
   echo "check-gates self-test passed: it rejects a commented-out run step, an unmentioned gate, an empty workflow directory, and a gate missing from the contributor checklist."
 }
 
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "check-gates" || exit 2
+
 self_test
 
 fail=0
@@ -497,8 +504,20 @@ done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | 
 
 # A verdict over nothing is not a pass: an empty scripts/ directory, or a glob
 # that stopped matching, would otherwise report every gate as wired.
-if [ "$checked" -eq 0 ]; then
-  echo "error: no gate scripts found in scripts/ — the enumeration is broken, not the tree." >&2
+#
+# A FLOOR WELL UNDER THE REAL COUNT, not at-least-one. "Matched almost nothing"
+# is the failure that reads as success: an at-least-one floor is satisfied by the
+# gate scripts themselves, or by one stray file, and reports a clean tree. This
+# catches an enumeration that collapsed, and is set low enough that ordinary
+# growth or deletion does not trip it.
+readonly GATE_COUNT_FLOOR=5 # measured 7 gates besides this one
+# The default is the FAILING value, and that direction is the fix. An empty
+# operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+# reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+# skip looks exactly like a pass. Defaulting to 0 would be the defect written
+# into its own fix: 0 is a clean count and is what an absent tool most resembles.
+if [ "${checked:--1}" -lt "$GATE_COUNT_FLOOR" ]; then
+  echo "error: found ${checked} gate script(s), under the floor of ${GATE_COUNT_FLOOR} — the enumeration collapsed." >&2
   exit 2
 fi
 

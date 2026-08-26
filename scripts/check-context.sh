@@ -188,6 +188,22 @@ self_test() {
 
   mkdir -p "$tmp/cmd" "$tmp/internal/cloud/aws"
 
+  # A REAL REPOSITORY, because that is what scan_tree enumerates. A fixture that
+  # is a plain directory exercises a path the gate no longer has, so every
+  # assertion below would be testing something CI never runs.
+  git -C "$tmp" init -q
+  plant() {
+    # Files arrive tracked, the way a change under review arrives. --intent-to-add
+    # records the path without staging content.
+    git -C "$tmp" add --intent-to-add -- "$1"
+  }
+  unplant() {
+    # --force-remove drops the index entry for a path recorded with
+    # --intent-to-add, which has no blob behind it.
+    git -C "$tmp" update-index --force-remove -- "$1" >/dev/null 2>&1 || true
+    rm -f "$tmp/$1"
+  }
+
   # The allowed bootstrap, plus a compliant handler. Neither may be flagged.
   cat >"$tmp/cmd/root.go" <<'CLEAN'
 package cmd
@@ -204,6 +220,7 @@ func runScan(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 CLEAN
+  plant "cmd/root.go"
 
   # A test file using context.Background() is legitimate and must stay silent.
   cat >"$tmp/internal/cloud/aws/aws_test.go" <<'CLEANTEST'
@@ -213,6 +230,7 @@ func TestThing(t *testing.T) {
 	_ = context.Background()
 }
 CLEANTEST
+  plant "internal/cloud/aws/aws_test.go"
 
   clean_scan="$(scan_or_die "$tmp")"
   if [[ -n "$clean_scan" ]]; then
@@ -233,6 +251,7 @@ CLEANTEST
     needle="${entry##*|}"
 
     printf 'package broken\n\nfunc scan() {\n\t_ = %s\n}\n' "$needle" >"$tmp/$path"
+    plant "$path"
 
     # Assert the mutation actually landed. A plant that silently failed to write
     # looks exactly like a gate that failed to catch, and the two must never be
@@ -246,7 +265,7 @@ CLEANTEST
       die "planted $needle in $path and the scan did not report it"
     fi
 
-    rm -f "$tmp/$path"
+    unplant "$path"
   done
 
   # A real violation whose line carries a trailing comment mentioning the allowed
@@ -261,11 +280,12 @@ func masked() {
 	_ = ctx
 }
 MASKED
+  plant "internal/cloud/aws/masked.go"
   masked_scan="$(scan_or_die "$tmp")"
   if [[ -z "$masked_scan" ]]; then
     die "a violation whose line carries a comment mentioning the allowed bootstrap was not reported (the gate reads comments as code)"
   fi
-  rm -f "$tmp/internal/cloud/aws/masked.go"
+  unplant "internal/cloud/aws/masked.go"
 
   # A violation sharing a line with a Go rune literal that contains an escaped
   # quote. `'\''` is one rune, and a stripper honouring backslash escapes only
@@ -281,11 +301,12 @@ func runeLiteral(c byte) interface{} {
 	return nil
 }
 RUNE
+  plant "internal/cloud/aws/rune.go"
   rune_scan="$(scan_or_die "$tmp")"
   if ! reports "$rune_scan" 'rune.go'; then
     die "a violation after a rune literal on the same line was not reported (the string state machine desynchronised on an escaped quote)"
   fi
-  rm -f "$tmp/internal/cloud/aws/rune.go"
+  unplant "internal/cloud/aws/rune.go"
 
   # A file importing the context package under an alias. A pattern hardcoding
   # "context." matches nothing here, so the violation is invisible — and nothing
@@ -301,11 +322,12 @@ func aliased() ctxpkg.Context {
 	return ctxpkg.Background()
 }
 ALIASED
+  plant "internal/cloud/aws/aliased.go"
   aliased_scan="$(scan_or_die "$tmp")"
   if ! reports "$aliased_scan" 'aliased.go'; then
     die "a detached context reached through an aliased import was not reported"
   fi
-  rm -f "$tmp/internal/cloud/aws/aliased.go"
+  unplant "internal/cloud/aws/aliased.go"
 
   # The plain single-line import. Reading the token before the path without
   # excluding the `import` keyword binds the alias to it, and `import.Background()`
@@ -320,11 +342,12 @@ func plainImport() context.Context {
 	return context.Background()
 }
 PLAIN
+  plant "internal/cloud/aws/plainimport.go"
   plain_scan="$(scan_or_die "$tmp")"
   if ! reports "$plain_scan" 'plainimport.go'; then
     die "a detached context under a single-line 'import \"context\"' was not reported"
   fi
-  rm -f "$tmp/internal/cloud/aws/plainimport.go"
+  unplant "internal/cloud/aws/plainimport.go"
 
   # And the complement: a file that binds some OTHER package to a name must not
   # have that name matched, or the alias handling becomes a false-positive engine.
@@ -337,11 +360,12 @@ import (
 
 func other() { _ = ctxpkg.Background() }
 OTHER
+  plant "internal/cloud/aws/otherpkg.go"
   other_scan="$(scan_or_die "$tmp")"
   if reports "$other_scan" 'otherpkg.go'; then
     die "a Background() call on a package that is not context was flagged: $other_scan"
   fi
-  rm -f "$tmp/internal/cloud/aws/otherpkg.go"
+  unplant "internal/cloud/aws/otherpkg.go"
 
   # The complement, so the rule above cannot be satisfied by treating every
   # single quote as ordinary text: a rune literal that genuinely CONTAINS the
@@ -354,6 +378,7 @@ func quoteChar() byte {
 	return byte(q)
 }
 RUNECLEAN
+  plant "internal/cloud/aws/runeclean.go"
   # ── an alias must not be readable out of a COMMENT ──
   #
   # The alias resolver decides which name the matcher greps for. If a block
@@ -372,6 +397,7 @@ func commentAlias() context.Context {
 	return context.Background()
 }
 ALIAS
+  plant "internal/cloud/aws/commentalias.go"
   # ── an alias must not be readable out of a RAW STRING either ──
   #
   # The same mistake as the comment case, one view over: taking the alias from a
@@ -391,23 +417,24 @@ func rawAlias() context.Context {
 	return context.Background()
 }
 RAW
+  plant "internal/cloud/aws/rawalias.go"
   rawalias_scan="$(scan_or_die "$tmp")"
   if ! reports "$rawalias_scan" 'rawalias.go'; then
     die "a detached context went unreported because a raw string literal set the import alias; the alias must come from the import block, not from a match anywhere in the file"
   fi
-  rm -f "$tmp/internal/cloud/aws/rawalias.go"
+  unplant "internal/cloud/aws/rawalias.go"
 
   commentalias_scan="$(scan_or_die "$tmp")"
   if ! reports "$commentalias_scan" 'commentalias.go'; then
     die "a detached context went unreported because a block comment set the import alias; one such comment disables this gate for the file that carries it"
   fi
-  rm -f "$tmp/internal/cloud/aws/commentalias.go"
+  unplant "internal/cloud/aws/commentalias.go"
 
   runeclean_scan="$(scan_or_die "$tmp")"
   if reports "$runeclean_scan" 'runeclean.go'; then
     die "a file whose only single quotes are a rune literal was flagged: $runeclean_scan"
   fi
-  rm -f "$tmp/internal/cloud/aws/runeclean.go"
+  unplant "internal/cloud/aws/runeclean.go"
 
   # Removing every plant returns the tree to silent, so the gate tracks the tree
   # rather than latching red once it has fired.
@@ -435,6 +462,7 @@ func cited() {
 	_ = ctx
 }
 CITED
+  plant "internal/cloud/aws/cited.go"
   cited_scan="$(scan_or_die "$tmp")"
   citation="$(printf '%s\n' "$cited_scan" | grep -F 'cited.go' || true)"
   if [[ -z "$citation" ]]; then
@@ -444,7 +472,7 @@ CITED
   if [[ "$cited_line" != "9" ]]; then
     die "the violation is on line 9 of cited.go and was cited at line ${cited_line}; the citation points at the wrong code"
   fi
-  rm -f "$tmp/internal/cloud/aws/cited.go"
+  unplant "internal/cloud/aws/cited.go"
 
   # The stripper must preserve the shape of the file exactly: same number of
   # lines, and every line the same length. Line count is what keeps citations
@@ -462,6 +490,7 @@ func shape() string {
 	return s
 }
 SHAPE
+  plant "internal/cloud/aws/shape.go"
   shape_in="$(wc -l <"$tmp/internal/cloud/aws/shape.go" | tr -d ' ')"
   shape_out="$(awk -v style=go -v strings=blank -f "${lib_dir}/strip-comments.awk" "$tmp/internal/cloud/aws/shape.go" | wc -l | tr -d ' ')"
   if [[ "$shape_in" != "$shape_out" ]]; then
@@ -473,7 +502,7 @@ SHAPE
     >/dev/null; then
     die "stripping changed a line's length; a column-sensitive matcher would read a different position than the source has"
   fi
-  rm -f "$tmp/internal/cloud/aws/shape.go"
+  unplant "internal/cloud/aws/shape.go"
 
   # A mention inside a comment or a string literal is not a call.
   cat >"$tmp/internal/cloud/aws/mentions.go" <<'MENTIONS'
@@ -485,11 +514,12 @@ func mentions() string {
 	return "context.Background()"
 }
 MENTIONS
+  plant "internal/cloud/aws/mentions.go"
   mention_scan="$(scan_or_die "$tmp")"
   if [[ -n "$mention_scan" ]]; then
     die "a mention in a comment or string literal was reported as a call: $mention_scan"
   fi
-  rm -f "$tmp/internal/cloud/aws/mentions.go"
+  unplant "internal/cloud/aws/mentions.go"
 
   residue_scan="$(scan_or_die "$tmp")"
   if [[ -n "$residue_scan" ]]; then
@@ -503,14 +533,18 @@ MENTIONS
   # the filesystem grades them, passes on the seat, and reports on someone else's
   # code in CI. The enumeration is the tracked set for that reason, and this is
   # the assertion — an untracked file under the repo root is not examined.
-  local untracked="internal/cloud/aws/zzuntracked_probe.go"
+  # At the repository ROOT, not inside a package directory. A fixture that
+  # assumes a directory exists is a fixture outside the population on any tree
+  # that lacks it — there it does not test the exclusion, it crashes, and a
+  # harness reading the exit status records a crash as a refusal.
+  local untracked="zzuntracked_probe.go"
   printf 'package aws\n\nfunc zzUntrackedProbe() {}\n' >"${repo_root}/${untracked}"
   local listed=0
   if (cd "$repo_root" && tracked_files . -name '*.go' -type f) | grep -q 'zzuntracked_probe'; then
     listed=1
   fi
   rm -f "${repo_root}/${untracked}"
-  [ "$listed" -eq 0 ] ||
+  [ "${listed:-1}" -eq 0 ] ||
     self_test_die "an untracked file under the repo root was enumerated; this gate would grade whatever CI places beside the checkout"
 
   echo "context-awareness self-test passed: it catches Background() and TODO() under cmd/ and internal/, through an aliased import, past a rune literal, past a masking comment and past an alias named only in a comment or a raw string, cites the right line, and stays silent on compliant code, tests and foreign packages."
@@ -521,15 +555,64 @@ cd "$(dirname "$0")/.."
 # shellcheck disable=SC1091  # resolved at run time from lib_dir, not at parse time
 . "${lib_dir}/tracked-files.sh"
 
+require_tools grep sed awk git || exit 2
+
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "context-awareness" || exit 2
+
 self_test
 
 # The denominator. A gate that passes over zero files reads exactly like a gate
 # that passed over all of them, and an --include glob or a find predicate that
 # stops matching is the usual way that happens. Reporting the count makes an
 # empty sweep visible rather than merely non-failing.
-scanned=$(tracked_files . -name '*.go' -type f | grep -cv '_test\.go$')
-if [[ "$scanned" -eq 0 ]]; then
-  echo "context-awareness check: no Go files found — the enumeration is broken, not the tree." >&2
+# Written to a file rather than a variable: an empty variable printed through
+# `printf '%s\n'` yields one blank line, which every count below then reads as
+# one file. That is the empty case reporting as a non-empty one, in the counters
+# whose whole job is to notice emptiness.
+scanned_list=$(mktemp)
+trap 'rm -f "$scanned_list"' EXIT
+tracked_files . -name '*.go' -type f | grep -v '_test\.go$' | sed 's|^\./||' >"$scanned_list" || true
+scanned=$(grep -c . "$scanned_list" || true)
+outside=$(grep -cv '^scripts/' "$scanned_list" || true)
+#
+# A FLOOR WELL UNDER THE REAL COUNT, not at-least-one. "Matched almost nothing"
+# is the failure that reads as success: an at-least-one floor is satisfied by the
+# gate scripts themselves, or by one stray file, and reports a clean tree. This
+# catches an enumeration that collapsed, and is set low enough that ordinary
+# growth or deletion does not trip it.
+# TWO FLOORS, AND THEY ANSWER DIFFERENT QUESTIONS. Collapsing them into one
+# number loses the half that generalises.
+#
+#   UNCONDITIONAL — at least one file examined OUTSIDE this gate's own
+#                   directories. A law about ANY tree: a gate whose whole
+#                   population turned out to be its own scripts has examined
+#                   nothing about the repository, however large the count looks.
+#   REPO-ONLY     — a realistic count for THIS repository. True here, not a law
+#                   anywhere. It catches an enumeration that collapsed to a
+#                   handful without collapsing to zero.
+#
+# A margin is not a property: lower the repo-only number far enough and it stops
+# distinguishing a manifest the repo ships from a fixture the gate carries. Only
+# the unconditional half can make that distinction, which is why it is separate
+# and why it is not a count.
+if [[ "${outside:-0}" -eq 0 ]]; then
+  echo "context-awareness check: every Go file examined lies under scripts/, so nothing about" >&2
+  echo "this repository's code was read. That is an empty answer, not a clean one." >&2
+  exit 2
+fi
+
+readonly CONTEXT_FILE_FLOOR=90 # measured 128 non-test Go files
+# The default is the FAILING value, and that direction is the fix. An empty
+# operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+# reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+# skip looks exactly like a pass. Defaulting to 0 would be the defect written
+# into its own fix: 0 is a clean count and is what an absent tool most resembles.
+if [[ "${scanned:--1}" -lt "$CONTEXT_FILE_FLOOR" ]]; then
+  echo "context-awareness check: examined ${scanned} non-test Go file(s), under the floor of ${CONTEXT_FILE_FLOOR}." >&2
+  echo "The enumeration collapsed; this is not a report about the tree." >&2
   exit 2
 fi
 

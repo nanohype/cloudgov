@@ -52,6 +52,8 @@ cd "$repo_root"
 # shellcheck disable=SC1091  # resolved at run time from repo_root
 . "${repo_root}/scripts/lib/tracked-files.sh"
 
+require_tools grep sed awk git || exit 2
+
 backup_dir="$(mktemp -d)"
 # ── an abort must not read as a pass ────────────────────────────────────────
 #
@@ -66,6 +68,7 @@ backup_dir="$(mktemp -d)"
 # any other route.
 suite_completed=0
 
+attempted=()
 mutated=()
 
 restore_all() {
@@ -372,6 +375,11 @@ cat: /nonexistent/zzctl06path: No such file or directory'
   echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, a non-zero exit with no verdict, a SILENT exit 127, a verdict printed after the gate's own helper died, and a real verdict that QUOTES a shell diagnostic as its finding."
 }
 
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "check-positive-controls" || exit 2
+
 self_test
 
 fail=0
@@ -411,7 +419,13 @@ run_control() {
     fail=1
     return
   fi
-  controlled+=("$(basename "$gate")")
+  # ATTEMPTED here; PROVEN at the end of the body. They are different
+  # quantities and the summary was printing the first while claiming the second:
+  # a control that returned early still counted as a gate proven to reject.
+  # Every early return below sets fail=1 today, so nothing is silent yet — but
+  # the count would not notice if one stopped doing so, and the count is what
+  # licenses every other verdict in this suite.
+  attempted+=("$(basename "$gate")")
 
   # Clean before mutating. Without this a non-zero exit after the mutation proves
   # nothing: the gate may have been failing the whole time for an unrelated
@@ -490,6 +504,9 @@ run_control() {
     return
   fi
 
+  # Counted only now: the mutation landed, the gate rejected, the rejection was a
+  # verdict rather than a crash, and it named what was planted.
+  controlled+=("$(basename "$gate")")
   printf '  ok  %-30s accepts the clean tree, rejects %s (naming it)\n' "$(basename "$gate")" "$description"
   unmutate_since "$mutated_before"
 }
@@ -806,6 +823,14 @@ if [ "${#controlled[@]}" -eq 0 ]; then
   exit 2
 fi
 
+# ATTEMPTED versus PROVEN. A control that leaves the body without either proving
+# something or setting fail is invisible to both the verdict and the count, and
+# the summary would report it as a completed proof.
+if [ "${#attempted[@]}" -ne "${#controlled[@]}" ] && [ "$fail" -eq 0 ]; then
+  echo "error: $(( ${#attempted[@]} - ${#controlled[@]} )) control(s) left the loop without proving or failing anything, so this run licenses nothing." >&2
+  exit 2
+fi
+
 # The suite reached its end. Set BEFORE the verdict, because a legitimate
 # rejection is a completed run: leaving it until after made every real failure
 # report as "did not run to completion", which is a different and wrong claim.
@@ -815,4 +840,5 @@ if [ "$fail" -ne 0 ]; then
   echo "== positive controls NOT met =="
   exit 1
 fi
-printf 'ok: %s gate(s) each accepted the clean tree and rejected its own violation, every mutation verified by inspection\n' "${#controlled[@]}"
+printf 'ok: %s of %s control(s) COMPLETED a proof — accepted the clean tree, rejected its own violation, and named it; every mutation verified by inspection\n' \
+  "${#controlled[@]}" "${#attempted[@]}"

@@ -31,6 +31,8 @@ cd "$repo_root"
 
 # shellcheck disable=SC1091  # resolved at run time from repo_root
 . "${repo_root}/scripts/lib/tracked-files.sh"
+
+require_tools grep sed awk git || exit 2
 lib_dir="${repo_root}/scripts/lib"
 
 # THREE PARALLEL ARRAYS, indexed together: label, pattern, fixture.
@@ -257,7 +259,12 @@ self_test() {
     printf '#!/usr/bin/env bash\ncat >/tmp/x <<%s\n' "'FIX'"
     printf 'mapfile -t y < /dev/null\nFIX\ntrue\n'
   } >"$tmp/heredoc.sh"
-  [ -z "$(scanned "$tmp/heredoc.sh")" ] ||
+  # Captured, then tested. `[ -z "$(producer ...)" ]` cannot tell a producer that
+  # FOUND nothing from one that PRODUCED nothing: an absent tool or a broken
+  # helper yields empty, and empty is the passing value here. The assignment
+  # carries the status; the test carries the answer.
+  probe_0="$(scanned "$tmp/heredoc.sh")" || self_test_die "scanned could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_0" ] ||
     self_test_die "a construct inside a heredoc body was counted as a use by the writing script"
   {
     printf '#!/usr/bin/env bash\ncat >/tmp/x <<%s\n' "'FIX'"
@@ -269,7 +276,8 @@ self_test() {
   # A construct NAMED IN PROSE is not a use of it. Without this the only way to
   # explain the rule is to stop explaining it.
   printf '#!/usr/bin/env bash\n# mapfile is deliberately not used here.\ntrue\n' >"$tmp/prose.sh"
-  [ -z "$(scanned "$tmp/prose.sh")" ] ||
+  probe_1="$(scanned "$tmp/prose.sh")" || self_test_die "scanned could not run, so an empty result here would be a failure reported as a clean fixture"
+  [ -z "$probe_1" ] ||
     self_test_die "a construct named in a comment was counted as a use of it"
 
   # The denominator, and which of the two answers this machine gave. A table
@@ -279,7 +287,9 @@ self_test() {
     printf 'check-shell-portability self-test passed: %s construct(s) each detected by its own rule and each CONFIRMED absent by running it under %s; shebangs classified; portable code, comments and heredoc bodies left alone.\n' \
       "$verified" "$("$SELF_TEST_OLD_BASH" --version | head -1 | sed 's/ (.*//')"
   else
-    printf 'check-shell-portability self-test passed: %s construct(s) each detected by its own rule; shebangs classified; portable code, comments and heredoc bodies left alone. No bash older than 4 on this machine, so the table was NOT confirmed by execution.\n' \
+    # Reachable only when the caller set SKIP_OLD_BASH_PROBE. The sentence says
+    # what was not done rather than describing a pass.
+    printf 'check-shell-portability: %s construct(s) detected by rule ONLY — the table was NOT confirmed by execution and no script was run under an old bash, because SKIP_OLD_BASH_PROBE was set.\n' \
       "${#BASH4_PATTERNS[@]}"
   fi
 }
@@ -291,7 +301,11 @@ self_test() {
 # bash older than 4. Discovering it after the self-test would leave that half of
 # the table unverified on the one machine able to verify it.
 old_bash=""
-for candidate in /bin/bash /usr/bin/bash; do
+# /usr/bin/bash-3.2 is where CI installs the one it builds; the other two are
+# where a macOS system bash lives. Selected on the reported version rather than
+# on the first match, because a lookup that found a newer bash first would skip
+# the check on the one machine able to perform it.
+for candidate in /usr/bin/bash-3.2 /usr/local/bin/bash-3.2 /bin/bash /usr/bin/bash; do
   [ -x "$candidate" ] || continue
   major="$("$candidate" -c 'echo "${BASH_VERSINFO[0]}"' 2>/dev/null || echo 0)"
   if [ "${major:-0}" -gt 0 ] && [ "$major" -lt 4 ]; then
@@ -304,7 +318,35 @@ done
 # execution. Empty is not a failure — it is a machine with no old bash — and the
 # gate says which of the two happened rather than reporting the same line for
 # both.
+# ── an environment where this gate cannot run must not be green ──
+#
+# The run probe and the table verification both need a bash older than 4, which
+# this resolves from the machine. A runner has none. Built as a skip with a zero
+# exit, the gate printed "the table was NOT confirmed by execution" INTO A GREEN
+# JOB — and nobody reads a green job. The controls passed on a seat for purely
+# environmental reasons, and the gate had never been exercised in the one place
+# it gates.
+#
+# So absence is a FAILURE, and the opt-out is explicit. The seat is the
+# permissive side and CI is the strict one, which is the way round that makes a
+# green CI job mean something: CI never sets the variable, so it cannot take this
+# branch.
+if [ -z "$old_bash" ] && [ -z "${SKIP_OLD_BASH_PROBE:-}" ]; then
+  echo "== shell portability NOT met ==" >&2
+  echo "error: no bash older than 4 was found, so neither the construct table nor the scripts" >&2
+  echo "       could be verified by execution — and that is the only check here that can catch a" >&2
+  echo "       construct the table does not list." >&2
+  echo "       CI installs one; see the 'shell portability' step in .github/workflows/ci.yml." >&2
+  echo "       To run the scan alone on a machine that has none: SKIP_OLD_BASH_PROBE=1 $0" >&2
+  exit 2
+fi
+
 SELF_TEST_OLD_BASH="$old_bash"
+
+# The enumeration's precondition, named before anything depends on it. Without
+# this the silent filesystem fallback restores the behaviour the tracked set
+# replaced, and a small count is the only sign.
+require_tracked_source "$repo_root" "check-shell-portability" || exit 2
 
 self_test
 
@@ -335,8 +377,20 @@ while IFS= read -r script; do
   fi
 done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)
 
-if [ "$checked" -eq 0 ]; then
-  echo "error: no bash scripts found in scripts/ — the enumeration is broken, not the tree." >&2
+#
+# A FLOOR WELL UNDER THE REAL COUNT, not at-least-one. "Matched almost nothing"
+# is the failure that reads as success: an at-least-one floor is satisfied by the
+# gate scripts themselves, or by one stray file, and reports a clean tree. This
+# catches an enumeration that collapsed, and is set low enough that ordinary
+# growth or deletion does not trip it.
+readonly PORTABILITY_SCRIPT_FLOOR=6 # measured 8 bash scripts
+# The default is the FAILING value, and that direction is the fix. An empty
+# operand to a numeric test exits 2 with "integer expected", and in an `if` a 2
+# reads as false — so the floor is not evaluated to false, it is SKIPPED, and the
+# skip looks exactly like a pass. Defaulting to 0 would be the defect written
+# into its own fix: 0 is a clean count and is what an absent tool most resembles.
+if [ "${checked:--1}" -lt "$PORTABILITY_SCRIPT_FLOOR" ]; then
+  echo "error: examined ${checked} bash script(s), under the floor of ${PORTABILITY_SCRIPT_FLOOR} — the enumeration collapsed." >&2
   exit 2
 fi
 
@@ -386,7 +440,7 @@ if [ -n "$old_bash" ]; then
   printf 'ok: %s bash script(s) carry no bash 4 construct; %s of them were also RUN under %s\n' \
     "$checked" "$probed" "$("$old_bash" --version | head -1 | sed 's/ (.*//')"
 else
-  printf 'ok: %s bash script(s) carry no bash 4 construct (scanned; no bash older than 4 on this machine to run them under)\n' "$checked"
+  printf 'PARTIAL: %s bash script(s) carry no bash 4 construct BY SCAN ONLY; none was run under an old bash, because SKIP_OLD_BASH_PROBE was set. A construct this table does not list would not be caught.\n' "$checked"
 fi
 
 if [ "$fail" -ne 0 ]; then
