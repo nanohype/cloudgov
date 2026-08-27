@@ -54,6 +54,7 @@ package internal/compliance         97
 package internal/cloud/aws          82
 package internal/cost               95
 package internal/drift              88
+package internal/fix                95    # Terraform/shell emitters and the `iam fix` entry path: the severity floor, per-principal dedup, and an unwritable file each pinned
 package internal/iam                88
 package internal/inventory          85
 package internal/network            94
@@ -75,9 +76,8 @@ package internal/tags               94
 #
 # This does not assert 75 — the tree does not meet it, and a floor set to a
 # number the tree fails is a gate that is red on arrival and gets removed. It
-# asserts the total cannot REGRESS, and the distance left to the org floor is
-# stated rather than implied.
-total   coverage                    65    # measured 66.3; org floor is 75, so 8.7 points outstanding
+# asserts the total cannot REGRESS, and names the org floor it has not reached.
+total   coverage                    65    # the org floor is 75; the gate prints the measured total every run, and the toolchain's statement counting moves it
 
 # ── packages below the org floor ──────────────────────────────────────────────
 package internal/audit              73    # 74.2 measured
@@ -88,5 +88,4 @@ package internal/baseline           72    # baseline store + comparison
 package internal/compare            64    # report normalization
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports
-package internal/fix                39    # Terraform/shell emitters — golden-compared; the policy writer is covered directly
 package cmd                         17    # handlers resolve providers and render; the logic they call is floored above

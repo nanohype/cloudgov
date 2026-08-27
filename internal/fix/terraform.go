@@ -61,7 +61,13 @@ func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string
 		content = fmt.Sprintf("# no Terraform template available for provider %q\n", principal.Provider)
 	}
 
-	return os.WriteFile(filename, []byte(content), 0o600)
+	// The error names the principal: `iam fix` writes one file per principal,
+	// and the operator's next move is to re-run for the one that failed, which
+	// a bare path error does not identify.
+	if err := os.WriteFile(filename, []byte(content), 0o600); err != nil {
+		return fmt.Errorf("write fix for %s: %w", principal.Name, err)
+	}
+	return nil
 }
 
 func formatAWSTF(s, name string, policy cloud.Policy) string {
