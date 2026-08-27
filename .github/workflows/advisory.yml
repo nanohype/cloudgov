@@ -54,5 +54,5 @@ jobs:
         # vulnerability database is fetched at run time and stays current.
         run: |
           # renovate: datasource=go depName=golang.org/x/vuln
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
