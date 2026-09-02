@@ -43,14 +43,11 @@ func WriteFixScripts(findings []cloud.NetworkFinding, outDir string) ([]string, 
 		if err := fix.NameComponent("provider", provider); err != nil {
 			return written, err
 		}
-		// NameComponent has already refused every provider that could trip this:
-		// no separator, no bare "..", and the prefix below leaves nothing for
-		// PathUnder to reject. Kept because containment must not rest on the
-		// order of two statements — this is the layer that holds if the check
-		// above is moved, weakened, or forgotten by the next generator.
+		// Reachable on a valid provider: PathUnder also refuses a name that is
+		// already a symlink, which has nothing to do with the check above.
 		name, err := fix.PathUnder(outDir, fmt.Sprintf("fix-network-%s.sh", provider))
 		if err != nil {
-			return written, err //coverage:ignore unreachable while the check above stands
+			return written, err
 		}
 		if err := writeNetworkScript(name, provider, byProvider[provider]); err != nil {
 			return written, fmt.Errorf("write %s: %w", name, err)

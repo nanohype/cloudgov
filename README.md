@@ -395,7 +395,9 @@ Supported report types: `storage`, `network`, `orphans`. Reports are read from f
 
 The report is input, not configuration. Each generated script is named after the `provider` on the findings it covers, so `remediate` refuses a report whose `provider` names a path rather than a file — a separator, a `..` segment, or nothing at all — and refuses it before writing anything, naming the entry. It also refuses a name that is already a symlink, which would carry the write wherever the link points.
 
-The scripts are written executable and their contents come from the same report, so both halves are contained: the report chooses neither where a file lands nor what lines are in it. Values it supplies appear inside comment lines and inside quoted arguments; they do not become lines of their own.
+The scripts are written executable, so where a file lands is contained: no report can put one outside `--out`.
+
+What is in the file is contained in one place and not the other, and the difference is the report type. For `orphans`, cloudgov composes every command from an allowlist of resource kinds, and report values reach the file only inside comment lines and quoted arguments — they do not become lines of their own. For `storage` and `network`, the report's `remediation` string **is** the command by design: the scan writes it, `remediate` copies it to the script verbatim, and a report that supplies that field supplies the line. Review a storage or network script before running it, and treat one from a source you do not control as you would any other script from that source.
 
 What that does not cover: `remediate` refuses a symlink at the name it is about to write, and does not re-check the directories above it. Point `--out` at a directory you control.
 

@@ -17,25 +17,15 @@ func WriteRawPolicies(policies map[string]cloud.Policy, dir string) error {
 			continue
 		}
 		ext := ".json"
-		// slug repairs an arbitrary principal id into a filename; the two checks
-		// below assert the result rather than trusting the repair. Nothing here
-		// supplies a prefix, so the principal id is the whole of the name before
-		// the extension and PathUnder is what refuses one that reads as a flag.
 		s := slug(principalID)
 		if err := NameComponent("principal", s); err != nil {
 			return err
 		}
-		// NameComponent above refuses the separators and the bare directory
-		// references, so nothing reaches the refusal below. slug is not what
-		// makes that true — it replaces only / @ . - and space, so a backslash
-		// passes through it and a backslash is a separator by this package's own
-		// definition. The check two lines up is what catches it.
-		//
-		// Kept because containment must not rest on the order of two statements:
-		// this is the layer that holds if the check above is moved or dropped.
+		// Reachable on a valid principal: PathUnder also refuses a name that is
+		// already a symlink, which has nothing to do with the check above.
 		filename, err := PathUnder(dir, s+ext)
 		if err != nil {
-			return err //coverage:ignore unreachable while slug produces one plain element
+			return err
 		}
 		if err := os.WriteFile(filename, pol.Raw, 0o600); err != nil {
 			return fmt.Errorf("write policy %s: %w", principalID, err)

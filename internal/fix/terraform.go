@@ -49,26 +49,15 @@ func GenerateTerraform(findings []cloud.Finding, policies map[string]cloud.Polic
 }
 
 func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string) error {
-	// slug repairs an arbitrary principal name into a filename; the two checks
-	// below assert the result rather than trusting the repair. They are
-	// independent of slug on purpose, so a change to slug cannot widen where
-	// this writes.
 	s := slug(principal.Name)
 	if err := NameComponent("principal", s); err != nil {
 		return err
 	}
-	// NameComponent above refuses the separators and the bare directory
-	// references, and "minimal_" prefixes the name, so nothing reaches the
-	// refusal below. Note that slug is NOT what makes that true — it replaces
-	// only / @ . - and space, so a backslash passes through it and a backslash is
-	// a separator by this package's own definition. The check two lines up is
-	// what catches it.
-	//
-	// Kept because containment must not rest on the order of two statements: this
-	// is the layer that holds if the check above is moved, weakened or dropped.
+	// Reachable on a valid principal: PathUnder also refuses a name that is
+	// already a symlink, which has nothing to do with the check above.
 	filename, err := PathUnder(dir, "minimal_"+s+".tf")
 	if err != nil {
-		return err //coverage:ignore unreachable while slug produces one plain element
+		return err
 	}
 
 	var content string
@@ -117,8 +106,31 @@ POLICY
 `, s, strings.ReplaceAll(name, "_", "-"), body)
 }
 
+// slug renders an arbitrary principal name as one filename element.
+//
+// The named substitutions are kept so existing filenames do not move, and a
+// sweep against what NameComponent accepts is added behind them. A replacer
+// alone names the characters someone thought of, and this one had already let a
+// backslash and a colon through — a backslash being a separator by this
+// package's own definition, and a colon appearing in every principal ARN.
 func slug(name string) string {
-	return strings.NewReplacer(
+	// The named substitutions first, so the filenames this produces do not change:
+	// "@" carries meaning spelled out, and "." "-" and "/" have always collapsed
+	// to an underscore here.
+	lowered := strings.NewReplacer(
 		"/", "_", "@", "_at_", ".", "_", "-", "_", " ", "_",
 	).Replace(strings.ToLower(name))
+
+	// Then everything else outside the accepted set, which is the half a list of
+	// substitutions kept missing.
+	var b strings.Builder
+	b.Grow(len(lowered))
+	for _, r := range lowered {
+		if allowedInAName(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteRune('_')
+	}
+	return b.String()
 }

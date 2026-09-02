@@ -473,40 +473,34 @@ tool hides it.
   those lines, and a newline in one of them ends the comment and starts a line of
   its own in a file written `0700`.
 
-### What `internal/fix/containment_contract_test.go` checks, and what it does not
+### Where the containment claim is held
 
-It reads the sources and requires the path handed to **every** file-creating call
-to have come from `PathUnder` — per write, not per file, so a second write added
-to a generator does not inherit the first one's containment.
+"No remediation writer places an entry outside the directory it was given" is a
+claim about where a file ends up, so it is held by running rather than by
+reading. `internal/integration/containment_behaviour_test.go` drives every
+remediation writer against a report whose every caller-controlled string names an
+escape, in a sandbox it makes the working directory, and walks the filesystem
+afterwards. A writer that escapes fails there however it wrote — through a
+renamed variable, a rename whose destination nobody classified, a helper in
+another package, a function value, or a subprocess.
 
-The writer population is fail-closed rather than a list: any call on the standard
-library's `os` package counts unless it is named in `osTakesNoPathOrOnlyReads`,
-so a routine this repository has not used yet demands containment instead of
-being invisible. The `os` import is resolved by path, so an alias does not walk
-past it. `os.Mkdir` and `os.MkdirAll` are out of the population with the reason
-stated in the test: they create the directory rather than a file inside one, and
-the directory is the boundary `PathUnder` contains against.
+Its population is read from the source, because *which writers exist* is a fact
+about the source: an exported function in `internal/{storage,network,orphans,fix}`
+whose body creates the directory it writes into is a remediation writer, and one
+with no driver fails `TestEveryRemediationWriterIsObserved`.
 
-It resolves **one level** of dataflow. A write whose path is a parameter is
-contained only if every call to that function in its package passes a contained
-value, and a wrapper returning a `PathUnder` result counts as one. A wrapper
-around a wrapper is reported as uncontained rather than assumed safe.
+What it cannot do is prove the property for inputs it does not try. It runs the
+escapes a report can name, which is the surface the defect came in through; it
+says nothing about one a writer invents from a value no report supplies.
 
-`io/ioutil` is refused outright rather than classified: it is deprecated, every
-route it offers has an `os` equivalent already in the population, and refusing the
-import is one rule with nothing to drift.
+`internal/fix/containment_contract_test.go` holds the one part that genuinely is
+about the source: no file imports `io/ioutil`, whose writers no behavioural
+driver was written for.
 
-What it does not see: a filesystem write through a third-party package, or one
-shelled out through `exec`. Neither is how anything here writes, and a gate that
-claimed otherwise would be the more dangerous statement.
-
-The exemption check is the same shape. A directory listed in `containmentExempt`
-claims its writes are handed their paths, and the test fails if a write there is
-given a path the file built — by any spelling, since it classifies the expression
-rather than searching for `filepath.Join`.
-- Table output uses lipgloss + tabwriter. No interactive TUI (no bubbletea).
-- Do not add comments or docstrings to functions you didn't modify.
-- Do not add features, flags, or options beyond what is directly required.
+When you add a writer, add its driver. `fix.PathUnder` and `fix.NameComponent`
+are still how you compose a path — they are what makes the behavioural gate pass
+— and `fix.CommentText` is how a report value goes into a generated script's
+comment banner.
 
 ## Submitting changes
 

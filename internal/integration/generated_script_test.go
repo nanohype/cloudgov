@@ -14,8 +14,17 @@ import (
 
 // The invariant every generated script holds:
 //
-//	Every line is blank, a comment, or a command this tool composed. The report
-//	supplies values that appear in those lines. It does not supply lines.
+//	Every line is blank, a comment, or a command the generator put there. The
+//	report supplies values that appear in those lines. It does not supply extra
+//	lines.
+//
+// "The generator put there" is the honest half. For orphans that means a command
+// cloudgov composed from an allowlist of kinds, so the report chooses none of it.
+// For storage and network the report's `remediation` field IS the command by
+// documented contract — the scan writes it and remediate copies it — so for
+// those two the report supplies one line per finding, by design, and the
+// invariant is that it supplies no OTHER line. README.md says the same thing to
+// an operator, which is where they will look.
 //
 // Containing the path was half of the defect. `cloudgov remediate` reads a report
 // an operator received, and the same report fills the `#` banner above each

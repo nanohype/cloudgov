@@ -58,11 +58,30 @@ func NameComponent(field, value string) error {
 		return fmt.Errorf("%s %q is a directory reference, not a name", field, value)
 	}
 	for _, r := range value {
-		if r < 0x20 || r == 0x7f {
-			return fmt.Errorf("%s %q contains a control character", field, value)
+		if !allowedInAName(r) {
+			// A charset rather than a list of characters to refuse. The path this
+			// produces is printed for an operator to paste into a shell to review
+			// or run the script, so `$(`, a backtick, `;`, `*`, a quote and a
+			// space are all live there — and a blocklist of them is a list of the
+			// ones someone thought of. The values that reach this are tool-shaped
+			// identifiers: a provider is "aws", a slugged principal is lower-case
+			// and underscored. Naming what may appear is the narrower claim and
+			// the one that does not need extending.
+			return fmt.Errorf("%s %q contains %q, which is not a letter, digit, dot, dash or underscore; "+
+				"the generated path is printed for an operator to paste into a shell", field, value, r)
 		}
 	}
 	return nil
+}
+
+func allowedInAName(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	case r == '.' || r == '-' || r == '_':
+		return true
+	}
+	return false
 }
 
 // PathUnder joins name onto dir and returns the result only when it names a

@@ -27,8 +27,8 @@ func TestNameComponentRefusesWhatCannotBeOneElement(t *testing.T) {
 		{"current reference", ".", "directory reference"},
 		// No separator in this one on purpose: with one, the separator branch
 		// answers first and the case stops exercising what it names.
-		{"newline", "aws\nrm", "control character"},
-		{"null byte", "aws\x00", "control character"},
+		{"newline", "aws\nrm", "not a letter, digit"},
+		{"null byte", "aws\x00", "not a letter, digit"},
 	}
 
 	for _, tc := range tests {
