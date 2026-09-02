@@ -32,6 +32,16 @@ repo_root="$(pwd)"
 
 require_tools grep awk go || exit 2
 
+# The org floor and where it comes from. Named once so the gate, its messages
+# and .coverage-floors cannot state three different numbers.
+#
+# The standard publishes four floors — branches 60, lines 75, functions 75,
+# statements 75. `go test -cover` reports statements and nothing else, so this is
+# the one of the four a Go toolchain can assert. The other three are recorded as
+# unasserted in CONTRIBUTING.md rather than left to look enforced.
+readonly ORG_COVERAGE_FLOOR=75
+readonly STANDARD_SOURCE="nanohype/standards/testing-rubric.json"
+
 profile="${1:-coverage.out}"
 floors_file=".coverage-floors"
 module="github.com/nanohype/cloudgov"
@@ -180,9 +190,34 @@ evaluate_floors() {
     if awk "BEGIN{exit !($cov < $floor)}"; then
       echo "::error::${label} coverage ${cov}% is below its ${floor}% floor"
       fail=1
-    else
-      printf '  ok  %-52s %5s%% >= %s%%\n' "$label" "$cov" "$floor"
+      continue
     fi
+
+    # The org floor, asserted where it can be.
+    #
+    # A per-package floor is a ratchet set from that package's own measurement,
+    # so every package can sit above its own number while the tree sits under the
+    # org standard's. Naming the standard in a comment and gating on the ratchet
+    # is what let a package cross 75 and drift back under it with a green run.
+    #
+    # So: a package that MEASURES at or above the org floor must CARRY a floor at
+    # or above it. Non-circular, and it needs no list — the population is every
+    # package that has met the standard, read from the measurement rather than
+    # remembered. Once a package meets the bar it cannot quietly stop meeting it,
+    # and the tree ratchets toward the standard one package at a time instead of
+    # waiting on a single number nobody can move alone.
+    #
+    # A package still under the org floor is held to its own ratchet and named in
+    # the debt section, which is what ${floors_file} is for.
+    if [ "$kind" = "package" ] &&
+      awk "BEGIN{exit !($cov >= $ORG_COVERAGE_FLOOR)}" &&
+      awk "BEGIN{exit !($floor < $ORG_COVERAGE_FLOOR)}"; then
+      echo "::error::${label} measures ${cov}%, at or above the org floor of ${ORG_COVERAGE_FLOOR}% (${STANDARD_SOURCE}), but carries a floor of ${floor}%. Raise it to ${ORG_COVERAGE_FLOOR} or above: a package that has met the standard must not be free to fall back under it."
+      fail=1
+      continue
+    fi
+
+    printf '  ok  %-52s %5s%% >= %s%%\n' "$label" "$cov" "$floor"
   done
 
   # Any package that reports coverage but isn't floored is ungated — fail so new
@@ -252,6 +287,29 @@ self_test() {
 	EOF
   then
     self_test_die "accepted a package below its floor"
+  fi
+
+  # A package that has met the org floor and carries a floor below it. Without
+  # this the standard is named in prose and gated by nothing, which is the state
+  # that let a package cross 75 and be free to drift back under with a green run.
+  if evaluate_floors "$clean_out" "$clean_files" >/dev/null <<-'EOF'
+	package internal/alpha  70
+	EOF
+  then
+    self_test_die "accepted a package measuring above the org floor whose floor sits below it"
+  fi
+
+  # And the other half, because a rule that rejects everything is not a rule: a
+  # package still under the org floor is held to its own ratchet, not to 75.
+  # Without this case the check above is satisfiable by refusing every floor
+  # under 75, which would make the debt section unlandable.
+  if ! evaluate_floors \
+    'ok  	'"${module}"'/internal/beta	0.1s	coverage: 60.0% of statements' \
+    'internal/beta/b.go 60.0 0' >/dev/null <<-'EOF'
+	package internal/beta  55
+	EOF
+  then
+    self_test_die "rejected a package below the org floor that meets its own ratchet"
   fi
 
   # A floor naming a package with no coverage data — a stale or typo'd path,
@@ -329,7 +387,7 @@ self_test() {
     self_test_die "accepted a total below its floor while every package met its own"
   fi
 
-  echo "coverage self-test passed: the gate rejects below-floor, stale-path, unfloored and malformed entries."
+  echo "coverage self-test passed: the gate rejects below-floor, stale-path, unfloored and malformed entries, and a package that has met the org floor whose floor sits below it — while still accepting one that is under the org floor and meets its own ratchet."
 }
 
 self_test

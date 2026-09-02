@@ -161,9 +161,19 @@ func runCompliance(_ *cobra.Command, args []string) error {
 		return output.WriteComplianceSARIF(w, report, Version, report.Incomplete)
 	default:
 		if !quiet {
-			fmt.Fprintf(os.Stderr, "\n%s: %d controls evaluated\n\n", benchmark.Name, report.Summary.Total)
+			// Both numbers, because the benchmark's size and the number of
+			// controls this run could decide are different facts and only one of
+			// them is a verdict. Summary.Total is every control the benchmark
+			// declares, evaluated or not, so printing it alone reported a run
+			// that decided nothing as a run that decided everything.
+			fmt.Fprintf(os.Stderr, "\n%s: %d of %d controls evaluated\n\n",
+				benchmark.Name, report.Summary.Total-report.Summary.NotEvaluated, report.Summary.Total)
 		}
 		output.ComplianceReport(w, report)
+		// The verdicts are what a reader keeps, and --output-file keeps only
+		// stdout. Without this the saved table states which controls passed and
+		// carries nothing to say the scans behind them were partial.
+		output.IncompleteNote(w, report.Incomplete)
 	}
 	return nil
 }

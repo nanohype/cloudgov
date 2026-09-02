@@ -455,6 +455,33 @@ tool hides it.
 - Files on the security-critical path carry a per-file `file <path> 100` floor instead, because a
   package floor averages them with everything around them. Adding a branch to one of those files
   means covering both sides of it in the same change.
+- A package that **measures** at or above the org floor of 75 must **carry** a floor at or above it.
+  `scripts/coverage.sh` fails a run where one does not, so a package that has met the standard
+  cannot drift back under it. Raising coverage past 75 therefore means raising the floor in the
+  same change — the gate says so by name rather than leaving it to review.
+
+### What the coverage floor does and does not assert
+
+The `testing-rubric` standard, published in the `nanohype/standards` repository, sets four floors:
+branches 60, lines 75, functions 75, statements 75.
+
+**Statements are asserted.** Per package, by the rule above; per file, at 100 on the
+security-critical paths; and as a whole-tree ratchet that cannot regress.
+
+**Branches, lines and functions are asserted nowhere, and cannot be by this toolchain.**
+`go test -covermode` accepts `set`, `count` and `atomic` — all three count statements — and
+`go test -cover` reports `coverage: N% of statements`. There is no branch, line or function
+metric to gate on. This is recorded rather than left implicit, because a per-file `100` reads like
+full branch coverage and is not: both sides of a comparison execute the same statement, so
+changing `<=` to `<` in a security-critical file can leave a suite green at 100%. Where a bound
+decides whether something is reported, pin the bound itself with a case on each side of it —
+`internal/secrets/patterns_test.go` and `internal/compliance/roundtrip_test.go` are the worked
+examples, and each was written by making the mutation and watching the suite go red.
+
+**The whole-tree statement floor is a ratchet, not the standard.** The tree does not meet 75
+overall; the total floor records where it is and refuses a regression. The per-package rule is what
+closes the gap: the tree reaches the standard one package at a time rather than waiting on a single
+number nobody can move alone.
 
 ## Code conventions
 
