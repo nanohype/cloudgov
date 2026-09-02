@@ -557,9 +557,13 @@ cd "$(dirname "$0")/.."
 
 require_tools grep sed awk git || exit 2
 
-# The enumeration's precondition, named before anything depends on it. Without
-# this the silent filesystem fallback restores the behaviour the tracked set
-# replaced, and a small count is the only sign.
+# The enumeration's precondition, named before anything depends on it.
+#
+# tracked_files refuses a tree it cannot enumerate from git rather than walking
+# it, so the enumeration cannot widen to whatever CI placed beside the checkout.
+# That refusal reaches a caller as an empty list and a non-zero status from one
+# call, and a caller reading only the list cannot tell it from a tree with
+# nothing in it. Asserting the precondition here says which it was.
 require_tracked_source "$repo_root" "context-awareness" || exit 2
 
 self_test

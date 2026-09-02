@@ -43,14 +43,14 @@ func TestEveryFindingTypeListHoldsEveryConstantOfItsType(t *testing.T) {
 			case token.CONST:
 				for _, spec := range gen.Specs {
 					vs, ok := spec.(*ast.ValueSpec)
-					if !ok || vs.Type == nil {
-						continue
-					}
-					typeName, ok := identName(vs.Type)
 					if !ok {
 						continue
 					}
-					for _, name := range vs.Names {
+					for i, name := range vs.Names {
+						typeName, named := constantTypeName(vs, i)
+						if !named {
+							continue
+						}
 						constantsByType[typeName] = append(constantsByType[typeName], name.Name)
 					}
 				}
@@ -114,6 +114,31 @@ func TestEveryFindingTypeListHoldsEveryConstantOfItsType(t *testing.T) {
 	if checked < listFloor {
 		t.Fatalf("compared %d finding-type list(s), under the floor of %d — the enumeration collapsed rather than the package changing", checked, listFloor)
 	}
+}
+
+// constantTypeName returns the type of the i-th name in a const spec.
+//
+// Two spellings declare a typed constant and both have to be read, because
+// reading one is how a list of "every constant of this type" quietly stops being
+// every one:
+//
+//	OrphanDisk OrphanKind = "disk"   // the spec carries the type
+//	OrphanDisk = OrphanKind("disk")  // the spec does not; the conversion does
+//
+// The second has a nil ValueSpec.Type, so a check that skipped those declared a
+// constant invisible to itself while its comment promised otherwise.
+func constantTypeName(vs *ast.ValueSpec, i int) (string, bool) {
+	if vs.Type != nil {
+		return identName(vs.Type)
+	}
+	if i >= len(vs.Values) {
+		return "", false
+	}
+	call, isCall := vs.Values[i].(*ast.CallExpr)
+	if !isCall {
+		return "", false
+	}
+	return identName(call.Fun)
 }
 
 func identName(e ast.Expr) (string, bool) {

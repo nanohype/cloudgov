@@ -86,11 +86,11 @@ func TestEveryWriterOfAnIncompleteRecordNormalizesIt(t *testing.T) {
 				}
 			}
 			checked++
-			if !callsObserved(fn) {
-				t.Errorf("%s hands writeJSON a value carrying an incomplete record and never calls observed; "+
-					"the key is emitted as null, which a caller cannot tell apart from a tool that does not report "+
-					"its own coverage. Normalize it, or marshal a type that carries no record.",
-					fn.Name.Name)
+			if why := normalizesTheRecord(fn, marshalled); why != "" {
+				t.Errorf("%s hands writeJSON a value whose incomplete record is not normalized: %s. "+
+					"The key is emitted as null, which a caller cannot tell apart from a tool that does not "+
+					"report its own coverage. Normalize it, or marshal a type that carries no record.",
+					fn.Name.Name, why)
 			}
 		}
 	}
@@ -125,20 +125,92 @@ func writeJSONArgument(fn *ast.FuncDecl) (ast.Expr, bool) {
 	return arg, found
 }
 
-func callsObserved(fn *ast.FuncDecl) bool {
-	var found bool
+// normalizesTheRecord relates the observed call to the value that reaches
+// writeJSON, and returns why it does not when it does not.
+//
+// Asking only whether the function calls `observed` somewhere is not the same
+// question. `report.Incomplete = observed(report.Incomplete)` and
+// `_ = observed(report.Incomplete)` differ by one token, both contain the call,
+// and only one of them normalizes anything — so a presence check green-lights
+// exactly the mutant that reintroduces `"incomplete": null`.
+//
+// Two shapes reach writeJSON here and each has its own answer. A composite
+// literal must set its Incomplete field FROM an observed call, and setting it to
+// anything else — or omitting it, which leaves the zero value that marshals as
+// null — is the defect. A value passed by name must have had its Incomplete
+// field ASSIGNED from an observed call somewhere in the function.
+func normalizesTheRecord(fn *ast.FuncDecl, marshalled ast.Expr) string {
+	if literal, isLiteral := marshalled.(*ast.CompositeLit); isLiteral {
+		for _, elt := range literal.Elts {
+			kv, isKV := elt.(*ast.KeyValueExpr)
+			if !isKV {
+				continue
+			}
+			key, isIdent := kv.Key.(*ast.Ident)
+			if !isIdent || key.Name != "Incomplete" {
+				continue
+			}
+			if isObservedCall(kv.Value) {
+				return ""
+			}
+			return "its Incomplete field is set from something other than observed"
+		}
+		return "the literal it marshals leaves Incomplete unset, so the key marshals as null"
+	}
+
+	base := baseIdent(marshalled)
+	if base == "" {
+		return "this check cannot tell what value it marshals, so it cannot tell whether the record was normalized"
+	}
+
+	var assigned bool
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
+		assign, isAssign := n.(*ast.AssignStmt)
+		if !isAssign {
 			return true
 		}
-		if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "observed" {
-			found = true
-			return false
+		for i, lhs := range assign.Lhs {
+			sel, isSel := lhs.(*ast.SelectorExpr)
+			if !isSel || sel.Sel.Name != "Incomplete" {
+				continue
+			}
+			if ident, isIdent := sel.X.(*ast.Ident); !isIdent || ident.Name != base {
+				continue
+			}
+			if i < len(assign.Rhs) && isObservedCall(assign.Rhs[i]) {
+				assigned = true
+			}
 		}
 		return true
 	})
-	return found
+	if !assigned {
+		return "nothing assigns " + base + ".Incomplete from observed before it is marshalled"
+	}
+	return ""
+}
+
+// baseIdent returns the identifier a marshalled value refers to, through one
+// address-of. Anything else returns empty, which the caller reports rather than
+// assumes.
+func baseIdent(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.UnaryExpr:
+		if v.Op == token.AND {
+			return baseIdent(v.X)
+		}
+	}
+	return ""
+}
+
+func isObservedCall(e ast.Expr) bool {
+	call, ok := e.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	ident, ok := call.Fun.(*ast.Ident)
+	return ok && ident.Name == "observed"
 }
 
 // literalTypeName returns the name of a composite literal's type when it is a

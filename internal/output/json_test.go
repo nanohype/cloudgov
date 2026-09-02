@@ -514,12 +514,24 @@ func TestCompleteScanReportsAnEmptyIncomplete(t *testing.T) {
 // own coverage. Emitting `[]` makes "I looked at everything" a positive
 // statement.
 //
-// The writers below are named by hand, so this proves the bytes for these and
-// says nothing about a writer nobody added to the map. That claim belongs to
-// TestEveryWriterOfAnIncompleteRecordNormalizesIt, which derives its population
-// from what each writer marshals and so has no list to be left out of. This test
-// is the other half: it renders each envelope and reads the key, which a check
-// over the syntax tree cannot do.
+// The writers below are named by hand and the list checks itself:
+// writersTakingIncomplete reads the package and counts the exported writers
+// whose last parameter is the incomplete record, and the assertion at the end of
+// this function fails when the map is shorter than that count. A writer added
+// with an incomplete argument and no entry here fails, so the list cannot
+// silently stop being every one.
+//
+// What the denominator does not count is a writer that takes no incomplete
+// argument because it carries the record on the value it marshals — which is
+// what WriteCompliance and WriteAudit do, and is how the two writers that
+// actually emitted `null` sat outside a list that could not otherwise be short.
+// TestEveryWriterOfAnIncompleteRecordNormalizesIt covers those, deriving its
+// population from the SHAPE of what each writer marshals rather than from a
+// signature.
+//
+// The two halves are complements, not a strong check and a weak one: this test
+// renders each envelope and reads the bytes, which a check over the syntax tree
+// cannot do, and that one reaches writers this one's denominator cannot see.
 func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 	writers := map[string]func(io.Writer) error{
 		"certs":     func(w io.Writer) error { return WriteCerts(w, nil, nil) },

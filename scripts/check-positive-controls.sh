@@ -375,9 +375,13 @@ cat: /nonexistent/zzctl06path: No such file or directory'
   echo "check-positive-controls self-test passed: it rejects a no-op mutation, an off-target edit, a pre-existing marker, a crash that names the mutation, a non-zero exit with no verdict, a SILENT exit 127, a verdict printed after the gate's own helper died, and a real verdict that QUOTES a shell diagnostic as its finding."
 }
 
-# The enumeration's precondition, named before anything depends on it. Without
-# this the silent filesystem fallback restores the behaviour the tracked set
-# replaced, and a small count is the only sign.
+# The enumeration's precondition, named before anything depends on it.
+#
+# tracked_files refuses a tree it cannot enumerate from git rather than walking
+# it, so the enumeration cannot widen to whatever CI placed beside the checkout.
+# That refusal reaches a caller as an empty list and a non-zero status from one
+# call, and a caller reading only the list cannot tell it from a tree with
+# nothing in it. Asserting the precondition here says which it was.
 require_tracked_source "$repo_root" "check-positive-controls" || exit 2
 
 self_test
@@ -820,23 +824,36 @@ run_dependency_control scripts/check-doc-paths.sh \
 # the functions a sourced library defines, and the basename of a helper invoked
 # as a program.
 #
-# require_tools is the one symbol that does not put a gate in this population,
-# and the loop derives that rather than carrying it as an exception. That guard
-# runs before the gate has read anything, so a gate whose only use of the library
-# is the guard has no scan for a broken helper to wrongly bless — breaking it can
-# stop the gate starting and nothing else. There is no clean tree being reported,
-# which is the failure a dependency control exists to catch.
+# One symbol is excluded, and it is excluded BY NAME rather than derived. Whether
+# a helper is a guard — something that runs before the gate has read anything, so
+# breaking it stops the gate starting rather than letting it bless a clean tree —
+# is a fact about when it is called, and nothing here reads that. So
+# `library_guard_symbol` below is a literal, and a second guard-shaped helper
+# added to scripts/lib/ puts its callers in this population until someone adds it
+# beside that literal with the same reasoning.
+#
+# Stated rather than dressed as a derivation: the symbol set IS read from the
+# library, and this one exclusion is not, and a paragraph claiming otherwise is
+# how a reader stops checking. require_tools is the current occupant because a
+# gate whose only use of the library is that guard has no scan for a broken
+# helper to wrongly bless.
 library_symbols=()
 library_symbol_count=0
 for library in scripts/lib/*; do
   [ -f "$library" ] || continue
   case "$library" in
     *.sh)
+      # Both spellings bash accepts for a definition at column zero:
+      # `name() {` and `function name {`, with any amount of space around the
+      # parentheses. A definition indented inside another function is not a
+      # library symbol a gate can call, and is deliberately not matched.
       while IFS= read -r symbol; do
         [ -n "$symbol" ] || continue
         library_symbols+=("$symbol")
         library_symbol_count=$((library_symbol_count + 1))
-      done < <(sed -n 's/^\([a-z_][a-z_0-9]*\)() {.*/\1/p' "$library")
+      done < <(sed -n -E \
+        -e 's/^([A-Za-z_][A-Za-z_0-9]*)[[:space:]]*\([[:space:]]*\)[[:space:]]*\{.*/\1/p' \
+        -e 's/^function[[:space:]]+([A-Za-z_][A-Za-z_0-9]*).*/\1/p' "$library")
       ;;
     *)
       library_symbols+=("$(basename "$library")")
@@ -858,8 +875,6 @@ if [ "${library_symbol_count:--1}" -lt "$LIBRARY_SYMBOL_FLOOR" ]; then
   exit 2
 fi
 
-# The guard is named once, here, so the sentence above and the code below cannot
-# drift apart.
 library_guard_symbol="require_tools"
 
 while IFS= read -r script; do

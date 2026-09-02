@@ -30,7 +30,7 @@ func soc2TypeIIBenchmark() *Benchmark {
 			{ID: "CC6.7", Title: "Encryption of data in transit and at rest", Section: "Logical and Physical Access", Severity: cloud.SeverityHigh, Description: "Unencrypted storage violates data protection requirements. Evaluated via storage encryption findings."},
 
 			// CC7 — System Operations
-			{ID: "CC7.1", Title: "Configuration and change management monitoring", Section: "System Operations", Severity: cloud.SeverityMedium, Description: "IAM configuration should be monitored for unauthorized changes. cloudgov reads no configuration-monitoring state, so this control is reported as not evaluated; IAM findings are context toward it, not a verdict on it."},
+			{ID: "CC7.1", Title: "Configuration and change management monitoring", Section: "System Operations", Severity: cloud.SeverityMedium, Description: "IAM configuration should be monitored for unauthorized changes. no scan report this benchmark reads carries change-monitoring state, so this control is reported as not evaluated; IAM findings are context toward it, not a verdict on it."},
 			{ID: "CC7.2", Title: "Security event monitoring and anomaly detection", Section: "System Operations", Severity: cloud.SeverityMedium, Description: "Logging gaps prevent security event detection. Evaluated via access logging findings."},
 
 			// CC8 — Change Management

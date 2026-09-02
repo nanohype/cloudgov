@@ -576,12 +576,8 @@ func camelCase(id string) string {
 const tagRuleID = "MISSING_REQUIRED_TAGS"
 
 func buildOrphanRules() []sarifRule {
-	kinds := []cloud.OrphanKind{
-		cloud.OrphanDisk, cloud.OrphanIP, cloud.OrphanLoadBalancer,
-		cloud.OrphanSnapshot, cloud.OrphanImage, cloud.OrphanDBSnapshot,
-	}
-	rules := make([]sarifRule, 0, len(kinds))
-	for _, kind := range kinds {
+	rules := make([]sarifRule, 0, len(cloud.AllOrphanKinds))
+	for _, kind := range cloud.AllOrphanKinds {
 		rules = append(rules, sarifRule{
 			ID:               string(kind),
 			Name:             "Orphan" + camelCase(string(kind)),
