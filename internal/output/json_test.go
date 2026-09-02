@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nanohype/cloudgov/internal/audit"
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/compliance"
 )
 
 // roundTrip encodes via fn into a buffer, then decodes into T.
@@ -514,24 +516,28 @@ func TestCompleteScanReportsAnEmptyIncomplete(t *testing.T) {
 // own coverage. Emitting `[]` makes "I looked at everything" a positive
 // statement.
 //
-// The writers below are named by hand and the list checks itself:
-// writersTakingIncomplete reads the package and counts the exported writers
-// whose last parameter is the incomplete record, and the assertion at the end of
-// this function fails when the map is shorter than that count. A writer added
-// with an incomplete argument and no entry here fails, so the list cannot
-// silently stop being every one.
+// Observed, not analysed. An earlier version of this claim was held by reading
+// the source — finding the value each writer handed to writeJSON and relating an
+// `observed` call to it. That is a question about spelling, and the property is
+// about bytes: what the caller receives is `[]` or it is `null`. Rendering each
+// envelope answers it directly, and cannot be evaded by normalizing through a
+// helper, a wrapper, or a package this check has never heard of.
 //
-// What the denominator does not count is a writer that takes no incomplete
-// argument because it carries the record on the value it marshals — which is
-// what WriteCompliance and WriteAudit do, and is how the two writers that
-// actually emitted `null` sat outside a list that could not otherwise be short.
-// TestEveryWriterOfAnIncompleteRecordNormalizesIt covers those, deriving its
-// population from the SHAPE of what each writer marshals rather than from a
-// signature.
+// The writers below are named by hand and the list checks itself.
+// writersRenderingJSON reads the package and counts the exported writers that
+// hand a value to writeJSON, and the assertion at the end of this function fails
+// when the map is shorter than that count, so the list cannot silently stop
+// being every one.
 //
-// The two halves are complements, not a strong check and a weak one: this test
-// renders each envelope and reads the bytes, which a check over the syntax tree
-// cannot do, and that one reaches writers this one's denominator cannot see.
+// Counting the writers that TAKE the record as an argument is what an earlier
+// denominator did, and WriteCompliance and WriteAudit carry it on the value they
+// marshal instead — which is how the two that actually emitted `null` sat
+// outside a list that could not otherwise be short. Counting writeJSON reaches
+// them.
+//
+// One envelope carries no coverage key at all. It is named in
+// writersWithNoCoverageRecord with the reason and subtracted from the count,
+// rather than being quietly outside it.
 func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 	writers := map[string]func(io.Writer) error{
 		"certs":     func(w io.Writer) error { return WriteCerts(w, nil, nil) },
@@ -549,6 +555,13 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
 		"k8s":       func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
 		"repo":      func(w io.Writer) error { return WriteRepo(w, nil, nil) },
+		// These two carry the record on the value they marshal rather than
+		// taking it as an argument, which is how they sat outside a denominator
+		// that counted the argument — and they were the two that emitted null.
+		"compliance": func(w io.Writer) error {
+			return WriteCompliance(w, compliance.ComplianceReport{Benchmark: "cis-aws-v3"})
+		},
+		"audit": func(w io.Writer) error { return WriteAudit(w, &audit.Report{}) },
 	}
 
 	for domain, write := range writers {
@@ -585,25 +598,27 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		})
 	}
 
-	// The list must cover every writer that takes an incomplete argument, or a
-	// domain could ship outside it and read as covered.
-	// Every writer in internal/output that takes an incomplete argument must be
-	// here. Counting rather than trusting the list is what makes a new domain
-	// fail here instead of shipping outside the check.
-	declared := writersTakingIncomplete(t)
+	// Every exported JSON writer in internal/output must be here. Counting
+	// rather than trusting the list is what makes a new domain fail here instead
+	// of shipping outside the check.
+	declared := writersRenderingJSON(t) - len(writersWithNoCoverageRecord)
 	if len(writers) != declared {
-		t.Errorf("this check covers %d writers; %d in internal/output take an incomplete "+
-			"argument, so the difference is unexercised", len(writers), declared)
+		t.Errorf("this check covers %d writers; %d in internal/output render JSON, "+
+			"so the difference is unexercised", len(writers), declared)
 	}
 }
 
-// writersTakingIncomplete counts the exported writers in this package whose last
-// parameter is the incomplete record, by reading the source rather than a list.
+// writersRenderingJSON counts the exported JSON writers in this package, by
+// reading the source rather than a list.
 //
 // The list above is maintained by hand, and a hand-maintained list of "every X"
 // is the thing that silently stops being every X. This is the denominator that
 // makes it check itself.
-func writersTakingIncomplete(t *testing.T) int {
+//
+// Which writers EXIST is a fact about the source, so it is read from there. What
+// each one emits is not, which is why the map above renders every one of them and
+// reads the bytes rather than looking for a normalizer call in the body.
+func writersRenderingJSON(t *testing.T) int {
 	t.Helper()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -636,15 +651,13 @@ func writersTakingIncomplete(t *testing.T) int {
 			if !strings.HasPrefix(fn.Name.Name, "Write") || strings.HasSuffix(fn.Name.Name, "SARIF") {
 				continue
 			}
-			params := fn.Type.Params.List
-			if len(params) == 0 {
-				continue
-			}
-			last := params[len(params)-1]
-			for _, ident := range last.Names {
-				if ident.Name == "incomplete" {
-					count++
-				}
+			// Every exported JSON writer, not only those that take the record
+			// as an argument. Counting the argument left WriteCompliance and
+			// WriteAudit outside the denominator — they carry the record on the
+			// value they marshal — and those were the two that emitted null.
+			// A writer is one of these when it hands a value to writeJSON.
+			if callsWriteJSON(fn) {
+				count++
 			}
 		}
 	}
@@ -652,4 +665,36 @@ func writersTakingIncomplete(t *testing.T) int {
 		t.Fatal("no writers take an incomplete argument; the denominator is broken, not the package")
 	}
 	return count
+}
+
+// writersWithNoCoverageRecord names the exported JSON writers whose envelope
+// carries no incomplete key at all, with the reason.
+//
+// Named rather than silently outside the count: an envelope that does not report
+// its own coverage is a gap, and one that is written down is a gap someone can
+// close. WriteCompare is the only one — `cloudgov compare` reads two saved
+// reports, each of which carries a record it does not read, so a finding the
+// baseline saw and the current run could not observe renders as RESOLVED.
+var writersWithNoCoverageRecord = map[string]string{
+	"WriteCompare": "compare's envelope has no incomplete key; its two inputs each carry one and it reads neither",
+}
+
+// callsWriteJSON reports whether fn hands a value to writeJSON.
+func callsWriteJSON(fn *ast.FuncDecl) bool {
+	if fn.Body == nil {
+		return false
+	}
+	var found bool
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if ident, isIdent := call.Fun.(*ast.Ident); isIdent && ident.Name == "writeJSON" {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
 }
