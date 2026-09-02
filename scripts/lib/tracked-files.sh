@@ -109,8 +109,8 @@ require_tracked_source() {
   local top
   top="$(git -C "$root" rev-parse --show-toplevel)"
   if [ "$(cd "$root" && pwd -P)" != "$(cd "$top" && pwd -P)" ]; then
-    echo "error: ${root} is not the root of its working tree (${top}), so the enumeration would" >&2
-    echo "       silently fall back to a filesystem walk." >&2
+    echo "error: ${root} is not the root of its working tree (${top}), so tracked_files would" >&2
+    echo "       refuse it and this gate has NOT enumerated anything." >&2
     return 2
   fi
 

@@ -7,9 +7,10 @@ import (
 // This decision lives in its own file so it can carry a per-file coverage floor.
 //
 // A package floor cannot reach it: this function is four lines inside a large
-// package whose floor sits far below its average, so it measured 0% while the
-// package was comfortably above that floor. The per-file floor in
-// .coverage-floors is what makes the branch visible at all. It is the entire control on whether a
+// package, so it measured 0% while the package average stayed above its floor
+// and nothing reported the gap. The per-file floor in .coverage-floors is what
+// makes the branch visible at all — a package average cannot see one function,
+// whatever the distance between the floor and the average happens to be. It is the entire control on whether a
 // kubeconfig NAMED BY THE MODEL may run an exec credential plugin — an arbitrary
 // command, in a process holding live AWS credentials — and both sides of its one
 // branch decide whether that command runs.

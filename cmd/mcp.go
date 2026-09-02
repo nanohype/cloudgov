@@ -562,10 +562,14 @@ func jsonResult(write func(io.Writer) error) (*mcp.CallToolResult, any, error) {
 
 // resolveMCPSeverity resolves a tool's `severity` argument, defaulting to LOW.
 //
-// LOW is the documented default for every MCP tool, so it lives here rather than
-// at each call site: a handler choosing its own fallback is a chance for one of
-// them to differ from the table in AGENTS.md, and the chances scale with the
-// number of tools.
+// LOW is the default every severity-taking tool gets, and it lives here rather
+// than at each call site because a handler choosing its own fallback is a chance
+// for one of them to differ — and the chances scale with the number of tools.
+//
+// Where it is written down is the jsonschema description on each input struct,
+// not the AGENTS.md tool table, which lists `severity` as a parameter and records
+// no default for any tool. Two of those descriptions are empty, so the default is
+// documented on most of the surface rather than all of it.
 func resolveMCPSeverity(s string) (cloud.Severity, error) {
 	return resolveSeverity(s, cloud.SeverityLow)
 }

@@ -54,9 +54,11 @@ const (
 // constant is declared without joining the list, or when the list names one that
 // no longer exists.
 //
-// Nothing renders repo findings as SARIF, so unlike AllPlatformFindingTypes this
-// list feeds no rule table. It is the enumeration a renderer would be checked
-// against on the day one is written.
+// Nothing renders repo findings as SARIF, so this list feeds nothing. The
+// sibling that does feed a rule table is AllOrphanKinds, which internal/output
+// iterates to build one; AllPlatformFindingTypes is only checked against a rule
+// table written by hand beside it. This is the enumeration a renderer would be
+// built from on the day one is written.
 var RepoFindingTypes = []RepoFindingType{
 	RepoNoProtection,
 	RepoNoRequiredChecks,

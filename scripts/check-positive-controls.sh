@@ -865,13 +865,12 @@ done
 # A floor, not an at-least-one: an enumeration that collapsed reports every gate
 # as needing no control, which is the reading that looks like a clean tree.
 readonly LIBRARY_SYMBOL_FLOOR=4 # tracked-files.sh alone defines four
-# Counted as they are appended rather than read back with ${#array[@]}: under
-# `set -u` on the bash 3.2 a macOS system path provides, that expansion on an
-# EMPTY array is an unbound variable and aborts the suite mid-run — which is the
-# one failure this file cannot afford, since the abort leaves the floor reporting
-# a suite it never finished.
-if [ "${library_symbol_count:--1}" -lt "$LIBRARY_SYMBOL_FLOOR" ]; then
-  echo "error: found ${library_symbol_count} shared-library symbol(s), under the floor of ${LIBRARY_SYMBOL_FLOOR} — the enumeration is broken, not the tree." >&2
+# ${#array[@]} is safe on an empty array under `set -u`, on the bash 3.2 a macOS
+# system path provides as much as anywhere else — measured on GNU bash 3.2.57.
+# It is `${array[@]}` without the `#` that is an unbound variable there, which is
+# why the loops below carry the `${arr[@]+"${arr[@]}"}` guard and this does not.
+if [ "${#library_symbols[@]}" -lt "$LIBRARY_SYMBOL_FLOOR" ]; then
+  echo "error: found ${#library_symbols[@]} shared-library symbol(s), under the floor of ${LIBRARY_SYMBOL_FLOOR} — the enumeration is broken, not the tree." >&2
   exit 2
 fi
 

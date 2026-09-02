@@ -12,10 +12,16 @@ import (
 )
 
 // A list of "every finding type this auditor can emit" is only worth having if
-// something notices when it stops being every one. Both lists here sit beside
-// their constants and are kept by hand, which is the arrangement a new constant
+// something notices when it stops being every one. This package declares three —
+// AllOrphanKinds, RepoFindingTypes and AllPlatformFindingTypes — each sitting
+// beside its constants and kept by hand, which is the arrangement a new constant
 // slips past: the constant compiles, the auditor emits it, and the list that
 // downstream code enumerates is quietly one short.
+//
+// AllPlatformFindingTypes was in that state as much as the other two. It was
+// checked against the SARIF rule table, which is a different question: two
+// hand-kept lists agreeing with each other says nothing about either agreeing
+// with the constants.
 //
 // This is what notices. It reads the constant blocks and the list literals out
 // of the package source and requires them to agree, in both directions — a
@@ -23,9 +29,9 @@ import (
 // exists, are the same drift seen from either side.
 //
 // The population is derived: any package-level slice of a named type whose
-// elements are constants of that type is checked. A third enumeration added
-// tomorrow is covered without an edit here, which is the property the two lists'
-// own comments claim and could not have on their own.
+// elements are constants of that type is checked, so a fourth enumeration added
+// tomorrow is covered without an edit here — which is the property each list's
+// own comment claims and none of them could have alone.
 func TestEveryFindingTypeListHoldsEveryConstantOfItsType(t *testing.T) {
 	fset := token.NewFileSet()
 	files := parsePackage(t, fset)

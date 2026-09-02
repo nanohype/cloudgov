@@ -662,7 +662,7 @@ func writersRenderingJSON(t *testing.T) int {
 		}
 	}
 	if count == 0 {
-		t.Fatal("no writers take an incomplete argument; the denominator is broken, not the package")
+		t.Fatal("no exported writer in this package hands a value to writeJSON; the denominator is broken, not the package")
 	}
 	return count
 }
