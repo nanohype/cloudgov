@@ -492,6 +492,10 @@ contained only if every call to that function in its package passes a contained
 value, and a wrapper returning a `PathUnder` result counts as one. A wrapper
 around a wrapper is reported as uncontained rather than assumed safe.
 
+`io/ioutil` is refused outright rather than classified: it is deprecated, every
+route it offers has an `os` equivalent already in the population, and refusing the
+import is one rule with nothing to drift.
+
 What it does not see: a filesystem write through a third-party package, or one
 shelled out through `exec`. Neither is how anything here writes, and a gate that
 claimed otherwise would be the more dangerous statement.

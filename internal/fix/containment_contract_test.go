@@ -269,6 +269,20 @@ func TestEveryFileCreatingCallIsHandedAContainedPath(t *testing.T) {
 		}
 	}
 
+	// io/ioutil is refused outright rather than classified.
+	//
+	// It is deprecated, unused here, and its writers — WriteFile, TempFile,
+	// TempDir — are a second population this gate would have to carry a second
+	// read-only list for. Refusing the import is one rule with nothing to drift:
+	// every route it offers has an os equivalent already in the population.
+	for _, f := range files {
+		file, _ := parseFile(t, f.path)
+		if _, imported := importedAs(file, "io/ioutil"); imported {
+			t.Errorf("%s imports io/ioutil, whose writers are outside this gate's population; "+
+				"use the os equivalent, which is in it", f.rel)
+		}
+	}
+
 	// One level of dataflow: a write whose path is a parameter is contained only
 	// if EVERY call to that function in its package passes a contained
 	// identifier. Deeper than one level is not resolved — a caller that itself
