@@ -1,6 +1,7 @@
 package orphans
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -221,4 +222,64 @@ func TestWriteFixScriptsNoDeletable(t *testing.T) {
 	if len(files) != 0 {
 		t.Errorf("want no scripts, got %v", files)
 	}
+}
+
+// The provider on a saved report decides a filename, and `cloudgov remediate`
+// reads it out of a file an operator received rather than one cloudgov wrote.
+// This generator's scripts are written 0700 and their body is a list of DELETE
+// commands, so an escaping name is the worst version of the defect in the tree.
+func TestWriteFixScriptsRefusesAProviderThatNamesAPath(t *testing.T) {
+	for _, provider := range []string{
+		"../ESCAPED",
+		"../../ESCAPED",
+		"../../../ESCAPED",
+		"sub/ESCAPED",
+		// Segments that cancel back inside are refused too: the result is a file
+		// this code did not name, whether or not it lands where it meant to.
+		"x/../aws",
+		"/etc/cron.d/ESCAPED",
+		"..",
+		"",
+	} {
+		t.Run(provider, func(t *testing.T) {
+			root := t.TempDir()
+			out := filepath.Join(root, "out")
+
+			_, err := WriteFixScripts([]cloud.OrphanResource{{
+				Kind: cloud.OrphanDisk, ID: "vol-1", Region: "us-east-1",
+				Provider: provider,
+			}}, out)
+			if err == nil {
+				t.Fatalf("provider %q was accepted; it names a path, not a file", provider)
+			}
+
+			// The refusal is only worth having if nothing was written. Checked over
+			// the whole temporary tree rather than over `out`, because the failure
+			// this guards against is a file appearing somewhere else.
+			for _, path := range treeFiles(t, root) {
+				if filepath.Dir(path) != out {
+					t.Errorf("provider %q produced %s, outside %s", provider, path, out)
+				}
+			}
+		})
+	}
+}
+
+// treeFiles returns every regular file under root.
+func treeFiles(t *testing.T, root string) []string {
+	t.Helper()
+	var out []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			out = append(out, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return out
 }

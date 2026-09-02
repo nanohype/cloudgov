@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -107,4 +108,50 @@ func TestAnnounceFiles(t *testing.T) {
 	announceFiles(nil, 3)
 	quiet = true
 	announceFiles([]string{"fix-aws.sh"}, 1)
+}
+
+// The read side refuses the same values the generators refuse, before any file
+// exists. One shared definition rather than two rules: two drift, and the one
+// that drifts loose is the one that decides where a 0700 file lands.
+func TestCheckNamesRefusesAProviderThatNamesAPath(t *testing.T) {
+	tests := []struct {
+		name      string
+		providers []string
+		wantFrag  string // empty means the report is accepted
+	}{
+		{name: "plain provider", providers: []string{"aws"}},
+		{name: "several plain providers", providers: []string{"aws", "gamma"}},
+		{name: "escapes the output directory", providers: []string{"../../../ESCAPED"}, wantFrag: "path separator"},
+		{name: "segments that cancel", providers: []string{"x/../aws"}, wantFrag: "path separator"},
+		{name: "parent reference", providers: []string{".."}, wantFrag: "directory reference"},
+		{name: "empty", providers: []string{""}, wantFrag: "is empty"},
+		// The refusal names the entry, so an operator holding a long report knows
+		// which one to look at rather than which path they never typed.
+		{name: "names the offending entry", providers: []string{"aws", "gamma", "../ESCAPED"}, wantFrag: "finding 2"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			findings := make([]cloud.BucketFinding, 0, len(tc.providers))
+			for _, p := range tc.providers {
+				findings = append(findings, cloud.BucketFinding{Provider: p, Bucket: "b"})
+			}
+			err := checkNames("storage", "finding", findings, func(f cloud.BucketFinding) string { return f.Provider })
+			if tc.wantFrag == "" {
+				if err != nil {
+					t.Fatalf("a usable report was refused: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("providers %v were accepted; one of them names a path", tc.providers)
+			}
+			if !strings.Contains(err.Error(), tc.wantFrag) {
+				t.Errorf("refusal did not carry %q: %v", tc.wantFrag, err)
+			}
+			if !strings.Contains(err.Error(), "storage report") {
+				t.Errorf("refusal did not name the report: %v", err)
+			}
+		})
+	}
 }

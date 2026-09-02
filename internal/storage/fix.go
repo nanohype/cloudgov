@@ -3,10 +3,11 @@ package storage
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/fix"
 )
 
 // WriteFixScripts generates one shell remediation script per provider and writes them
@@ -25,10 +26,31 @@ func WriteFixScripts(findings []cloud.BucketFinding, outDir string) ([]string, e
 		byProvider[f.Provider] = append(byProvider[f.Provider], f)
 	}
 
+	// Sorted rather than ranged over the map: the provider decides a filename, so
+	// map order decides which refusal an operator sees and in what order the
+	// written files are reported. Neither should differ between two runs over the
+	// same report.
+	providers := make([]string, 0, len(byProvider))
+	for provider := range byProvider {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+
 	var written []string
-	for provider, pfindings := range byProvider {
-		name := filepath.Join(outDir, fmt.Sprintf("fix-%s.sh", provider))
-		if err := writeProviderScript(name, provider, pfindings); err != nil {
+	for _, provider := range providers {
+		if err := fix.NameComponent("provider", provider); err != nil {
+			return written, err
+		}
+		// NameComponent has already refused every provider that could trip this:
+		// no separator, no bare "..", and the prefix below leaves nothing for
+		// PathUnder to reject. Kept because containment must not rest on the
+		// order of two statements — this is the layer that holds if the check
+		// above is moved, weakened, or forgotten by the next generator.
+		name, err := fix.PathUnder(outDir, fmt.Sprintf("fix-%s.sh", provider))
+		if err != nil {
+			return written, err //coverage:ignore unreachable while the check above stands
+		}
+		if err := writeProviderScript(name, provider, byProvider[provider]); err != nil {
 			return written, fmt.Errorf("write %s: %w", name, err)
 		}
 		written = append(written, name)

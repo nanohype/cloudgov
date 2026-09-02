@@ -96,6 +96,12 @@ returns them: `--quiet` silences the output, not the record.
   Every `warnf` is recorded as an incomplete observation and surfaces in the run's
   `incomplete` output and exit code 3 — a partial scan must not report as clean.
 - Cost figures are on-demand list-price estimates; say so in the finding `Detail`.
+- A file this tool creates gets its path from `fix.PathUnder`, never from a bare
+  `filepath.Join`. Generated filenames are built from values read out of a saved
+  report, so without it the report chooses where an executable lands. Where the
+  value is a single untrusted component, `fix.NameComponent` refuses it at the
+  read as well, so the refusal names the report field rather than a path nobody
+  typed. `internal/fix/containment_contract_test.go` enforces this.
 
 ### Import aliases
 

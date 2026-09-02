@@ -3,7 +3,6 @@ package fix
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -18,7 +17,22 @@ func WriteRawPolicies(policies map[string]cloud.Policy, dir string) error {
 			continue
 		}
 		ext := ".json"
-		filename := filepath.Join(dir, slug(principalID)+ext)
+		// slug repairs an arbitrary principal id into a filename; the two checks
+		// below assert the result rather than trusting the repair. Nothing here
+		// supplies a prefix, so the principal id is the whole of the name before
+		// the extension and PathUnder is what refuses one that reads as a flag.
+		s := slug(principalID)
+		if err := NameComponent("principal", s); err != nil {
+			return err
+		}
+		// slug leaves no separator, no ".." segment and no leading dash, so no
+		// principal id reaches the refusal below. Kept because containment must
+		// not depend on that: a change to slug widens where this writes only if
+		// this check is here to refuse it.
+		filename, err := PathUnder(dir, s+ext)
+		if err != nil {
+			return err //coverage:ignore unreachable while slug produces one plain element
+		}
 		if err := os.WriteFile(filename, pol.Raw, 0o600); err != nil {
 			return fmt.Errorf("write policy %s: %w", principalID, err)
 		}

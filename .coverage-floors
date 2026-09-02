@@ -67,6 +67,7 @@ package internal/quota              95
 package internal/secrets            93
 package internal/storage            90
 package internal/tags               94
+package internal/baseline           75    # the store and its shared path definition
 
 # ── the total, ratcheted ──────────────────────────────────────────────────────
 #
@@ -84,7 +85,6 @@ package internal/audit              73    # 74.2 measured
 package internal/output             73    # 77.0 measured; floored below the org floor
 # These are the repo's real coverage debt. Each carries what it measures, and
 # raising one is a change to this file, not permission to stay.
-package internal/baseline           72    # baseline store + comparison
 package internal/compare            64    # report normalization
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports

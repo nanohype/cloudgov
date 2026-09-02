@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/fix"
 	"github.com/nanohype/cloudgov/internal/network"
 	orphanscanner "github.com/nanohype/cloudgov/internal/orphans"
 	"github.com/nanohype/cloudgov/internal/storage"
@@ -73,6 +74,9 @@ func runRemediate(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
+		if err := checkNames("storage", "finding", findings, func(f cloud.BucketFinding) string { return f.Provider }); err != nil {
+			return err
+		}
 		findings = filterStorageBySeverity(findings, minSev)
 		files, err := storage.WriteFixScripts(findings, remediateOutDir)
 		if err != nil {
@@ -83,6 +87,9 @@ func runRemediate(_ *cobra.Command, _ []string) error {
 	case "network":
 		findings, err := unmarshalNetworkReport(data)
 		if err != nil {
+			return err
+		}
+		if err := checkNames("network", "finding", findings, func(f cloud.NetworkFinding) string { return f.Provider }); err != nil {
 			return err
 		}
 		findings = filterNetworkBySeverity(findings, minSev)
@@ -97,6 +104,9 @@ func runRemediate(_ *cobra.Command, _ []string) error {
 		if err != nil {
 			return err
 		}
+		if err := checkNames("orphans", "resource", orphans, func(o cloud.OrphanResource) string { return o.Provider }); err != nil {
+			return err
+		}
 		// Orphan resources have no severity; --severity does not apply.
 		files, err := orphanscanner.WriteFixScripts(orphans, remediateOutDir)
 		if err != nil {
@@ -107,6 +117,27 @@ func runRemediate(_ *cobra.Command, _ []string) error {
 	default:
 		return fmt.Errorf("unsupported report type %q (want: storage, network, orphans)", remediateType)
 	}
+}
+
+// checkNames refuses a report whose entries carry a provider that cannot be
+// part of a filename.
+//
+// The generators refuse the same values as they compose a path, and that
+// refusal is what contains the write. This one runs at the read for two
+// reasons. It names the report, the entry and the field, where the generator
+// can only name a path the operator never typed; and it refuses before any file
+// exists, so a report with one bad entry does not leave the scripts for its
+// good entries on disk beside an error.
+//
+// Read and write share the definition rather than each carrying a rule. Two
+// rules drift, and the one that drifts loose is the one that decides.
+func checkNames[T any](kind, noun string, items []T, provider func(T) string) error {
+	for i, item := range items {
+		if err := fix.NameComponent("provider", provider(item)); err != nil {
+			return fmt.Errorf("%s report: %s %d: %w", kind, noun, i, err)
+		}
+	}
+	return nil
 }
 
 // storageEnvelope and networkEnvelope match the JSON output of the

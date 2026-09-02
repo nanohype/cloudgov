@@ -393,6 +393,8 @@ Read a previously-saved JSON scan report and emit shell scripts that remediate e
 
 Supported report types: `storage`, `network`, `orphans`. Reports are read from files written via `--output json --output-file <path>` on the corresponding scan command.
 
+The report is input, not configuration. Each generated script is named after the `provider` on the findings it covers, so `remediate` refuses a report whose `provider` names a path rather than a file — a separator, a `..` segment, or nothing at all — and refuses it before writing anything, naming the entry. The scripts are written executable and their body comes from the same report, so a report that could choose the filename could choose where an executable lands. Every generated file goes directly into `--out` and nowhere else.
+
 ```sh
 # Generate fix scripts from a saved storage scan
 cloudgov storage audit --output json --output-file storage.json

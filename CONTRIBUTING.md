@@ -462,6 +462,14 @@ tool hides it.
 - All cloud API calls must accept and respect a `context.Context`.
 - No global state. No `init()` side effects beyond cobra command registration.
 - Use the import aliases from `CLAUDE.md` consistently.
+- Compose the path of any file you write with `fix.PathUnder`, not
+  `filepath.Join`. Generated filenames are built from values read out of a saved
+  report, and `remediate` reads reports an operator received rather than ones
+  cloudgov wrote — so a bare join lets the report choose where an executable
+  lands. `fix.NameComponent` refuses such a value at the read too, so the error
+  names the report field. `internal/fix/containment_contract_test.go` fails the
+  build if a file creates a file on disk without composing its path this way, and
+  fails if a directory listed as exempt starts composing one.
 - Table output uses lipgloss + tabwriter. No interactive TUI (no bubbletea).
 - Do not add comments or docstrings to functions you didn't modify.
 - Do not add features, flags, or options beyond what is directly required.

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -50,8 +49,22 @@ func GenerateTerraform(findings []cloud.Finding, policies map[string]cloud.Polic
 }
 
 func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string) error {
+	// slug repairs an arbitrary principal name into a filename; the two checks
+	// below assert the result rather than trusting the repair. They are
+	// independent of slug on purpose, so a change to slug cannot widen where
+	// this writes.
 	s := slug(principal.Name)
-	filename := filepath.Join(dir, "minimal_"+s+".tf")
+	if err := NameComponent("principal", s); err != nil {
+		return err
+	}
+	// slug leaves no separator, no ".." segment and no leading dash, and
+	// "minimal_" prefixes the name, so no principal reaches the refusal below.
+	// Kept because containment must not depend on that: a change to slug widens
+	// where this writes only if this check is here to refuse it.
+	filename, err := PathUnder(dir, "minimal_"+s+".tf")
+	if err != nil {
+		return err //coverage:ignore unreachable while slug produces one plain element
+	}
 
 	var content string
 	switch principal.Provider {
