@@ -484,10 +484,14 @@ afterwards. A writer that escapes fails there however it wrote — through a
 renamed variable, a rename whose destination nobody classified, a helper in
 another package, a function value, or a subprocess.
 
-Its population is read from the source, because *which writers exist* is a fact
-about the source: an exported function in `internal/{storage,network,orphans,fix}`
-whose body creates the directory it writes into is a remediation writer, and one
-with no driver fails `TestEveryRemediationWriterIsObserved`.
+Its population is **every exported function** in
+`internal/{storage,network,orphans,fix}` — no predicate decides which of them
+writes. Each one either has a driver or a sentence in `notAWriter` saying why it
+creates no file, and one in neither fails
+`TestEveryExportedFunctionIsObservedOrExplained`. A predicate here would be a
+reading choosing what gets observed, which is how a writer escaped once already:
+the gate matched a body calling `os.MkdirAll`, five writers repeat that call, and
+factoring it into a shared helper produced a sixth writer the gate never saw.
 
 What it cannot do is prove the property for inputs it does not try. It runs the
 escapes a report can name, which is the surface the defect came in through; it

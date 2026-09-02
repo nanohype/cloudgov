@@ -21,10 +21,12 @@ import (
 // "The generator put there" is the honest half. For orphans that means a command
 // cloudgov composed from an allowlist of kinds, so the report chooses none of it.
 // For storage and network the report's `remediation` field IS the command by
-// documented contract — the scan writes it and remediate copies it — so for
-// those two the report supplies one line per finding, by design, and the
-// invariant is that it supplies no OTHER line. README.md says the same thing to
-// an operator, which is where they will look.
+// documented contract — the scan writes it and remediate copies it verbatim, so
+// a multi-line remediation is as many lines as the report wrote. The invariant
+// for those two is that the report supplies no line OTHER than that field's
+// contents. The security delta is nil, since a semicolon on one line carries the
+// same power; the point is that the sentence says what the code does.
+// README.md tells an operator the same thing, which is where they will look.
 //
 // Containing the path was half of the defect. `cloudgov remediate` reads a report
 // an operator received, and the same report fills the `#` banner above each
@@ -158,6 +160,10 @@ func TestGeneratedScriptsTakeNoLinesFromTheReport(t *testing.T) {
 				// A generator that emitted nothing would satisfy the check above,
 				// so the count is asserted too. The shebang is a comment by this
 				// count, so `set -euo pipefail` is the one preamble line left.
+				// The fixture's remediation is deliberately one line, so this
+				// counts lines the report did not ask for; a multi-line
+				// remediation legitimately raises the total for storage and
+				// network, which is why it is not the hostile field here.
 				const preamble = 1
 				if got := len(commandLines) - preamble; got != tc.commands {
 					t.Errorf("%s emitted %d command line(s), want %d:\n%s",

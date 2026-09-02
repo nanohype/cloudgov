@@ -46,12 +46,31 @@ var escapes = []string{
 	"../../../ESCAPED",
 	"sub/ESCAPED",
 	"x/../ESCAPED",
-	"/tmp/ESCAPED-absolute",
+	absoluteEscapeInside,
+	absoluteEscapeOutside,
 	"..",
 	"",
 	"-rf",
 	"a\nb",
 }
+
+// The two absolute shapes, each replaced per run with a path that has a
+// detector.
+//
+// A literal /tmp path was a case that could not fail. Two of the drivers return
+// no paths, so for those the only live detector is the walk — and the walk is
+// confined to the sandbox, which is exactly where a /tmp landing is not. A write
+// there reported pass with the file on disk, which is worse than not testing the
+// shape, because the case is counted.
+//
+// So one absolute target sits inside the sandbox, where the walk reaches it and
+// every driver is covered whether or not it reports what it wrote; and one sits
+// outside, asserted by naming it and looking. Neither is a placeholder the
+// detector cannot see.
+const (
+	absoluteEscapeInside  = "\x00absolute-inside"
+	absoluteEscapeOutside = "\x00absolute-outside"
+)
 
 // remediationWriters is every function this module calls to write remediation
 // files, with a driver that hands it a report carrying one escape.
@@ -110,6 +129,19 @@ func TestNoRemediationWriterPlacesAnEntryOutsideItsOutputDirectory(t *testing.T)
 				t.Chdir(root)
 				out := filepath.Join(root, "out")
 
+				// Two absolute shapes, and each has a detector. One inside the
+				// sandbox, which the walk below reaches; one outside it, which
+				// only an explicit Lstat can. A single /tmp literal had neither
+				// for the two drivers that return no paths.
+				outsideSandbox := filepath.Join(t.TempDir(), "ESCAPED-outside-the-sandbox")
+				escape := escape
+				switch escape {
+				case absoluteEscapeInside:
+					escape = filepath.Join(root, "ESCAPED-absolute")
+				case absoluteEscapeOutside:
+					escape = outsideSandbox
+				}
+
 				// Somewhere to land that is inside the sandbox and outside the
 				// output directory, so an escape that needs an existing parent
 				// has one. Its emptiness afterwards is part of the assertion.
@@ -142,35 +174,82 @@ func TestNoRemediationWriterPlacesAnEntryOutsideItsOutputDirectory(t *testing.T)
 					}
 					t.Errorf("escape %q put %s outside %s", escape, path, out)
 				}
+
+				// The half the walk cannot reach. Cheap, and it is the only
+				// assertion covering a landing outside the sandbox at all.
+				if _, statErr := os.Lstat(outsideSandbox); statErr == nil {
+					t.Errorf("escape %q created %s, outside the sandbox entirely", escape, outsideSandbox)
+				}
 			})
 		}
 	}
 }
 
-// A writer with no case above is a writer nothing observed. Which writers exist
-// is a fact about the source, so this half is read from it.
-func TestEveryRemediationWriterIsObserved(t *testing.T) {
-	// Read from the packages that generate remediation files. A package added to
-	// this list without a driver fails; a package NOT in this list is outside the
-	// gate, which is why the list is short and the reason is stated: these are
-	// the packages cmd/ calls to write remediation output.
-	packages := []string{
-		"../storage", "../network", "../orphans", "../fix",
-	}
+// notAWriter names the exported functions in the remediation packages that
+// create no file, each with the reason.
+//
+// The population above is EVERY exported function in those packages, with no
+// predicate deciding which of them writes. A predicate is a reading, and a
+// reading is what chose the population when the gate matched a body calling
+// os.MkdirAll: five writers repeat that call verbatim, so factoring it into a
+// shared helper — the obvious next refactor — produced a sixth writer the gate
+// never learned existed, and it landed a file above the output directory.
+//
+// So a new exported function is in the population until someone writes down why
+// it is not, and the thing that has to be written is a sentence in review rather
+// than a call the gate happens to recognise.
+var notAWriter = map[string]string{
+	"storage.Scan":             "audits buckets and returns findings; writes nothing",
+	"network.Scan":             "audits security groups and returns findings; writes nothing",
+	"orphans.Scan":             "lists unused resources and returns them; writes nothing",
+	"orphans.TotalMonthlyCost": "sums the estimated cost of a slice of orphans",
+	"fix.PathUnder":            "composes and refuses a path; the caller writes",
+	"fix.NameComponent":        "refuses a value that cannot be one filename element",
+	"fix.CommentText":          "renders a value so it cannot leave its comment line",
+}
 
-	found := 0
+// Every exported function in the remediation packages either has a driver above
+// or a reason here. Which functions exist is a fact about the source and is read
+// from it; which of them write is not decided by reading anything.
+func TestEveryExportedFunctionIsObservedOrExplained(t *testing.T) {
+	packages := []string{"../storage", "../network", "../orphans", "../fix"}
+
+	seen := map[string]bool{}
 	for _, dir := range packages {
-		for _, fn := range exportedWritersIn(t, dir) {
-			found++
-			if _, observed := remediationWriters[fn]; !observed {
-				t.Errorf("%s writes remediation files and no case in remediationWriters runs it; "+
-					"nothing observes where its output lands", fn)
+		for _, fn := range exportedFunctionsIn(t, dir) {
+			seen[fn] = true
+			_, driven := remediationWriters[fn]
+			_, explained := notAWriter[fn]
+			switch {
+			case driven && explained:
+				t.Errorf("%s has both a driver and a reason it writes nothing; one of them is wrong", fn)
+			case !driven && !explained:
+				t.Errorf("%s is exported from a remediation package and nothing observes where its "+
+					"output lands. Add a driver to remediationWriters, or say in notAWriter why it "+
+					"creates no file", fn)
 			}
 		}
 	}
-	if found < len(remediationWriters) {
-		t.Errorf("found %d writer(s) in the source and %d driver(s) here; a driver naming a writer "+
-			"that no longer exists observes nothing", found, len(remediationWriters))
+
+	// A name on either list that no longer exists observes nothing and explains
+	// nothing, and hides that the list has drifted from the tree.
+	for fn := range remediationWriters {
+		if !seen[fn] {
+			t.Errorf("remediationWriters drives %s, which these packages do not export", fn)
+		}
+	}
+	for fn := range notAWriter {
+		if !seen[fn] {
+			t.Errorf("notAWriter explains %s, which these packages do not export", fn)
+		}
+	}
+
+	// A floor well under the real count: a walk that reached nothing reports
+	// every function as accounted for.
+	const exportedFloor = 8
+	if len(seen) < exportedFloor {
+		t.Fatalf("found %d exported function(s) across %v, under the floor of %d — the walk collapsed",
+			len(seen), packages, exportedFloor)
 	}
 }
 
@@ -180,6 +259,10 @@ func escapeLabel(s string) string {
 		return "empty"
 	case "a\nb":
 		return "newline"
+	case absoluteEscapeInside:
+		return "absolute_inside_the_sandbox"
+	case absoluteEscapeOutside:
+		return "absolute_outside_the_sandbox"
 	}
 	return strings.NewReplacer("/", "_", ".", "dot", "-", "dash", " ", "_").Replace(s)
 }
@@ -204,15 +287,13 @@ func entriesUnder(t *testing.T, root string) []string {
 	return out
 }
 
-// exportedWritersIn returns the exported functions in a package directory that
-// create the directory they write into.
+// exportedFunctionsIn returns every exported function in a package directory.
 //
-// Derived from the shape rather than listed: a remediation writer is handed an
-// output directory and makes it, so a body calling os.MkdirAll is the signature
-// of one. A writer added to these packages therefore joins the population by
-// being written, and the failure a reader gets is "nothing observes where its
-// output lands" rather than silence.
-func exportedWritersIn(t *testing.T, dir string) []string {
+// Every one, with no predicate: the caller decides what to do about each by
+// looking it up in two lists a person maintains, and a function in neither is a
+// failure. A predicate here would be the reading that chose the population
+// before, and the escape it missed was a writer whose mkdir moved into a helper.
+func exportedFunctionsIn(t *testing.T, dir string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	pkgName := filepath.Base(dir)
@@ -236,29 +317,8 @@ func exportedWritersIn(t *testing.T, dir string) []string {
 			if !isFunc || fn.Body == nil || fn.Recv != nil || !fn.Name.IsExported() {
 				continue
 			}
-			if makesADirectory(fn) {
-				out = append(out, pkgName+"."+fn.Name.Name)
-			}
+			out = append(out, pkgName+"."+fn.Name.Name)
 		}
 	}
 	return out
-}
-
-func makesADirectory(fn *ast.FuncDecl) bool {
-	var found bool
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		if sel.Sel.Name == "MkdirAll" || sel.Sel.Name == "Mkdir" {
-			found = true
-		}
-		return true
-	})
-	return found
 }
