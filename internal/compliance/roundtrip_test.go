@@ -158,11 +158,12 @@ func assertControlFails(t *testing.T, input compliance.InputFindings, controlID 
 }
 
 // Every loader returns the report's unread record alongside its findings, and
-// every call site in these tests but this one discards it with `_`. That is the
-// gap statement coverage cannot see: replacing all five returns with
-// `report.Findings, nil, nil` leaves this package at 100% and the whole module's
+// before this test every call site discarded it with `_`. That was the gap
+// statement coverage cannot see: replacing all five returns with
+// `report.Findings, nil, nil` left this package at 100% and the whole module's
 // suite green, while a benchmark evaluated over a scan that was denied half an
-// account renders exactly like one evaluated over the whole of it.
+// account rendered exactly like one evaluated over the whole of it. This test is
+// what closes it, so that mutation now fails here.
 //
 // The record is the second return because it is not a finding: findings are
 // severity-filtered and this has to survive every filter. So it is asserted
