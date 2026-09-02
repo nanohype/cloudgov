@@ -466,7 +466,7 @@ The `testing-rubric` standard, published in the `nanohype/standards` repository,
 branches 60, lines 75, functions 75, statements 75.
 
 **Statements are asserted.** Per package, by the rule above; per file, at 100 on the
-security-critical paths; and as a whole-tree ratchet that cannot regress.
+security-critical paths; and as a whole-tree ratchet set below the measurement, which bounds a regression rather than refusing one.
 
 **Branches, lines and functions are asserted nowhere, and cannot be by this toolchain.**
 `go test -covermode` accepts `set`, `count` and `atomic` — all three count statements — and
@@ -478,10 +478,12 @@ decides whether something is reported, pin the bound itself with a case on each 
 `internal/secrets/patterns_test.go` and `internal/compliance/roundtrip_test.go` are the worked
 examples, and each was written by making the mutation and watching the suite go red.
 
-**The whole-tree statement floor is a ratchet, not the standard.** The tree does not meet 75
-overall; the total floor records where it is and refuses a regression. The per-package rule is what
-closes the gap: the tree reaches the standard one package at a time rather than waiting on a single
-number nobody can move alone.
+**The whole-tree statement floor is a loose ratchet, not the standard.** The tree does not meet 75
+overall, and this floor sits below the measurement rather than at it, because the toolchain's
+statement counting moves the total on changes that add no risk. The slack is real: the tree can shed
+coverage down to that number with every gate green. What closes the gap is the per-package rule
+above, which pins each package at 75 the run it reaches 75 — one package at a time, rather than
+waiting on a single number nobody can move alone.
 
 ## Code conventions
 

@@ -54,10 +54,13 @@ file    cmd/mcp_cluster.go               100
 
 # ── packages at or above the org floor ────────────────────────────────────────
 #
-# A package reaches this section by measuring at or above the org floor, and the
-# gate refuses one that measures at or above 75 while carrying a floor below it.
-# So the floors under this heading are held at 75 or more by the run, not by the
-# heading: this is where to read them, not what enforces them.
+# A package reaches this section by measuring at or above the org floor.
+#
+# The run holds no property of this SECTION — nothing binds a floor line to a
+# heading, so a line filed here with a lower floor is a filing error the gate
+# cannot see. What the run holds is the property the heading is a consequence of:
+# a package MEASURING at or above 75 must carry a floor at or above it, wherever
+# its line sits. The heading is where to read them.
 package internal/certs              90
 package internal/cloud              78    # capability interfaces, shared types and the tag policy
 package internal/compliance         97
@@ -87,12 +90,17 @@ package internal/baseline           75    # the baseline store and its compariso
 # sit above its own floor while the total sits under the org standard's, because
 # each package floor is set from its own measurement.
 #
-# This one is a ratchet, not the standard. The tree does not meet 75 here, and a
-# floor set to a number the tree fails is a gate that is red on arrival and gets
-# removed. What holds the direction is the per-package rule above: the total
-# cannot regress, and every package that reaches 75 is pinned there, so the gap
-# closes package by package rather than waiting on one number nobody can move.
-total   coverage                    68    # the org floor is 75; the gate prints the measured total every run
+# This one is a ratchet, not the standard, and it is a loose one. The tree does
+# not meet 75 here, and a floor set to a number the tree fails is a gate that is
+# red on arrival and gets removed — so this sits below the measurement, and the
+# slack is real: the tree can shed statement coverage down to this number with
+# every gate green. The gate prints the measured total every run, and the
+# toolchain's statement counting moves it, which is why the slack is not zero.
+#
+# What holds the direction is the per-package rule above rather than this line:
+# every package that reaches 75 is pinned there, so the gap closes package by
+# package rather than waiting on one number nobody can move.
+total   coverage                    68    # the org floor is 75
 
 # ── packages below the org floor ──────────────────────────────────────────────
 #
