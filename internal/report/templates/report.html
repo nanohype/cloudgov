@@ -13,12 +13,12 @@
   --focus: #0b57d0;
 }
 /* Severity colours are redefined here, not only the layout tokens. A palette
-   picked for a white page is unreadable on a dark one: the light --medium sits
-   at 1.5:1 against #2a2a2a. The two things a reader scans this page for are the
-   CRITICAL markers and the cost deltas, so those are the ones that must not be
-   the casualties. Every value in both blocks clears 4.5:1 against the darker of
-   --bg and --card-bg, which is the background these colours are actually drawn
-   on. */
+   picked for a white page does not survive a dark one: the light --medium is
+   chosen against #f5f5f5 and lands well under the readable floor on #2a2a2a.
+   The two things a reader scans this page for are the CRITICAL markers and the
+   cost deltas, so those are the ones that must not be the casualties. Both
+   blocks are held to 4.5:1 against the darker of --bg and --card-bg, which is
+   the background these colours are actually drawn on. */
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #1a1a1a; --fg: #e0e0e0; --card-bg: #2a2a2a; --border: #444444;

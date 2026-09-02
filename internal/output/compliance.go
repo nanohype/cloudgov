@@ -49,6 +49,14 @@ func ComplianceReport(w io.Writer, report compliance.ComplianceReport) {
 }
 
 // WriteCompliance marshals a compliance report as JSON to w.
+//
+// The incomplete record is normalized here like every other envelope's. A
+// benchmark verdict is only as complete as the scans behind it, and this is the
+// surface where the difference matters most: the output is the artifact someone
+// points at to say a control passed. `null` and an omitted key are the same
+// ambiguity — neither can be told apart from a tool that does not report its own
+// coverage — so a run whose inputs were whole says so with `[]`.
 func WriteCompliance(w io.Writer, report compliance.ComplianceReport) error {
+	report.Incomplete = observed(report.Incomplete)
 	return writeJSON(w, report)
 }

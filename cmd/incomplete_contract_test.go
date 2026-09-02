@@ -74,7 +74,7 @@ var exemptFromIncompleteGate = map[string]string{
 
 	// The MCP server has no exit code to set — it is a request/response surface,
 	// so the incomplete record travels in the JSON payload instead. Its tools are
-	// covered by TestMCPToolsCarryIncomplete below.
+	// covered by TestEveryMCPToolCarriesIncomplete in cmd/mcp_incomplete_test.go.
 	"mcp.go": "no exit code over MCP; incompletions travel in the response payload",
 
 	// root.go imports internal/providers to build providerOptions(). It runs no
@@ -563,10 +563,6 @@ func TestREADMEExitThreeListMatchesTheCode(t *testing.T) {
 	}
 	cannotList := rest[:closeAt]
 
-	// The names of the commands that cannot exit 3 are listed BEFORE the phrase
-	// that describes them, so that is the text to search. Searching after it
-	// finds only the trailing clause and reports every command as consistent —
-	// a check that passes while reading the wrong half of the sentence.
 	for _, name := range gating {
 		// Commands are named in the paragraph as `iam scan`, `repo audit`, etc.,
 		// and a cmd/ file is named for the first word of the command.

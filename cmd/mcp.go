@@ -563,8 +563,9 @@ func jsonResult(write func(io.Writer) error) (*mcp.CallToolResult, any, error) {
 // resolveMCPSeverity resolves a tool's `severity` argument, defaulting to LOW.
 //
 // LOW is the documented default for every MCP tool, so it lives here rather than
-// at each call site: fourteen handlers each choosing their own fallback is
-// fourteen chances for one of them to differ from the table in AGENTS.md.
+// at each call site: a handler choosing its own fallback is a chance for one of
+// them to differ from the table in AGENTS.md, and the chances scale with the
+// number of tools.
 func resolveMCPSeverity(s string) (cloud.Severity, error) {
 	return resolveSeverity(s, cloud.SeverityLow)
 }

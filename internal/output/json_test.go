@@ -514,8 +514,12 @@ func TestCompleteScanReportsAnEmptyIncomplete(t *testing.T) {
 // own coverage. Emitting `[]` makes "I looked at everything" a positive
 // statement.
 //
-// Enumerating the writers rather than spot-checking one is what makes this hold
-// for the next domain: a writer added without the normalizer fails here.
+// The writers below are named by hand, so this proves the bytes for these and
+// says nothing about a writer nobody added to the map. That claim belongs to
+// TestEveryWriterOfAnIncompleteRecordNormalizesIt, which derives its population
+// from what each writer marshals and so has no list to be left out of. This test
+// is the other half: it renders each envelope and reads the key, which a check
+// over the syntax tree cannot do.
 func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 	writers := map[string]func(io.Writer) error{
 		"certs":     func(w io.Writer) error { return WriteCerts(w, nil, nil) },

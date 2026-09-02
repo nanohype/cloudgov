@@ -80,17 +80,17 @@ filter_find_args() {
 
 # require_tracked_source fails unless $1 can be enumerated from version control.
 #
-# THE FALLBACK IS SILENT, AND THAT IS ITS OWN DEFECT. tracked_files drops to a
-# filesystem walk where git cannot answer, which is right for a scratch tree a
-# self-test built — such a tree holds only what the test put in it. It is wrong
-# for the repository: there, the walk is exactly what the tracked set replaced,
-# so a missing git or an unexpected working directory silently restores the
-# behaviour of grading whatever CI placed beside the checkout.
+# tracked_files refuses a tree it cannot enumerate from git rather than walking
+# it, so the enumeration cannot silently widen to whatever CI placed beside the
+# checkout. That refusal reaches the caller as an empty list and a non-zero
+# status from one call, which a caller reading only the list cannot tell from a
+# tree with nothing in it.
 #
-# An exemption on one axis is not an exemption on the others. tracked_files may
-# legitimately be unable to consult git; it must never be unable to SAY so. A
-# gate that enumerates the repository calls this first, so the precondition is
-# named rather than inferred from a suspiciously small count.
+# So the precondition is asserted here, once, before anything depends on it. An
+# exemption on one axis is not an exemption on the others: a gate may legitimately
+# be unable to consult git; it must never be unable to SAY so. A gate that
+# enumerates the repository calls this first, so the precondition is named rather
+# than inferred from a suspiciously small count.
 require_tracked_source() {
   local root="${1:-.}" what="${2:-this gate}"
 

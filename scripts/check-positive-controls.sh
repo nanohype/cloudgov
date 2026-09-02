@@ -26,7 +26,7 @@
 #   ACCEPTS A CLEAN TREE — asserted before every mutation.
 #   REJECTS ITS VIOLATION — asserted after it.
 #
-# Four properties make it hold, and each has been the failure at least once:
+# Three properties make it hold, and each has been the failure at least once:
 #
 #   ANTI-VACUITY FLOOR. A gate with no control fails this run, and a control
 #   naming a gate that no longer exists fails it too. The suite cannot quietly
@@ -681,8 +681,19 @@ self="$(basename "${BASH_SOURCE[0]}")"
 # happens to fail for its own unrelated reason does not count as catching this.
 dependency_controlled=()
 
+# run_dependency_control <gate> <lib> <marker> [entry]
+#
+# entry names the thing the gate CALLS, which is what the stub has to break. For
+# an awk or python helper the file is the entry point, so the argument is unused
+# and the whole file is replaced. A sourced shell library is not one program: it
+# defines several functions, and a gate calls the tool guard before it calls
+# anything else. Replacing that file breaks the guard first, so the gate exits
+# before it has read anything and its refusal names nothing — a rejection that
+# proves the guard works rather than that the helper's failure was caught. So for
+# a shell library the stub overrides one named function, after the real
+# definitions, and the gate reaches its own verdict about the thing that failed.
 run_dependency_control() {
-  local gate="$1" lib="$2" marker="$3"
+  local gate="$1" lib="$2" marker="$3" entry="${4:-}"
   local clean rejection rejection_status mutated_before
 
   if [ ! -f "$gate" ] || [ ! -f "$lib" ]; then
@@ -715,6 +726,24 @@ import sys
 sys.stderr.write("${marker}\n")
 raise SystemExit(3)
 PY
+      ;;
+    *.sh)
+      if [ -z "$entry" ]; then
+        echo "::error::a dependency control names the shell library ${lib} without an entry point; there is no single thing to break" >&2
+        fail=1
+        unmutate_since "$mutated_before"
+        return
+      fi
+      if ! grep -qE "^${entry}\\(\\) \\{" "$lib"; then
+        echo "::error::a dependency control breaks ${entry} in ${lib}, which defines no such function; the override would be dead code and the control would prove nothing" >&2
+        fail=1
+        unmutate_since "$mutated_before"
+        return
+      fi
+      cat >>"$lib" <<SH
+
+${entry}() { printf '${marker}\n' >&2; return 3; }
+SH
       ;;
     *)
       echo "::error::a dependency control names ${lib}, whose language this control cannot stub" >&2
@@ -776,22 +805,86 @@ run_dependency_control scripts/check-release-urls.sh \
 run_dependency_control scripts/check-shell-portability.sh \
   scripts/lib/strip-comments.awk zzdep05strip
 
-# Every gate that reads a shared library must be controlled against that library
-# failing. A gate added with a new `${lib_dir}` reference and no control here is
-# a gate whose helper can break silently.
+run_dependency_control scripts/check-doc-paths.sh \
+  scripts/lib/tracked-files.sh zzdep06tracked tracked_files
+
+# Every gate that takes a helper from a shared library must be controlled against
+# that helper failing.
+#
+# The population is derived from the LIBRARY rather than from an idiom in the
+# gate. Selecting on `lib_dir` selected on the name of a local variable, and two
+# gates that source scripts/lib/tracked-files.sh do not declare one — so the rule
+# this paragraph states was being applied to a set two of its members sat outside,
+# which is the shape of every other vacuity this file exists to catch. A gate
+# reads a shared library when it names one of the symbols that library exports:
+# the functions a sourced library defines, and the basename of a helper invoked
+# as a program.
+#
+# require_tools is the one symbol that does not put a gate in this population,
+# and the loop derives that rather than carrying it as an exception. That guard
+# runs before the gate has read anything, so a gate whose only use of the library
+# is the guard has no scan for a broken helper to wrongly bless — breaking it can
+# stop the gate starting and nothing else. There is no clean tree being reported,
+# which is the failure a dependency control exists to catch.
+library_symbols=()
+library_symbol_count=0
+for library in scripts/lib/*; do
+  [ -f "$library" ] || continue
+  case "$library" in
+    *.sh)
+      while IFS= read -r symbol; do
+        [ -n "$symbol" ] || continue
+        library_symbols+=("$symbol")
+        library_symbol_count=$((library_symbol_count + 1))
+      done < <(sed -n 's/^\([a-z_][a-z_0-9]*\)() {.*/\1/p' "$library")
+      ;;
+    *)
+      library_symbols+=("$(basename "$library")")
+      library_symbol_count=$((library_symbol_count + 1))
+      ;;
+  esac
+done
+
+# A floor, not an at-least-one: an enumeration that collapsed reports every gate
+# as needing no control, which is the reading that looks like a clean tree.
+readonly LIBRARY_SYMBOL_FLOOR=4 # tracked-files.sh alone defines four
+# Counted as they are appended rather than read back with ${#array[@]}: under
+# `set -u` on the bash 3.2 a macOS system path provides, that expansion on an
+# EMPTY array is an unbound variable and aborts the suite mid-run — which is the
+# one failure this file cannot afford, since the abort leaves the floor reporting
+# a suite it never finished.
+if [ "${library_symbol_count:--1}" -lt "$LIBRARY_SYMBOL_FLOOR" ]; then
+  echo "error: found ${library_symbol_count} shared-library symbol(s), under the floor of ${LIBRARY_SYMBOL_FLOOR} — the enumeration is broken, not the tree." >&2
+  exit 2
+fi
+
+# The guard is named once, here, so the sentence above and the code below cannot
+# drift apart.
+library_guard_symbol="require_tools"
+
 while IFS= read -r script; do
   name="$(basename "$script")"
   [ "$name" = "$self" ] && continue
   [ "$name" = "$(basename "$GATES_TARGET")" ] && continue
   [ "$name" = "$(basename "$CHECKLIST_TARGET")" ] && continue
   [ "$name" = "$(basename "$PORT_TARGET")" ] && continue
-  grep -q 'lib_dir' "$script" || continue
+
+  takes_helper=0
+  for symbol in ${library_symbols[@]+"${library_symbols[@]}"}; do
+    [ "$symbol" = "$library_guard_symbol" ] && continue
+    if grep -qF -- "$symbol" "$script"; then
+      takes_helper=1
+      break
+    fi
+  done
+  [ "$takes_helper" -eq 1 ] || continue
+
   covered=0
-  for controlled_name in "${dependency_controlled[@]:-}"; do
+  for controlled_name in ${dependency_controlled[@]+"${dependency_controlled[@]}"}; do
     [ "$controlled_name" = "$name" ] && covered=1
   done
   if [ "$covered" -eq 0 ]; then
-    echo "::error::${name} reads a shared library and has no dependency control; nothing proves it rejects when that library cannot run" >&2
+    echo "::error::${name} takes a helper from a shared library and has no dependency control; nothing proves it rejects when that helper cannot run" >&2
     fail=1
   fi
 done < <(tracked_files . -name '*.sh' -type f | grep '^\./scripts/[^/]*\.sh$' | sed 's|^\./||' | sort)

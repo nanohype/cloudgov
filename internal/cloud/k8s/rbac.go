@@ -68,7 +68,7 @@ var broadSubjectGroups = map[string]bool{
 // Conservative rules — we report what we'd report in a CTF writeup, not
 // what a fancy CNAPP would. Specifically:
 //
-//   - Bindings to cluster-admin always fire (CRITICAL)
+//   - Bindings to cluster-admin always fire (HIGH)
 //   - Bindings to any role from a broad subject group fire (CRITICAL/HIGH)
 //   - ClusterRoles with rules that combine wildcard resources AND any
 //     dangerous verb fire (HIGH)

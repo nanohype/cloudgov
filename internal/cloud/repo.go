@@ -47,9 +47,16 @@ const (
 	RepoUnprotectable RepoFindingType = "PROTECTION_UNAVAILABLE_ON_PLAN"
 )
 
-// RepoFindingTypes is every type this auditor can emit. Kept beside the
-// constants so a new type cannot be added without the SARIF rule table and the
-// coverage test seeing it.
+// RepoFindingTypes is every type this auditor can emit.
+//
+// Kept beside the constants, and checked against them:
+// TestEveryFindingTypeListHoldsEveryConstantOfItsType fails the build when a
+// constant is declared without joining the list, or when the list names one that
+// no longer exists.
+//
+// Nothing renders repo findings as SARIF, so unlike AllPlatformFindingTypes this
+// list feeds no rule table. It is the enumeration a renderer would be checked
+// against on the day one is written.
 var RepoFindingTypes = []RepoFindingType{
 	RepoNoProtection,
 	RepoNoRequiredChecks,

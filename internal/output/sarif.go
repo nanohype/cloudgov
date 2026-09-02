@@ -536,7 +536,6 @@ func buildSecretsRules() []sarifRule {
 	return rules
 }
 
-// WriteAuditSARIF writes all audit findings combined into a single SARIF 2.1.0 report.
 // buildTagRules and buildOrphanRules give the two domains with no standalone
 // SARIF writer the rule entries the audit report needs.
 //

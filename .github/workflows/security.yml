@@ -98,10 +98,6 @@ jobs:
           # a job — is reported by nothing. The default reports "No findings"
           # while suppressing that whole class.
           #
-          # min-severity=high is what keeps the auditor persona a gate rather
-          # than a style checker: its lower tiers are advisory (documenting a
-          # permissions block, per-job concurrency) and failing a merge on those
-          # is how a gate gets bypassed.
           # NO severity filter. `--min-severity` narrows: zizmor already
           # defaults to the most inclusive tier, so naming a level can only
           # remove findings, and a threshold turns a bare "ok" into something

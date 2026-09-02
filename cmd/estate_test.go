@@ -11,11 +11,11 @@ import (
 	"testing"
 )
 
-// What ships is a template for standing up an agent platform on EKS. A value
-// from the publisher's own estate presented as the product's shape is a defect,
-// and a DEFAULT is the form of it hardest to see: nothing in the call names it,
-// so a run with no argument reaches an organization, an account or a cluster the
-// caller does not own and reports findings about it.
+// What ships is a governance CLI an adopter points at their own account, org and
+// cluster. A value from the publisher's own estate presented as the product's
+// shape is a defect, and a DEFAULT is the form of it hardest to see: nothing in
+// the call names it, so a run with no argument reaches an organization, an
+// account or a cluster the caller does not own and reports findings about it.
 //
 // A tool schema is worse again. Over MCP the caller is a model, the default is
 // invisible to it, and the description is the whole contract — so an estate value
