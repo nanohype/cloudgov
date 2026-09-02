@@ -1,7 +1,10 @@
 package fix
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -95,9 +98,66 @@ func PathUnder(dir, name string) (string, error) {
 	if strings.HasPrefix(filepath.Base(joined), "-") {
 		return "", fmt.Errorf("filename %q starts with a dash; a file named this way is read as a flag by whatever runs it", filepath.Base(joined))
 	}
+
+	// Everything above decides on the string. A symlink already sitting at that
+	// name carries the write wherever it points, so the lexical answer is right
+	// and the file still lands outside dir — and the callers open with
+	// os.WriteFile, which follows one. Lstat rather than Stat: the question is
+	// what the name IS, not what it resolves to.
+	//
+	// A name with nothing at it is the ordinary case and passes; an unreadable
+	// one is refused rather than assumed, because a caller that cannot tell what
+	// is there is exactly the caller that must not write through it.
+	info, err := os.Lstat(joined)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return "", fmt.Errorf("cannot tell what %s already is, so this write is refused: %w", joined, err)
+	case info.Mode()&fs.ModeSymlink != 0:
+		return "", fmt.Errorf("%s is a symlink; writing through it would place the file wherever it points rather than inside %s", joined, dir)
+	}
 	return joined, nil
 }
 
 func isPathSeparator(r rune) bool {
 	return strings.ContainsRune(pathSeparators, r)
+}
+
+// CommentText renders an untrusted value so that it cannot leave the comment
+// line it is written on.
+//
+// Containing the path was half of the defect. The same report supplies the
+// values these generators interpolate into the `#` banner above each command,
+// and a newline in one of them ends the comment and starts a line of its own —
+// in a file written 0700, above a command the tool composed. The path half sends
+// the file somewhere the operator did not choose; this half decides what is in
+// it once it lands, and closing only the first moves the choice inside --out
+// rather than removing it.
+//
+// Rendered rather than refused, because unlike a filename these values are meant
+// to be reproduced: an AWS Detail legitimately carries text, and a report that
+// wraps one over two lines is not hostile. What must not survive is the value's
+// ability to end the line. A reader still sees what the report said, spelled so
+// that the shell never does.
+func CommentText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			// The rest of C0 and DEL: no shell meaning on a comment line, but a
+			// terminal reading the generated script can act on them, and an
+			// operator reviewing it would not see what they are agreeing to.
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

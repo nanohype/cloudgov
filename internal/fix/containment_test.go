@@ -160,3 +160,69 @@ func assertEmpty(t *testing.T, dir string) {
 		t.Errorf("a refused write left %s behind in %s", e.Name(), dir)
 	}
 }
+
+// The lexical answer is right and the file still lands outside dir when a
+// symlink is already sitting at the name. The callers write with os.WriteFile,
+// which follows one.
+func TestPathUnderRefusesASymlinkAlreadyAtTheName(t *testing.T) {
+	root := t.TempDir()
+	out := filepath.Join(root, "out")
+	if err := os.Mkdir(out, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	elsewhere := filepath.Join(root, "elsewhere")
+	if err := os.Mkdir(elsewhere, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(elsewhere, "landed.sh"), filepath.Join(out, "fix-aws.sh")); err != nil {
+		t.Skipf("this platform does not support symlinks: %v", err)
+	}
+
+	got, err := PathUnder(out, "fix-aws.sh")
+	if err == nil {
+		t.Fatalf("PathUnder returned %q for a name that is a symlink out of the directory", got)
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("the refusal does not say what it found: %v", err)
+	}
+
+	// The positive control: the same name with nothing at it is the ordinary
+	// case and must pass, so the check above is not satisfied by refusing
+	// everything.
+	if _, err := PathUnder(out, "fix-gamma.sh"); err != nil {
+		t.Errorf("a name with nothing at it was refused: %v", err)
+	}
+}
+
+// The banner half of the containment. A newline in a report value ended the
+// comment and started a line of its own in a file written 0700; these are the
+// characters that can do that and the ones a terminal would act on while an
+// operator reviewed the script.
+func TestCommentTextKeepsAValueOnItsLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"ordinary text is untouched", "bucket is publicly readable", "bucket is publicly readable"},
+		{"non-ascii is untouched", "région eu-ouest-1 — ouverte", "région eu-ouest-1 — ouverte"},
+		{"newline", "unattached\naws s3 rb s3://victim --force", `unattached\naws s3 rb s3://victim --force`},
+		{"carriage return", "a\rb", `a\rb`},
+		{"tab", "a\tb", `a\tb`},
+		{"bell", "a\ab", `a\x07b`},
+		{"escape, which a terminal acts on", "a\x1b[2Kb", `a\x1b[2Kb`},
+		{"delete", "a\x7fb", `a\x7fb`},
+		{"empty", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := CommentText(tc.value)
+			if got != tc.want {
+				t.Errorf("CommentText(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+			if strings.ContainsAny(got, "\n\r") {
+				t.Errorf("CommentText(%q) = %q, which still ends its line", tc.value, got)
+			}
+		})
+	}
+}

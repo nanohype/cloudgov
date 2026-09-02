@@ -467,9 +467,39 @@ tool hides it.
   report, and `remediate` reads reports an operator received rather than ones
   cloudgov wrote — so a bare join lets the report choose where an executable
   lands. `fix.NameComponent` refuses such a value at the read too, so the error
-  names the report field. `internal/fix/containment_contract_test.go` fails the
-  build if a file creates a file on disk without composing its path this way, and
-  fails if a directory listed as exempt starts composing one.
+  names the report field.
+- Render any report value you put in a generated script's comment banner with
+  `fix.CommentText`. Containing the path is half of it: the same report fills
+  those lines, and a newline in one of them ends the comment and starts a line of
+  its own in a file written `0700`.
+
+### What `internal/fix/containment_contract_test.go` checks, and what it does not
+
+It reads the sources and requires the path handed to **every** file-creating call
+to have come from `PathUnder` — per write, not per file, so a second write added
+to a generator does not inherit the first one's containment.
+
+The writer population is fail-closed rather than a list: any call on the standard
+library's `os` package counts unless it is named in `osTakesNoPathOrOnlyReads`,
+so a routine this repository has not used yet demands containment instead of
+being invisible. The `os` import is resolved by path, so an alias does not walk
+past it. `os.Mkdir` and `os.MkdirAll` are out of the population with the reason
+stated in the test: they create the directory rather than a file inside one, and
+the directory is the boundary `PathUnder` contains against.
+
+It resolves **one level** of dataflow. A write whose path is a parameter is
+contained only if every call to that function in its package passes a contained
+value, and a wrapper returning a `PathUnder` result counts as one. A wrapper
+around a wrapper is reported as uncontained rather than assumed safe.
+
+What it does not see: a filesystem write through a third-party package, or one
+shelled out through `exec`. Neither is how anything here writes, and a gate that
+claimed otherwise would be the more dangerous statement.
+
+The exemption check is the same shape. A directory listed in `containmentExempt`
+claims its writes are handed their paths, and the test fails if a write there is
+given a path the file built — by any spelling, since it classifies the expression
+rather than searching for `filepath.Join`.
 - Table output uses lipgloss + tabwriter. No interactive TUI (no bubbletea).
 - Do not add comments or docstrings to functions you didn't modify.
 - Do not add features, flags, or options beyond what is directly required.

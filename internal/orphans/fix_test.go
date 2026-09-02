@@ -283,3 +283,35 @@ func treeFiles(t *testing.T, root string) []string {
 	}
 	return out
 }
+
+// A quoted argument stays on one line. Single quotes make a value inert to the
+// shell, which is what stops a report identifier becoming a command; they do not
+// stop it becoming a LINE, and this file is a list of deletes an operator reads
+// before running.
+func TestShellQuoteKeepsAValueOnOneLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"ordinary identifier", "vol-0abc", `'vol-0abc'`},
+		{"embedded single quote", "a'b", `'a'\''b'`},
+		{"newline", "us-east-1\naws s3 rb s3://victim", `$'us-east-1\naws s3 rb s3://victim'`},
+		{"carriage return", "a\rb", `$'a\rb'`},
+		{"tab", "a\tb", `$'a\tb'`},
+		{"bell", "a\ab", `$'a\x07b'`},
+		{"quote and newline together", "a'b\nc", `$'a\'b\nc'`},
+		{"backslash with a control char", "a\\b\nc", `$'a\\b\nc'`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := shellQuote(tc.value)
+			if got != tc.want {
+				t.Errorf("shellQuote(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+			if strings.ContainsAny(got, "\n\r") {
+				t.Errorf("shellQuote(%q) = %q, which still ends its line", tc.value, got)
+			}
+		})
+	}
+}

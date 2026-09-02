@@ -75,20 +75,20 @@ func providerScript(provider string, orphans []cloud.OrphanResource) []byte {
 	sb.WriteString("#!/usr/bin/env bash\n")
 	sb.WriteString("set -euo pipefail\n\n")
 	sb.WriteString("# cloudgov remediate --type orphans\n")
-	fmt.Fprintf(&sb, "# Provider: %s\n", provider)
+	fmt.Fprintf(&sb, "# Provider: %s\n", fix.CommentText(provider))
 	fmt.Fprintf(&sb, "# Resources: %d\n", len(orphans))
 	sb.WriteString("#\n")
 	sb.WriteString("# DESTRUCTIVE: each command below DELETES a resource cloudgov flagged as\n")
 	sb.WriteString("# orphaned. Review every line before running; deletes are irreversible.\n\n")
 
 	for _, o := range orphans {
-		fmt.Fprintf(&sb, "# [%s] %s", o.Kind, o.Name)
+		fmt.Fprintf(&sb, "# [%s] %s", fix.CommentText(string(o.Kind)), fix.CommentText(o.Name))
 		if o.Region != "" {
-			fmt.Fprintf(&sb, " (%s)", o.Region)
+			fmt.Fprintf(&sb, " (%s)", fix.CommentText(o.Region))
 		}
 		sb.WriteString("\n")
 		if o.Detail != "" {
-			fmt.Fprintf(&sb, "# %s\n", o.Detail)
+			fmt.Fprintf(&sb, "# %s\n", fix.CommentText(o.Detail))
 		}
 		sb.WriteString(deleteCommand(o))
 		sb.WriteString("\n\n")
@@ -152,11 +152,50 @@ func karpenterRuleDelete(o cloud.OrphanResource, region string) string {
 	return sb.String()
 }
 
-// shellQuote single-quotes s for safe inclusion in a bash command, escaping any
-// embedded single quotes.
+// shellQuote renders s as one bash word, on one line.
+//
+// Single quotes make the value inert to the shell, which is what stops a report
+// identifier becoming a command. They do not stop it becoming a LINE: a newline
+// inside single quotes is literal data to bash and a line break to the operator
+// reading the script, so a report could put `aws s3 rb ...` at the start of a
+// physical line in a file written 0700 and have it read as the next command.
+// Inert to the shell and misleading to the reader is not safe in a file whose
+// whole purpose is to be reviewed before it is run.
+//
+// So a value carrying a control character is rendered with ANSI-C quoting
+// instead, which bash expands to exactly the same string while keeping it on one
+// line. The command means what the report said; the script still reads one
+// command per line.
 func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	if !strings.ContainsFunc(s, isControl) {
+		return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	}
+
+	var b strings.Builder
+	b.WriteString("$'")
+	for _, r := range s {
+		switch {
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '\'':
+			b.WriteString(`\'`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case isControl(r):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteString("'")
+	return b.String()
 }
+
+func isControl(r rune) bool { return r < 0x20 || r == 0x7f }
 
 // regionFlag returns " --region <r>" so the generated command targets the
 // resource's own region, or "" when the region is unknown (the command then falls

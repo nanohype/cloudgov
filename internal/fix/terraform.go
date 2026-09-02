@@ -57,10 +57,15 @@ func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string
 	if err := NameComponent("principal", s); err != nil {
 		return err
 	}
-	// slug leaves no separator, no ".." segment and no leading dash, and
-	// "minimal_" prefixes the name, so no principal reaches the refusal below.
-	// Kept because containment must not depend on that: a change to slug widens
-	// where this writes only if this check is here to refuse it.
+	// NameComponent above refuses the separators and the bare directory
+	// references, and "minimal_" prefixes the name, so nothing reaches the
+	// refusal below. Note that slug is NOT what makes that true — it replaces
+	// only / @ . - and space, so a backslash passes through it and a backslash is
+	// a separator by this package's own definition. The check two lines up is
+	// what catches it.
+	//
+	// Kept because containment must not rest on the order of two statements: this
+	// is the layer that holds if the check above is moved, weakened or dropped.
 	filename, err := PathUnder(dir, "minimal_"+s+".tf")
 	if err != nil {
 		return err //coverage:ignore unreachable while slug produces one plain element

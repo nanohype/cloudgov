@@ -65,17 +65,17 @@ func writeProviderScript(path, provider string, findings []cloud.BucketFinding) 
 	sb.WriteString("set -euo pipefail\n")
 	sb.WriteString("\n")
 	sb.WriteString("# cloudgov storage audit --fix\n")
-	fmt.Fprintf(&sb, "# Provider: %s\n", provider)
+	fmt.Fprintf(&sb, "# Provider: %s\n", fix.CommentText(provider))
 	fmt.Fprintf(&sb, "# Findings: %d\n", len(findings))
 	sb.WriteString("\n")
 
 	for _, f := range findings {
-		fmt.Fprintf(&sb, "# [%s] %s — %s", f.Severity, f.Type, f.Bucket)
+		fmt.Fprintf(&sb, "# [%s] %s — %s", fix.CommentText(string(f.Severity)), fix.CommentText(string(f.Type)), fix.CommentText(f.Bucket))
 		if f.Region != "" {
-			fmt.Fprintf(&sb, " (%s)", f.Region)
+			fmt.Fprintf(&sb, " (%s)", fix.CommentText(f.Region))
 		}
 		sb.WriteString("\n")
-		fmt.Fprintf(&sb, "# %s\n", f.Detail)
+		fmt.Fprintf(&sb, "# %s\n", fix.CommentText(f.Detail))
 		sb.WriteString(f.Remediation)
 		sb.WriteString("\n\n")
 	}

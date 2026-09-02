@@ -67,7 +67,7 @@ func writeNetworkScript(path, provider string, findings []cloud.NetworkFinding) 
 	sb.WriteString("set -euo pipefail\n")
 	sb.WriteString("\n")
 	sb.WriteString("# cloudgov network audit --fix\n")
-	fmt.Fprintf(&sb, "# Provider: %s\n", provider)
+	fmt.Fprintf(&sb, "# Provider: %s\n", fix.CommentText(provider))
 	fmt.Fprintf(&sb, "# Generated: %s\n", time.Now().UTC().Format(time.RFC3339))
 	fmt.Fprintf(&sb, "# Findings: %d\n", len(findings))
 	sb.WriteString("#\n")
@@ -76,14 +76,14 @@ func writeNetworkScript(path, provider string, findings []cloud.NetworkFinding) 
 	sb.WriteString("\n")
 
 	for _, f := range findings {
-		fmt.Fprintf(&sb, "# [%s] %s — %s", f.Severity, f.Type, f.Resource)
+		fmt.Fprintf(&sb, "# [%s] %s — %s", fix.CommentText(string(f.Severity)), fix.CommentText(string(f.Type)), fix.CommentText(f.Resource))
 		if f.Region != "" {
-			fmt.Fprintf(&sb, " (%s)", f.Region)
+			fmt.Fprintf(&sb, " (%s)", fix.CommentText(f.Region))
 		}
 		sb.WriteString("\n")
-		fmt.Fprintf(&sb, "# proto=%s port=%s cidr=%s\n", f.Protocol, f.Port, f.CIDR)
+		fmt.Fprintf(&sb, "# proto=%s port=%s cidr=%s\n", fix.CommentText(f.Protocol), fix.CommentText(f.Port), fix.CommentText(f.CIDR))
 		if f.Detail != "" {
-			fmt.Fprintf(&sb, "# %s\n", f.Detail)
+			fmt.Fprintf(&sb, "# %s\n", fix.CommentText(f.Detail))
 		}
 		sb.WriteString(f.Remediation)
 		sb.WriteString("\n\n")

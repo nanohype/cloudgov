@@ -58,12 +58,18 @@ func (s *Store) Save(name string, report json.RawMessage, source string) error {
 		return fmt.Errorf("marshal baseline: %w", err)
 	}
 
-	// Atomic write via temp file + rename
+	// Atomic write via temp file + rename. The temp name goes through the same
+	// definition as the final one rather than being derived from it: a write is
+	// a write, and the file this places is the one that becomes the baseline a
+	// moment later.
 	path, err := s.path(name)
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
+	tmp, err := s.tmpPath(name)
+	if err != nil {
+		return err
+	}
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write temp file: %w", err)
 	}
@@ -155,4 +161,11 @@ func (s *Store) Delete(name string) error {
 // it will not read back.
 func (s *Store) path(name string) (string, error) {
 	return fix.PathUnder(s.dir, name+".json")
+}
+
+// tmpPath is the file Save writes before renaming it into place. Composed the
+// same way as path rather than from path, so both writes are contained by the
+// same definition and neither inherits the other's.
+func (s *Store) tmpPath(name string) (string, error) {
+	return fix.PathUnder(s.dir, name+".json.tmp")
 }
