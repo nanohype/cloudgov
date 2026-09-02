@@ -103,4 +103,4 @@ total   coverage                    68    # the org floor is 75; the gate prints
 package internal/compare            64    # report normalization
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports
-package cmd                         22    # the offline handlers are driven directly; the ones that resolve a provider are not, and the logic they call is floored above
+package cmd                         22    # runCompliance is driven directly; the handlers that resolve a provider have no seam to drive and the logic they call is floored above
