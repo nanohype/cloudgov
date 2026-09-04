@@ -84,8 +84,15 @@ func (p *Provider) discoverRegions(ctx context.Context) []string {
 }
 
 // configuredRegionOnly is the fallback when the region set cannot be discovered.
-// It is only ever reached from a warnf call site, so the narrowed scope is
-// recorded as an incomplete observation rather than passing for a full sweep.
+//
+// Both paths that reach it from a FAILED discovery warn first, so a sweep
+// narrowed to one region by an error is recorded as an incomplete observation
+// rather than passing for a full one.
+//
+// The third caller is the nil-client guard above, which does not warn and does
+// not need to: New and NewWithProfile wire every client, so a provider with no
+// EC2 client is one a test built directly, and a test that means to scan several
+// regions supplies a client that lists them.
 func (p *Provider) configuredRegionOnly() []string {
 	if p.cfg.Region == "" {
 		return nil

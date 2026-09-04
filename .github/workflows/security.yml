@@ -55,10 +55,15 @@ jobs:
         # G304 (file inclusion via variable) is excluded wholesale: every hit
         # is an operator-supplied CLI path (--from report files, the drift
         # tfstate argument, benchmark/standard files) — reading files the operator
-        # names is this CLI's contract, not taint. Everything else either got
-        # fixed (G301/G306 permissions) or carries an inline, justified
-        # `#nosec` at the site (G101 finding-type labels, G204 fixed per-OS
-        # report opener).
+        # names is this CLI's contract, not taint.
+        #
+        # Every other rule fails the build unless the site itself carries an
+        # inline `#nosec` naming the rule and why it does not apply there. That
+        # puts the argument beside the code it is about, where a reader changing
+        # the code sees it, rather than in a list here that a reader of the code
+        # never reaches. `grep -rn '#nosec' --include='*.go' .` answers which
+        # sites those are; no other mechanism suppresses a finding, so the grep
+        # is the whole of it.
         uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3 # v2.28.0
         with:
           args: -severity medium -exclude=G304 -fmt sarif -out gosec.sarif ./...
@@ -98,10 +103,6 @@ jobs:
           # a job — is reported by nothing. The default reports "No findings"
           # while suppressing that whole class.
           #
-          # min-severity=high is what keeps the auditor persona a gate rather
-          # than a style checker: its lower tiers are advisory (documenting a
-          # permissions block, per-job concurrency) and failing a merge on those
-          # is how a gate gets bypassed.
           # NO severity filter. `--min-severity` narrows: zizmor already
           # defaults to the most inclusive tier, so naming a level can only
           # remove findings, and a threshold turns a bare "ok" into something

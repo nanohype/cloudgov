@@ -68,8 +68,11 @@ var broadSubjectGroups = map[string]bool{
 // Conservative rules — we report what we'd report in a CTF writeup, not
 // what a fancy CNAPP would. Specifically:
 //
-//   - Bindings to cluster-admin always fire (CRITICAL)
-//   - Bindings to any role from a broad subject group fire (CRITICAL/HIGH)
+//   - Bindings to any role from a broad subject group fire (CRITICAL/HIGH), and
+//     that arm is tested first: a cluster-admin binding whose subject is a broad
+//     group is reported as BINDING_TOO_BROAD rather than twice. The binding is
+//     never unreported; which type it carries depends on its subject.
+//   - Bindings to cluster-admin from any other subject fire as CLUSTER_ADMIN (HIGH)
 //   - ClusterRoles with rules that combine wildcard resources AND any
 //     dangerous verb fire (HIGH)
 //   - ClusterRoles with wildcard verbs (verbs: ["*"]) fire (HIGH) regardless

@@ -64,6 +64,12 @@ func AuditReport(w io.Writer, report *audit.Report) {
 }
 
 // WriteAudit marshals a full audit report as JSON to w.
+//
+// The incomplete record is normalized on a copy rather than on the caller's
+// report: rendering is not a mutation, and `cloudgov audit` renders the same
+// report to more than one sink.
 func WriteAudit(w io.Writer, report *audit.Report) error {
-	return writeJSON(w, report)
+	normalized := *report
+	normalized.Incomplete = observed(normalized.Incomplete)
+	return writeJSON(w, &normalized)
 }

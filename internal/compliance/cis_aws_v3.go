@@ -19,11 +19,11 @@ func cisAWSv3Benchmark() *Benchmark {
 			{ID: "1.22", Title: "Ensure access to AWSCloudShellFullAccess is restricted", Section: "Identity and Access Management", Severity: cloud.SeverityMedium, Description: "CloudShell full access should be restricted."},
 
 			// 2 - Storage
-			{ID: "2.1.1", Title: "Ensure S3 bucket policy is set to deny HTTP requests", Section: "Storage", Severity: cloud.SeverityMedium, Description: "S3 buckets should deny non-HTTPS requests."},
-			{ID: "2.1.2", Title: "Ensure MFA Delete is enabled on S3 buckets", Section: "Storage", Severity: cloud.SeverityHigh, Description: "S3 buckets should have MFA Delete enabled."},
+			{ID: "2.1.1", Title: "Ensure S3 bucket policy is set to deny HTTP requests", Section: "Storage", Severity: cloud.SeverityMedium, Description: "S3 buckets should deny non-HTTPS requests. cloudgov does not read bucket policies, so this control is reported as not evaluated; storage findings are context toward it, not a verdict on it."},
+			{ID: "2.1.2", Title: "Ensure MFA Delete is enabled on S3 buckets", Section: "Storage", Severity: cloud.SeverityHigh, Description: "S3 buckets should have MFA Delete enabled. cloudgov does not read MFA Delete state, so this control is reported as not evaluated; storage findings are context toward it, not a verdict on it."},
 			{ID: "2.1.4", Title: "Ensure all data in S3 is encrypted", Section: "Storage", Severity: cloud.SeverityHigh, Description: "All S3 buckets should have default encryption enabled."},
 			{ID: "2.1.5", Title: "Ensure S3 buckets are configured with Block Public Access", Section: "Storage", Severity: cloud.SeverityCritical, Description: "S3 buckets should have Block Public Access enabled."},
-			{ID: "2.2.1", Title: "Ensure EBS volume encryption is enabled", Section: "Storage", Severity: cloud.SeverityHigh, Description: "EBS volumes should be encrypted."},
+			{ID: "2.2.1", Title: "Ensure EBS volume encryption is enabled", Section: "Storage", Severity: cloud.SeverityHigh, Description: "EBS volumes should be encrypted. cloudgov does not read EBS volume encryption state, so this control is reported as not evaluated; storage findings are context toward it, not a verdict on it."},
 
 			// 3 - Logging
 			{ID: "3.1", Title: "Ensure CloudTrail is enabled in all regions", Section: "Logging", Severity: cloud.SeverityHigh, Description: "CloudTrail should be enabled across all regions."},

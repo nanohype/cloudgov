@@ -111,7 +111,10 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 			if err != nil {
 				// Worse than a missing finding: analyze() reads an empty used-set
 				// as "never used", so proceeding would invent a stale-principal
-				// finding and mark every granted permission unused.
+				// finding for a principal nobody looked at. The unused-permission
+				// findings are held back by their own `len(used) > 0` guard, which
+				// is why the invented verdict is the stale one and not a page of
+				// them.
 				mu.Lock()
 				result.Incomplete = append(result.Incomplete,
 					fmt.Sprintf("principal %s: used permissions: %v", p.Name, err))

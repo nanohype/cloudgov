@@ -28,6 +28,27 @@ const (
 	OrphanKarpenterRule  OrphanKind = "karpenter_rule"
 )
 
+// AllOrphanKinds is every kind this scanner can emit.
+//
+// SARIF declares one rule per kind and takes the ruleId straight from the kind,
+// so a kind with no rule produces a result referencing a rule that is not
+// declared in the run — invalid SARIF that most consumers drop silently. The
+// rule table is built from this list rather than from a second one written
+// beside it, and TestEveryFindingTypeListHoldsEveryConstantOfItsType holds this
+// list against the constants above.
+var AllOrphanKinds = []OrphanKind{
+	OrphanDisk,
+	OrphanIP,
+	OrphanLoadBalancer,
+	OrphanSnapshot,
+	OrphanImage,
+	OrphanDBSnapshot,
+	OrphanDBClusterSnapshot,
+	OrphanEKSLogGroup,
+	OrphanKarpenterQueue,
+	OrphanKarpenterRule,
+}
+
 // AlwaysReport reports whether this kind must be surfaced regardless of the
 // --min-cost threshold. Cluster residue is a correctness/conflict problem (a
 // stale resource that blocks re-creation), not cost waste, so its ~$0 estimate

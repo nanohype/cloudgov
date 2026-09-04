@@ -230,11 +230,26 @@ func evalStorageFinding(ctrl Control, findings []cloud.BucketFinding, findingTyp
 	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no " + string(findingType) + " issues detected"}
 }
 
+// evalStorageGeneric serves the storage controls a storage audit is evidence
+// toward but does not decide: bucket-policy HTTPS enforcement, MFA Delete, and
+// EBS volume encryption. cloudgov reads none of those three states.
+//
+// It must never report PASS, for the same reason evalIAMGeneric must not. A
+// control this evaluator serves is one nothing examined, and PASS is what an
+// auditor reads as "examined and clean" — a verdict the tool cannot compute, in
+// the artifact someone points at to say a control passed. Returning PASS because
+// a storage scan produced findings about something else is the conflation the
+// incomplete contract prevents everywhere else in this tool, arriving as a
+// compliance verdict.
+//
+// It declines in both cases, naming the finding count as context rather than as
+// a verdict.
 func evalStorageGeneric(ctrl Control, findings []cloud.BucketFinding) ControlResult {
 	if len(findings) == 0 {
 		return ControlResult{Control: ctrl, Status: StatusNotEvaluated, Detail: "no storage findings provided"}
 	}
-	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no relevant storage findings detected"}
+	return evalNotEvaluated(ctrl, fmt.Sprintf(
+		"cloudgov has no evaluator for this control; the %d storage finding(s) loaded are context, not a verdict", len(findings)))
 }
 
 func evalNetworkFinding(ctrl Control, findings []cloud.NetworkFinding, findingType cloud.NetworkFindingType) ControlResult {
