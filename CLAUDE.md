@@ -101,7 +101,17 @@ returns them: `--quiet` silences the output, not the record.
   report, so without it the report chooses where an executable lands. Where the
   value is a single untrusted component, `fix.NameComponent` refuses it at the
   read as well, so the refusal names the report field rather than a path nobody
-  typed. `internal/fix/containment_contract_test.go` enforces this.
+  typed. What is enforced is the outcome, not the spelling:
+  `internal/integration/containment_behaviour_test.go` drives each remediation
+  writer against a report whose every caller-controlled string names an escape,
+  in a sandbox it makes the working directory, and walks the filesystem
+  afterwards — so a join that lets a report value out of the output directory
+  fails there. It also requires every exported callable in
+  `internal/{storage,network,orphans,fix}` to be either driven that way or given
+  a written reason it creates no file, so a new writer cannot be outside the
+  check. No gate reads the source for the call: a writer composing its path some
+  other way and still landing inside passes, which is why the rule above is how
+  you write one rather than what the gate measures.
 
 ### Import aliases
 

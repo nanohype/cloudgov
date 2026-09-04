@@ -513,14 +513,20 @@ afterwards. A writer that escapes fails there however it wrote — through a
 renamed variable, a rename whose destination nobody classified, a helper in
 another package, a function value, or a subprocess.
 
-Its population is **every exported function** in
-`internal/{storage,network,orphans,fix}` — no predicate decides which of them
-writes. Each one either has a driver or a sentence in `notAWriter` saying why it
-creates no file, and one in neither fails
-`TestEveryExportedFunctionIsObservedOrExplained`. A predicate here would be a
+Its population is **every exported name a caller can invoke** in
+`internal/{storage,network,orphans,fix}` — a function, a method, or a
+package-level variable holding a function — and no predicate decides which of
+them writes. Each one either has a driver or a sentence in `notAWriter` saying
+why it creates no file, and one in neither fails
+`TestEveryExportedCallableIsObservedOrExplained`. A predicate here would be a
 reading choosing what gets observed, which is how a writer escaped once already:
 the gate matched a body calling `os.MkdirAll`, five writers repeat that call, and
 factoring it into a shared helper produced a sixth writer the gate never saw.
+Moving a writer onto a receiver and binding one to a variable are that same move
+in a different spelling, so the walk takes all three. Exported variables are
+taken whatever their type, because `var Write = os.WriteFile` binds a function
+through an expression no syntax tree can classify; a variable holding no function
+costs one sentence in `notAWriter`, and that is the fail-safe direction.
 
 What it cannot do is prove the property for inputs it does not try. It runs the
 escapes a report can name, which is the surface the defect came in through; it

@@ -76,8 +76,8 @@ const (
 // files, with a driver that hands it a report carrying one escape.
 //
 // Enumerated here and checked against the source by
-// TestEveryRemediationWriterIsObserved, because "which writers exist" is a fact
-// about the source and "where their files land" is not.
+// TestEveryExportedCallableIsObservedOrExplained, because "which names a caller
+// can invoke" is a fact about the source and "where their files land" is not.
 var remediationWriters = map[string]func(outDir, escape string) ([]string, error){
 	"storage.WriteFixScripts": func(outDir, escape string) ([]string, error) {
 		return storage.WriteFixScripts([]cloud.BucketFinding{{
@@ -185,17 +185,20 @@ func TestNoRemediationWriterPlacesAnEntryOutsideItsOutputDirectory(t *testing.T)
 	}
 }
 
-// notAWriter names the exported functions in the remediation packages that
+// notAWriter names the exported callables in the remediation packages that
 // create no file, each with the reason.
 //
-// The population above is EVERY exported function in those packages, with no
-// predicate deciding which of them writes. A predicate is a reading, and a
-// reading is what chose the population when the gate matched a body calling
-// os.MkdirAll: five writers repeat that call verbatim, so factoring it into a
-// shared helper — the obvious next refactor — produced a sixth writer the gate
-// never learned existed, and it landed a file above the output directory.
+// The population is EVERY name those packages export that a caller can invoke —
+// function, method, or variable holding a function — with no predicate deciding
+// which of them writes. A predicate is a reading, and a reading is what chose the
+// population when the gate matched a body calling os.MkdirAll: five writers
+// repeat that call verbatim, so factoring it into a shared helper — the obvious
+// next refactor — produced a sixth writer the gate never learned existed, and it
+// landed a file above the output directory. Moving a writer onto a receiver, or
+// binding it to a package-level variable, are the same move in a different
+// spelling.
 //
-// So a new exported function is in the population until someone writes down why
+// So a new exported callable is in the population until someone writes down why
 // it is not, and the thing that has to be written is a sentence in review rather
 // than a call the gate happens to recognise.
 var notAWriter = map[string]string{
@@ -208,15 +211,26 @@ var notAWriter = map[string]string{
 	"fix.CommentText":          "renders a value so it cannot leave its comment line",
 }
 
-// Every exported function in the remediation packages either has a driver above
-// or a reason here. Which functions exist is a fact about the source and is read
-// from it; which of them write is not decided by reading anything.
-func TestEveryExportedFunctionIsObservedOrExplained(t *testing.T) {
+// Every exported callable in the remediation packages either has a driver above
+// or a reason here. Which names exist is a fact about the source and is read from
+// it; which of them write is not decided by reading anything.
+func TestEveryExportedCallableIsObservedOrExplained(t *testing.T) {
 	packages := []string{"../storage", "../network", "../orphans", "../fix"}
 
 	seen := map[string]bool{}
 	for _, dir := range packages {
-		for _, fn := range exportedFunctionsIn(t, dir) {
+		found := exportedCallablesIn(t, dir)
+
+		// Per package, not just in total. Each of these exports at least a
+		// scanner and a writer, so a package contributing nothing means the walk
+		// stopped reaching it — a suffix test that stopped matching, a directory
+		// that moved — and a total floor set below the sum cannot see one package
+		// drop out.
+		if len(found) == 0 {
+			t.Fatalf("%s contributed no exported callable; the walk does not reach it", dir)
+		}
+
+		for _, fn := range found {
 			seen[fn] = true
 			_, driven := remediationWriters[fn]
 			_, explained := notAWriter[fn]
@@ -226,7 +240,8 @@ func TestEveryExportedFunctionIsObservedOrExplained(t *testing.T) {
 			case !driven && !explained:
 				t.Errorf("%s is exported from a remediation package and nothing observes where its "+
 					"output lands. Add a driver to remediationWriters, or say in notAWriter why it "+
-					"creates no file", fn)
+					"creates no file. A method and a variable holding a function are callable the "+
+					"same way a function is, and are in this population for that reason", fn)
 			}
 		}
 	}
@@ -244,11 +259,11 @@ func TestEveryExportedFunctionIsObservedOrExplained(t *testing.T) {
 		}
 	}
 
-	// A floor well under the real count: a walk that reached nothing reports
-	// every function as accounted for.
+	// And a floor under the sum, for a collapse that empties every package at
+	// once: a walk that reached nothing reports every name as accounted for.
 	const exportedFloor = 8
 	if len(seen) < exportedFloor {
-		t.Fatalf("found %d exported function(s) across %v, under the floor of %d — the walk collapsed",
+		t.Fatalf("found %d exported callable(s) across %v, under the floor of %d — the walk collapsed",
 			len(seen), packages, exportedFloor)
 	}
 }
@@ -287,13 +302,30 @@ func entriesUnder(t *testing.T, root string) []string {
 	return out
 }
 
-// exportedFunctionsIn returns every exported function in a package directory.
+// exportedCallablesIn returns every exported name in a package directory that a
+// caller outside the package can invoke.
 //
-// Every one, with no predicate: the caller decides what to do about each by
-// looking it up in two lists a person maintains, and a function in neither is a
-// failure. A predicate here would be the reading that chose the population
-// before, and the escape it missed was a writer whose mkdir moved into a helper.
-func exportedFunctionsIn(t *testing.T, dir string) []string {
+// Every one, with no predicate over what it does: the caller decides by looking
+// each up in two lists a person maintains, and a name in neither is a failure. A
+// predicate here would be the reading that chose the population before, and the
+// escape it missed was a writer whose mkdir moved into a helper.
+//
+// Three spellings reach a caller, and all three are collected:
+//
+//	func Write(...)                 a package-level function
+//	func (e *Exporter) Write(...)   a method, named Package.Exporter.Write
+//	var Write = func(...)           a package-level variable holding a function
+//
+// The variables are taken whatever their type, because what a var holds is a
+// question for the type checker and this reads syntax: `var Write = os.WriteFile`
+// binds a function through an expression no AST can classify, and the branch that
+// classified is the one a rename walked out of. An exported var that holds no
+// function costs one sentence in notAWriter, which is the fail-safe direction.
+//
+// Types and constants are not collected, and neither can be called: a method
+// declared on a type arrives here as its own declaration, and Go has no constant
+// of function type — a function value is not a constant expression.
+func exportedCallablesIn(t *testing.T, dir string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
 	pkgName := filepath.Base(dir)
@@ -313,12 +345,54 @@ func exportedFunctionsIn(t *testing.T, dir string) []string {
 			t.Fatalf("parse %s: %v", name, parseErr)
 		}
 		for _, decl := range file.Decls {
-			fn, isFunc := decl.(*ast.FuncDecl)
-			if !isFunc || fn.Body == nil || fn.Recv != nil || !fn.Name.IsExported() {
-				continue
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if !d.Name.IsExported() {
+					continue
+				}
+				out = append(out, pkgName+"."+receiverPrefix(d)+d.Name.Name)
+			case *ast.GenDecl:
+				if d.Tok != token.VAR {
+					continue
+				}
+				for _, spec := range d.Specs {
+					value, isValue := spec.(*ast.ValueSpec)
+					if !isValue {
+						continue
+					}
+					for _, ident := range value.Names {
+						if !ident.IsExported() {
+							continue
+						}
+						out = append(out, pkgName+"."+ident.Name)
+					}
+				}
 			}
-			out = append(out, pkgName+"."+fn.Name.Name)
 		}
 	}
 	return out
+}
+
+// receiverPrefix renders a method's receiver type as a name segment, so a method
+// is distinguishable from a function of the same name and reads the way it is
+// called. A function returns the empty string.
+func receiverPrefix(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	expr := fn.Recv.List[0].Type
+	if star, isStar := expr.(*ast.StarExpr); isStar {
+		expr = star.X
+	}
+	// A generic receiver is written Type[T]; the type is the thing being indexed.
+	if index, isIndex := expr.(*ast.IndexExpr); isIndex {
+		expr = index.X
+	}
+	if list, isList := expr.(*ast.IndexListExpr); isList {
+		expr = list.X
+	}
+	if ident, isIdent := expr.(*ast.Ident); isIdent {
+		return ident.Name + "."
+	}
+	return "?."
 }
