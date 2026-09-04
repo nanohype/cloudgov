@@ -516,116 +516,143 @@ func TestCompleteScanReportsAnEmptyIncomplete(t *testing.T) {
 // own coverage. Emitting `[]` makes "I looked at everything" a positive
 // statement.
 //
-// Observed, not analysed. An earlier version of this claim was held by reading
-// the source — finding the value each writer handed to writeJSON and relating an
-// `observed` call to it. That is a question about spelling, and the property is
-// about bytes: what the caller receives is `[]` or it is `null`. Rendering each
-// envelope answers it directly, and cannot be evaded by normalizing through a
-// helper, a wrapper, or a package this check has never heard of.
+// Observed, not analysed. What the caller receives is `[]` or it is `null`, so
+// each writer is rendered and the bytes are read. Whether a writer normalizes
+// through a helper, a wrapper, or a package this check has never heard of makes
+// no difference to what comes back.
 //
-// The writers below are named by hand and the list checks itself.
-// writersRenderingJSON reads the package and counts the exported writers that
-// hand a value to writeJSON, and the assertion at the end of this function fails
-// when the map is shorter than that count, so the list cannot silently stop
-// being every one.
+// The writers below are named by hand and the list checks itself against the
+// package. writersTakingAWriter reads every exported function that renders to an
+// io.Writer and reports an error, and the assertion at the end requires each one
+// to be rendered here or to have a case in
+// TestEverySARIFWriterCarriesTheIncompleteRecord — so the two gates partition the
+// package's writers between them and a writer in neither fails.
 //
-// Counting the writers that TAKE the record as an argument is what an earlier
-// denominator did, and WriteCompliance and WriteAudit carry it on the value they
-// marshal instead — which is how the two that actually emitted `null` sat
-// outside a list that could not otherwise be short. Counting writeJSON reaches
-// them.
+// The population is a signature rather than a body or a name, because both of
+// those are satisfied by spelling. A writer whose own body called writeJSON was
+// the population once, and a writer rendering one frame down through a per-domain
+// helper joined nothing while the assertion beside it claimed every exported JSON
+// writer was covered.
 //
-// The count is the whole population: no writer is subtracted and there is no
-// exemption list, so a writer whose envelope carries no coverage key fails here
-// rather than being named and excused.
+// No writer is subtracted and there is no exemption list, so a writer whose
+// envelope carries no coverage key fails here rather than being named and
+// excused.
 func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
-	writers := map[string]func(io.Writer) error{
-		"certs":     func(w io.Writer) error { return WriteCerts(w, nil, nil) },
-		"storage":   func(w io.Writer) error { return WriteStorage(w, nil, nil) },
-		"network":   func(w io.Writer) error { return WriteNetwork(w, nil, nil) },
-		"tags":      func(w io.Writer) error { return WriteTags(w, nil, nil) },
-		"secrets":   func(w io.Writer) error { return WriteSecrets(w, nil, nil) },
-		"orphans":   func(w io.Writer) error { return WriteOrphans(w, nil, nil) },
-		"quota":     func(w io.Writer) error { return WriteQuotas(w, nil, nil) },
-		"inventory": func(w io.Writer) error { return WriteInventory(w, nil, nil) },
-		"cost":      func(w io.Writer) error { return WriteCost(w, nil, nil) },
-		"drift":     func(w io.Writer) error { return WriteDrift(w, nil, nil) },
-		"lambda":    func(w io.Writer) error { return WriteLambdaPolicy(w, nil, nil) },
-		"platform":  func(w io.Writer) error { return WritePlatform(w, nil, nil) },
-		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
-		"k8s":       func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
-		"repo":      func(w io.Writer) error { return WriteRepo(w, nil, nil) },
-		"compare":   func(w io.Writer) error { return WriteCompare(w, nil, nil, nil, nil) },
+	exercised := map[string]func(io.Writer) error{
+		"WriteCerts":        func(w io.Writer) error { return WriteCerts(w, nil, nil) },
+		"WriteStorage":      func(w io.Writer) error { return WriteStorage(w, nil, nil) },
+		"WriteNetwork":      func(w io.Writer) error { return WriteNetwork(w, nil, nil) },
+		"WriteTags":         func(w io.Writer) error { return WriteTags(w, nil, nil) },
+		"WriteSecrets":      func(w io.Writer) error { return WriteSecrets(w, nil, nil) },
+		"WriteOrphans":      func(w io.Writer) error { return WriteOrphans(w, nil, nil) },
+		"WriteQuotas":       func(w io.Writer) error { return WriteQuotas(w, nil, nil) },
+		"WriteInventory":    func(w io.Writer) error { return WriteInventory(w, nil, nil) },
+		"WriteCost":         func(w io.Writer) error { return WriteCost(w, nil, nil) },
+		"WriteDrift":        func(w io.Writer) error { return WriteDrift(w, nil, nil) },
+		"WriteLambdaPolicy": func(w io.Writer) error { return WriteLambdaPolicy(w, nil, nil) },
+		"WritePlatform":     func(w io.Writer) error { return WritePlatform(w, nil, nil) },
+		"WriteIAM":          func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
+		"WriteK8sFindings":  func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
+		"WriteRepo":         func(w io.Writer) error { return WriteRepo(w, nil, nil) },
+		"WriteCompare":      func(w io.Writer) error { return WriteCompare(w, nil, nil, nil, nil) },
 		// These two carry the record on the value they marshal rather than
 		// taking it as an argument, which is how they sat outside a denominator
 		// that counted the argument — and they were the two that emitted null.
-		"compliance": func(w io.Writer) error {
+		"WriteCompliance": func(w io.Writer) error {
 			return WriteCompliance(w, compliance.ComplianceReport{Benchmark: "cis-aws-v3"})
 		},
-		"audit": func(w io.Writer) error { return WriteAudit(w, &audit.Report{}) },
+		"WriteAudit": func(w io.Writer) error { return WriteAudit(w, &audit.Report{}) },
 	}
 
-	for domain, write := range writers {
-		t.Run(domain, func(t *testing.T) {
+	for name, write := range exercised {
+		t.Run(name, func(t *testing.T) {
 			var buf bytes.Buffer
 			if err := write(&buf); err != nil {
-				t.Fatalf("write %s report: %v", domain, err)
+				t.Fatalf("write %s report: %v", name, err)
 			}
 			body := buf.String()
 			if !strings.Contains(body, `"incomplete"`) {
-				t.Fatalf("%s omits the incomplete key entirely:\n%s", domain, body)
+				t.Fatalf("%s omits the incomplete key entirely:\n%s", name, body)
 			}
 
 			var envelope map[string]json.RawMessage
 			if err := json.Unmarshal(buf.Bytes(), &envelope); err != nil {
-				t.Fatalf("%s report is not valid JSON: %v", domain, err)
+				t.Fatalf("%s report is not valid JSON: %v", name, err)
 			}
 			raw, ok := envelope["incomplete"]
 			if !ok {
-				t.Fatalf("%s decoded without an incomplete key", domain)
+				t.Fatalf("%s decoded without an incomplete key", name)
 			}
 			if string(raw) == "null" {
 				t.Errorf("%s emits incomplete as null; an agent cannot tell that from a tool "+
-					"that does not report coverage", domain)
+					"that does not report coverage", name)
 			}
 
 			var entries []string
 			if err := json.Unmarshal(raw, &entries); err != nil {
-				t.Fatalf("%s incomplete is not an array of strings: %v", domain, err)
+				t.Fatalf("%s incomplete is not an array of strings: %v", name, err)
 			}
 			if len(entries) != 0 {
-				t.Errorf("%s reported %d incompletions for a run given none", domain, len(entries))
+				t.Errorf("%s reported %d incompletions for a run given none", name, len(entries))
 			}
 		})
 	}
 
-	// Every exported JSON writer in internal/output must be here. Counting
-	// rather than trusting the list is what makes a new domain fail here instead
-	// of shipping outside the check.
-	declared := writersRenderingJSON(t)
-	if len(writers) != declared {
-		t.Errorf("this check covers %d writers; %d in internal/output render JSON, "+
-			"so the difference is unexercised", len(writers), declared)
+	// Every writer this package exports is accounted for by name, not by count.
+	//
+	// A count is met by any set of the right size, so a writer joining while
+	// another leaves reads as no change. Naming each one means a writer that
+	// renders JSON through a helper — the shape a package acquires the moment two
+	// writers share shaping code — fails here rather than sitting outside a
+	// denominator that never noticed it.
+	for _, name := range writersTakingAWriter(t) {
+		_, rendered := exercised[name]
+		_, isSARIF := sarifIncompleteWriters[name]
+		switch {
+		case rendered && isSARIF:
+			t.Errorf("%s is exercised as a JSON envelope and as a SARIF writer; one of the two "+
+				"is describing the wrong output", name)
+		case !rendered && !isSARIF:
+			t.Errorf("%s renders to an io.Writer and returns an error, and nothing observes "+
+				"whether its output carries the unread record. Render it above, or give it a "+
+				"case in TestEverySARIFWriterCarriesTheIncompleteRecord", name)
+		}
+	}
+
+	// A name here that the package does not export renders nothing and hides that
+	// the map has drifted from the tree.
+	declared := map[string]bool{}
+	for _, name := range writersTakingAWriter(t) {
+		declared[name] = true
+	}
+	for name := range exercised {
+		if !declared[name] {
+			t.Errorf("this check renders %s, which internal/output does not export with that shape", name)
+		}
 	}
 }
 
-// writersRenderingJSON counts the exported JSON writers in this package, by
-// reading the source rather than a list.
+// writersTakingAWriter returns every exported function in this package that
+// renders to an io.Writer and reports an error — the shape of a writer whose
+// output a caller receives.
 //
-// The list above is maintained by hand, and a hand-maintained list of "every X"
-// is the thing that silently stops being every X. This is the denominator that
-// makes it check itself.
+// The population is a signature, not a body and not a name. Reading each body for
+// a writeJSON call put the population back inside the thing being checked: a
+// writer that rendered through a per-domain helper called writeJSON one frame
+// down and joined nothing, while the assertion beside it said every exported JSON
+// writer was covered. A name prefix has the same defect one step out — it is
+// satisfied by spelling.
 //
 // Which writers EXIST is a fact about the source, so it is read from there. What
 // each one emits is not, which is why the map above renders every one of them and
-// reads the bytes rather than looking for a normalizer call in the body.
-func writersRenderingJSON(t *testing.T) int {
+// reads the bytes.
+func writersTakingAWriter(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatalf("read package dir: %v", err)
 	}
-	count := 0
+	var out []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -638,52 +665,46 @@ func writersRenderingJSON(t *testing.T) int {
 		}
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || !fn.Name.IsExported() || fn.Type.Params == nil {
+			if !ok || fn.Recv != nil || !fn.Name.IsExported() {
 				continue
 			}
-			// Only the JSON writers. Two other surfaces take the same argument
-			// and are checked where their own shape can be asserted, because a
-			// count that mixed them would be satisfied by the wrong one:
-			//
-			//   IncompleteNote  renders it to a table
-			//                   (TestIncompleteNoteStatesCoverageEitherWay)
-			//   Write*SARIF     renders it as invocations + notifications
-			//                   (TestEverySARIFWriterCarriesTheIncompleteRecord)
-			if !strings.HasPrefix(fn.Name.Name, "Write") || strings.HasSuffix(fn.Name.Name, "SARIF") {
+			if !takesWriterReturnsError(fn) {
 				continue
 			}
-			// Every exported JSON writer, not only those that take the record
-			// as an argument. Counting the argument left WriteCompliance and
-			// WriteAudit outside the denominator — they carry the record on the
-			// value they marshal — and those were the two that emitted null.
-			// A writer is one of these when it hands a value to writeJSON.
-			if callsWriteJSON(fn) {
-				count++
-			}
+			out = append(out, fn.Name.Name)
 		}
 	}
-	if count == 0 {
-		t.Fatal("no exported writer in this package hands a value to writeJSON; the denominator is broken, not the package")
+	if len(out) == 0 {
+		t.Fatal("no exported function in this package renders to an io.Writer; the population is broken, not the package")
 	}
-	return count
+	return out
 }
 
-// callsWriteJSON reports whether fn hands a value to writeJSON.
-func callsWriteJSON(fn *ast.FuncDecl) bool {
-	if fn.Body == nil {
+// takesWriterReturnsError reports whether fn's first parameter is an io.Writer
+// and its only result is an error.
+//
+// A function that renders somewhere a caller can read has to be handed the
+// destination, and a function that can fail to render has to say so. Together
+// those exclude the constructors and the table helpers without asking what any of
+// them is called: IncompleteNote writes to an io.Writer and returns nothing, so a
+// caller cannot learn that it failed, and it is checked where its own shape can be
+// asserted rather than as an envelope.
+func takesWriterReturnsError(fn *ast.FuncDecl) bool {
+	params := fn.Type.Params
+	if params == nil || len(params.List) == 0 {
 		return false
 	}
-	var found bool
-	ast.Inspect(fn.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		if ident, isIdent := call.Fun.(*ast.Ident); isIdent && ident.Name == "writeJSON" {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
+	first, isSelector := params.List[0].Type.(*ast.SelectorExpr)
+	if !isSelector || first.Sel == nil || first.Sel.Name != "Writer" {
+		return false
+	}
+	if pkg, isIdent := first.X.(*ast.Ident); !isIdent || pkg.Name != "io" {
+		return false
+	}
+	results := fn.Type.Results
+	if results == nil || len(results.List) != 1 {
+		return false
+	}
+	result, isIdent := results.List[0].Type.(*ast.Ident)
+	return isIdent && result.Name == "error"
 }

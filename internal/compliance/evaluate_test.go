@@ -1,6 +1,7 @@
 package compliance
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -214,4 +215,102 @@ func TestEvaluateTagsControl(t *testing.T) {
 		}
 	}
 	t.Error("control 4.1 not found")
+}
+
+// The two generic evaluators serve controls a scan is evidence toward but does
+// not decide, and they must never report PASS. PASS is what an auditor reads as
+// "examined and clean", and neither evaluator examined anything: it returns a
+// verdict about a control on the strength of findings about a different one.
+//
+// Both branches are pinned, because the branch that matters is the one that runs
+// when a scan DID find something — an evaluator that declines only on an empty
+// input still hands out a verdict on the path an operator actually takes.
+// Statement coverage cannot see the difference: returning
+// `ControlResult{Control: ctrl, Status: StatusPass, ...}` executes the same one
+// statement the decline does, and the file's 100 floor is met either way.
+func TestGenericEvaluatorsNeverReportAVerdict(t *testing.T) {
+	ctrl := Control{ID: "2.1.1", Title: "a control nothing examined"}
+
+	declines := map[string]func(withFindings bool) ControlResult{
+		"evalStorageGeneric": func(withFindings bool) ControlResult {
+			var findings []cloud.BucketFinding
+			if withFindings {
+				findings = []cloud.BucketFinding{{Type: cloud.BucketPublicAccess, Bucket: "docs"}}
+			}
+			return evalStorageGeneric(ctrl, findings)
+		},
+		"evalIAMGeneric": func(withFindings bool) ControlResult {
+			var findings []cloud.Finding
+			if withFindings {
+				findings = []cloud.Finding{{Type: cloud.FindingAdminAccess, Resource: "role/admin"}}
+			}
+			return evalIAMGeneric(ctrl, findings)
+		},
+	}
+
+	for name, evaluate := range declines {
+		for _, withFindings := range []bool{false, true} {
+			label := "no findings loaded"
+			if withFindings {
+				label = "findings loaded for the domain"
+			}
+			t.Run(name+"/"+label, func(t *testing.T) {
+				got := evaluate(withFindings)
+				if got.Status != StatusNotEvaluated {
+					t.Fatalf("status = %s, want NOT_EVALUATED — this evaluator examined nothing "+
+						"and a verdict here is a claim the tool cannot compute: %+v", got.Status, got)
+				}
+				if got.Detail == "" {
+					t.Error("the decline carries no reason, so a reader cannot tell why the tool declined")
+				}
+			})
+		}
+	}
+}
+
+// A control's Description and its Status travel in the same JSON, and an auditor
+// reads both. A control whose shipped description says it is reported as not
+// evaluated must in fact report that, or the artifact contradicts itself in a way
+// only someone reading both fields can see.
+//
+// The population is read from the shipped descriptions, so a control that makes
+// the promise is covered by making it. This is not a claim that any benchmark
+// contains one — a benchmark that promises nothing contributes nothing here, and
+// what holds the evaluators regardless of prose is
+// TestGenericEvaluatorsNeverReportAVerdict above.
+func TestEveryControlPromisingNoVerdictReportsNone(t *testing.T) {
+	// Findings in every domain, so a control that declines only on an empty
+	// input cannot satisfy this by accident.
+	loaded := InputFindings{
+		IAM:     []cloud.Finding{{Type: cloud.FindingAdminAccess, Resource: "role/admin", Detail: "full admin"}},
+		Storage: []cloud.BucketFinding{{Type: cloud.BucketPublicAccess, Bucket: "docs"}},
+		Network: []cloud.NetworkFinding{{Type: cloud.NetworkAdminPortOpen, Resource: "sg-1"}},
+		Tags:    []cloud.TagFinding{{ResourceID: "raw", MissingTags: []string{"Team"}}},
+		Certs:   []cloud.CertFinding{{Status: cloud.CertExpired, Domain: "api.example.test"}},
+	}
+
+	const promise = "reported as not evaluated"
+	promising := 0
+	for _, id := range AvailableBenchmarks() {
+		benchmark := GetBenchmark(id)
+		if benchmark == nil {
+			t.Fatalf("benchmark %s is published and does not resolve", id)
+		}
+		for _, result := range Evaluate(benchmark, loaded).Results {
+			if !strings.Contains(result.Control.Description, promise) {
+				continue
+			}
+			promising++
+			if result.Status != StatusNotEvaluated {
+				t.Errorf("%s %s reports %s while its own description, in the same report, says it is "+
+					"%s — an auditor reading the two fields is told opposite things",
+					id, result.Control.ID, result.Status, promise)
+			}
+		}
+	}
+
+	if promising == 0 {
+		t.Fatalf("no published control's description contains %q; the population is empty, which is "+
+			"not the same as every promise being kept", promise)
+	}
 }

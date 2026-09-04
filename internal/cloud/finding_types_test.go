@@ -28,10 +28,17 @@ import (
 // constant missing from its list, and a list naming a constant that no longer
 // exists, are the same drift seen from either side.
 //
-// The population is derived: any package-level slice of a named type whose
-// elements are constants of that type is checked, so a fourth enumeration added
-// tomorrow is covered without an edit here — which is the property each list's
-// own comment claims and none of them could have alone.
+// The population is derived: any package-level variable declared as a slice of a
+// named type that has constants is checked, whether the type is written on the
+// declaration or on the literal, so a fourth enumeration is covered by being
+// written — which is the property each list's own comment claims and none of them
+// could have alone.
+//
+// What it does not reach is a list whose element type is knowable only from the
+// return type of a call, because this reads syntax and that answer belongs to the
+// type checker. `var All = kinds()` declares nothing an AST can compare against
+// its constants. The named controls at the end are what notice if the walk stops
+// reaching the enumerations that do exist.
 func TestEveryFindingTypeListHoldsEveryConstantOfItsType(t *testing.T) {
 	fset := token.NewFileSet()
 	files := parsePackage(t, fset)
@@ -63,25 +70,40 @@ func TestEveryFindingTypeListHoldsEveryConstantOfItsType(t *testing.T) {
 			case token.VAR:
 				for _, spec := range gen.Specs {
 					vs, ok := spec.(*ast.ValueSpec)
-					if !ok || len(vs.Values) != 1 {
+					if !ok || len(vs.Names) != 1 {
 						continue
 					}
-					lit, ok := vs.Values[0].(*ast.CompositeLit)
-					if !ok {
+					// The element type is taken from whichever of the two
+					// spellings declares it, because a slice of a named type is
+					// what makes this an enumeration and either spelling says so:
+					//
+					//	var All = []Kind{...}   the literal carries the type
+					//	var All []Kind = ...    the declaration carries it
+					var elem string
+					var lit *ast.CompositeLit
+					if arr, isArray := vs.Type.(*ast.ArrayType); isArray {
+						elem, _ = identName(arr.Elt)
+					}
+					if len(vs.Values) == 1 {
+						if composite, isComposite := vs.Values[0].(*ast.CompositeLit); isComposite {
+							lit = composite
+							if arr, isArray := composite.Type.(*ast.ArrayType); isArray && elem == "" {
+								elem, _ = identName(arr.Elt)
+							}
+						}
+					}
+					if elem == "" {
 						continue
 					}
-					arr, ok := lit.Type.(*ast.ArrayType)
-					if !ok {
-						continue
-					}
-					elem, ok := identName(arr.Elt)
-					if !ok {
-						continue
-					}
+					// A list whose members are not a literal is in the population
+					// and contributes none, so it fails against its constants
+					// rather than leaving quietly.
 					var members []string
-					for _, e := range lit.Elts {
-						if name, ok := identName(e); ok {
-							members = append(members, name)
+					if lit != nil {
+						for _, e := range lit.Elts {
+							if name, ok := identName(e); ok {
+								members = append(members, name)
+							}
 						}
 					}
 					if listsByType[elem] == nil {
@@ -114,11 +136,23 @@ func TestEveryFindingTypeListHoldsEveryConstantOfItsType(t *testing.T) {
 		}
 	}
 
-	// A floor, not an at-least-one: an enumeration that found nothing reports
-	// every list as consistent, which is the reading that looks like a clean tree.
-	const listFloor = 2
-	if checked < listFloor {
-		t.Fatalf("compared %d finding-type list(s), under the floor of %d — the enumeration collapsed rather than the package changing", checked, listFloor)
+	// Positive controls, per type rather than a single count.
+	//
+	// A total is met by any set of the right size, so a walk that lost one
+	// enumeration and kept the rest sits above a floor set under the sum — and an
+	// enumeration that found nothing reports every list as consistent, which is
+	// the reading that looks like a clean tree. These are the types this package
+	// is known to enumerate; each must be reached. They are not the population:
+	// a fourth enumeration is compared by being written, and is absent from this
+	// list because nothing here has to name it.
+	for _, elem := range []string{"OrphanKind", "RepoFindingType", "PlatformFindingType"} {
+		if len(listsByType[elem]) == 0 {
+			t.Errorf("no list of %s was reached; this package declares one, so the walk stopped "+
+				"finding enumerations rather than the package losing one", elem)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("compared no finding-type list at all; the enumeration collapsed rather than the package changing")
 	}
 }
 

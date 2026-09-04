@@ -70,16 +70,16 @@ type severityInput struct {
 type iamInput struct {
 	Profile  string `json:"profile,omitempty" jsonschema:"AWS named profile to use"`
 	Days     int    `json:"days,omitempty" jsonschema:"audit-log lookback window in days (default 90)"`
-	Severity string `json:"severity,omitempty" jsonschema:"minimum severity to report (default LOW)"`
+	Severity string `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 }
 
 type certsInput struct {
-	Severity string `json:"severity,omitempty"`
+	Severity string `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 	Days     int    `json:"days,omitempty" jsonschema:"include certificates expiring within this many days (default 90)"`
 }
 
 type tagsInput struct {
-	Severity string   `json:"severity,omitempty"`
+	Severity string   `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 	Required []string `json:"required" jsonschema:"tag/label keys that must be present on every resource"`
 }
 
@@ -98,7 +98,7 @@ type inventoryInput struct {
 type costInput struct {
 	Days      int     `json:"days,omitempty" jsonschema:"compare the last N days against the prior N days (default 30)"`
 	Threshold float64 `json:"threshold,omitempty" jsonschema:"only include services whose spend changed by more than this percent"`
-	Severity  string  `json:"severity,omitempty"`
+	Severity  string  `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 }
 
 type driftInput struct {
@@ -107,7 +107,7 @@ type driftInput struct {
 }
 
 type auditInput struct {
-	Severity     string   `json:"severity,omitempty"`
+	Severity     string   `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 	Skip         []string `json:"skip,omitempty" jsonschema:"domains to skip: iam, storage, network, orphans, certs, tags, secrets"`
 	IAMDays      int      `json:"iam_days,omitempty" jsonschema:"IAM audit-log lookback in days (default 90)"`
 	CertDays     int      `json:"cert_days,omitempty" jsonschema:"certificate expiry threshold in days (default 90)"`
@@ -116,7 +116,7 @@ type auditInput struct {
 
 type k8sInput struct {
 	Kubeconfig string `json:"kubeconfig,omitempty" jsonschema:"path to kubeconfig (default: standard chain)"`
-	Severity   string `json:"severity,omitempty"`
+	Severity   string `json:"severity,omitempty" jsonschema:"minimum severity to report: CRITICAL, HIGH, MEDIUM, or LOW (default LOW)"`
 }
 
 type complianceInput struct {
@@ -566,10 +566,13 @@ func jsonResult(write func(io.Writer) error) (*mcp.CallToolResult, any, error) {
 // than at each call site because a handler choosing its own fallback is a chance
 // for one of them to differ — and the chances scale with the number of tools.
 //
-// Where it is written down is the jsonschema description on each input struct,
-// not the AGENTS.md tool table, which lists `severity` as a parameter and records
-// no default for any tool. Two of those descriptions are empty, so the default is
-// documented on most of the surface rather than all of it.
+// Where an agent reads it is the `severity` property's description in a tool's
+// published input schema — not the AGENTS.md tool table, which lists `severity`
+// as a parameter and records no default for any tool.
+// TestEveryToolTakingSeverityPublishesItsDefault lists the server's tools over an
+// in-memory transport and requires every one that accepts the argument to state
+// the value this function applies, so a tool cannot ship the argument with the
+// default reaching an agent nowhere.
 func resolveMCPSeverity(s string) (cloud.Severity, error) {
 	return resolveSeverity(s, cloud.SeverityLow)
 }

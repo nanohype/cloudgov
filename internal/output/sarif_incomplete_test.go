@@ -22,41 +22,48 @@ import (
 // who never saw any of those. A partial scan rendered there as a clean report is
 // the failure with the longest half life, so every writer carries it and the run
 // is marked unsuccessful.
+// sarifIncompleteWriters drives each SARIF writer with and without an unread
+// record. It is package-level because the envelope gate in json_test.go reads it
+// too: a writer named there rather than exercised as a JSON envelope is one this
+// map has to cover, so the two gates partition the package's writers between them
+// instead of each assuming the other has a name.
+var sarifIncompleteWriters = map[string]func(*bytes.Buffer, []string) error{
+	"WriteSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteSARIF(b, nil, "v", inc)
+	},
+	"WriteStorageSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteStorageSARIF(b, nil, "v", inc)
+	},
+	"WriteSecretsSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteSecretsSARIF(b, nil, "v", inc)
+	},
+	"WriteK8sSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteK8sSARIF(b, nil, "v", inc)
+	},
+	"WriteLambdaSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteLambdaSARIF(b, nil, "v", inc)
+	},
+	"WriteComplianceSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteComplianceSARIF(b, compliance.ComplianceReport{}, "v", inc)
+	},
+	"WriteDriftSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteDriftSARIF(b, nil, "v", inc)
+	},
+	"WritePlatformSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WritePlatformSARIF(b, nil, "v", inc)
+	},
+	"WriteCertsSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteCertsSARIF(b, nil, "v", inc)
+	},
+	"WriteAuditSARIF": func(b *bytes.Buffer, inc []string) error {
+		return WriteAuditSARIF(b, &audit.Report{}, "v", inc)
+	},
+}
+
 func TestEverySARIFWriterCarriesTheIncompleteRecord(t *testing.T) {
 	const unread = "ec2:DescribeInstances in eu-west-1: AccessDenied"
 
-	writers := map[string]func(*bytes.Buffer, []string) error{
-		"WriteSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteSARIF(b, nil, "v", inc)
-		},
-		"WriteStorageSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteStorageSARIF(b, nil, "v", inc)
-		},
-		"WriteSecretsSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteSecretsSARIF(b, nil, "v", inc)
-		},
-		"WriteK8sSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteK8sSARIF(b, nil, "v", inc)
-		},
-		"WriteLambdaSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteLambdaSARIF(b, nil, "v", inc)
-		},
-		"WriteComplianceSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteComplianceSARIF(b, compliance.ComplianceReport{}, "v", inc)
-		},
-		"WriteDriftSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteDriftSARIF(b, nil, "v", inc)
-		},
-		"WritePlatformSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WritePlatformSARIF(b, nil, "v", inc)
-		},
-		"WriteCertsSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteCertsSARIF(b, nil, "v", inc)
-		},
-		"WriteAuditSARIF": func(b *bytes.Buffer, inc []string) error {
-			return WriteAuditSARIF(b, &audit.Report{}, "v", inc)
-		},
-	}
+	writers := sarifIncompleteWriters
 
 	// The population comes from the source, not from the map above. A writer
 	// added without an entry here fails rather than joining the ones nothing
