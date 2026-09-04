@@ -96,6 +96,22 @@ returns them: `--quiet` silences the output, not the record.
   Every `warnf` is recorded as an incomplete observation and surfaces in the run's
   `incomplete` output and exit code 3 — a partial scan must not report as clean.
 - Cost figures are on-demand list-price estimates; say so in the finding `Detail`.
+- A file this tool creates gets its path from `fix.PathUnder`, never from a bare
+  `filepath.Join`. Generated filenames are built from values read out of a saved
+  report, so without it the report chooses where an executable lands. Where the
+  value is a single untrusted component, `fix.NameComponent` refuses it at the
+  read as well, so the refusal names the report field rather than a path nobody
+  typed. What is enforced is the outcome, not the spelling:
+  `internal/integration/containment_behaviour_test.go` drives each remediation
+  writer against a report whose every caller-controlled string names an escape,
+  in a sandbox it makes the working directory, and walks the filesystem
+  afterwards — so a join that lets a report value out of the output directory
+  fails there. It also requires every exported callable in
+  `internal/{storage,network,orphans,fix}` to be either driven that way or given
+  a written reason it creates no file, so a new writer cannot be outside the
+  check. No gate reads the source for the call: a writer composing its path some
+  other way and still landing inside passes, which is why the rule above is how
+  you write one rather than what the gate measures.
 
 ### Import aliases
 

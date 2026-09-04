@@ -189,3 +189,36 @@ func TestListNonexistentDir(t *testing.T) {
 		t.Errorf("got %v, want nil", metas)
 	}
 }
+
+// validName and PathUnder do not answer the same question, and this is the gap
+// between them: `-x` matches the pattern and still names a file that every tool
+// taking it as an argument reads as a flag. Save, Load and Delete share one
+// definition of the path, so a name this store will not write is also one it
+// will not read back or remove.
+func TestNameThePatternAllowsAndThePathRefuses(t *testing.T) {
+	dir := t.TempDir()
+	s := NewStore(dir)
+	const name = "-rf"
+
+	if !validName.MatchString(name) {
+		t.Fatalf("this test needs a name the pattern accepts; %q is not one", name)
+	}
+
+	if err := s.Save(name, json.RawMessage(`{}`), "test"); err == nil {
+		t.Error("Save accepted a baseline name that reads as a flag")
+	}
+	if _, err := s.Load(name); err == nil {
+		t.Error("Load accepted a baseline name that reads as a flag")
+	}
+	if err := s.Delete(name); err == nil {
+		t.Error("Delete accepted a baseline name that reads as a flag")
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+	for _, e := range entries {
+		t.Errorf("a refused name left %s behind", e.Name())
+	}
+}
