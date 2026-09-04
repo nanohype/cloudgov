@@ -4,19 +4,24 @@
 // the domain scanner, and rendered by the output package.
 //
 // This is the substance of what a command does, but not the command shell
-// itself: a command's RunE resolves providers via providers.Resolve (→
-// Default()), which is AWS-backed and has no test-injection seam, so no test in
-// this repository executes a RunE.
+// itself, and the shell splits in two.
 //
-// That gap is stated rather than covered. Package cmd tests the pure helpers a
-// handler calls — severity resolution, output-format resolution, the exit-code
-// gate — and checks the handlers' SOURCE for invariants an AST can see, such as
-// whether each one gates on what its providers could not read. Neither runs a
-// handler, so flag→ScanOptions threading, the output-format switch and the
-// exit-code path are read but never exercised. `go tool cover -func` reports
-// every runXxx at 0%, and .coverage-floors floors the package accordingly.
+// A handler that reads saved reports resolves nothing, so it can be driven
+// directly; package cmd drives runCompliance and runCompare that way, exercising their
+// flags, their exit codes and the artifacts they write rather than reading them.
+// The remaining report-reading handlers can be driven the same way and are not
+// yet.
 //
-// What these tests do catch is the composition break the per-layer unit tests
-// miss: a scanner that resolves or filters wrong, or a renderer that drops a
-// field.
+// A handler that reaches an account resolves providers through providers.Resolve
+// (→ Default()), which is AWS-backed and has no test-injection seam, so nothing
+// runs those: package cmd tests the pure helpers they call and checks their
+// SOURCE for invariants an AST can see, which proves a call site exists rather
+// than that the value reaches it.
+//
+// The split is where it is because of the seam, not because of what was
+// convenient, and .coverage-floors floors package cmd against the half that is
+// only read.
+//
+// What these tests catch is the composition break the per-layer unit tests miss:
+// a scanner that resolves or filters wrong, or a renderer that drops a field.
 package integration

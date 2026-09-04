@@ -535,9 +535,9 @@ func TestCompleteScanReportsAnEmptyIncomplete(t *testing.T) {
 // outside a list that could not otherwise be short. Counting writeJSON reaches
 // them.
 //
-// One envelope carries no coverage key at all. It is named in
-// writersWithNoCoverageRecord with the reason and subtracted from the count,
-// rather than being quietly outside it.
+// The count is the whole population: no writer is subtracted and there is no
+// exemption list, so a writer whose envelope carries no coverage key fails here
+// rather than being named and excused.
 func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 	writers := map[string]func(io.Writer) error{
 		"certs":     func(w io.Writer) error { return WriteCerts(w, nil, nil) },
@@ -555,6 +555,7 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
 		"k8s":       func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
 		"repo":      func(w io.Writer) error { return WriteRepo(w, nil, nil) },
+		"compare":   func(w io.Writer) error { return WriteCompare(w, nil, nil, nil, nil) },
 		// These two carry the record on the value they marshal rather than
 		// taking it as an argument, which is how they sat outside a denominator
 		// that counted the argument — and they were the two that emitted null.
@@ -601,7 +602,7 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 	// Every exported JSON writer in internal/output must be here. Counting
 	// rather than trusting the list is what makes a new domain fail here instead
 	// of shipping outside the check.
-	declared := writersRenderingJSON(t) - len(writersWithNoCoverageRecord)
+	declared := writersRenderingJSON(t)
 	if len(writers) != declared {
 		t.Errorf("this check covers %d writers; %d in internal/output render JSON, "+
 			"so the difference is unexercised", len(writers), declared)
@@ -665,18 +666,6 @@ func writersRenderingJSON(t *testing.T) int {
 		t.Fatal("no exported writer in this package hands a value to writeJSON; the denominator is broken, not the package")
 	}
 	return count
-}
-
-// writersWithNoCoverageRecord names the exported JSON writers whose envelope
-// carries no incomplete key at all, with the reason.
-//
-// Named rather than silently outside the count: an envelope that does not report
-// its own coverage is a gap, and one that is written down is a gap someone can
-// close. WriteCompare is the only one — `cloudgov compare` reads two saved
-// reports, each of which carries a record it does not read, so a finding the
-// baseline saw and the current run could not observe renders as RESOLVED.
-var writersWithNoCoverageRecord = map[string]string{
-	"WriteCompare": "compare's envelope has no incomplete key; its two inputs each carry one and it reads neither",
 }
 
 // callsWriteJSON reports whether fn hands a value to writeJSON.

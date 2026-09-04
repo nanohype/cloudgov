@@ -304,3 +304,59 @@ func TestMatchKey_ExcludesSeverity(t *testing.T) {
 		t.Errorf("MatchKey should ignore severity: %q != %q", f1.MatchKey(), f2.MatchKey())
 	}
 }
+
+// A comparison is only as complete as its inputs, and this is what carries that
+// from a saved report into the diff.
+func TestReportIncomplete(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want []string
+	}{
+		{
+			name: "an envelope that could not read part of the account",
+			data: `{"findings":[],"total":0,"incomplete":["describe regions: AccessDenied; scanned us-east-1 only"]}`,
+			want: []string{"describe regions: AccessDenied; scanned us-east-1 only"},
+		},
+		{
+			name: "a whole scan reports nothing unread",
+			data: `{"findings":[],"total":0,"incomplete":[]}`,
+			want: nil,
+		},
+		{
+			// The positive control on the two above: a reader that returned a
+			// constant would pass both.
+			name: "several entries are all carried",
+			data: `{"resources":[],"incomplete":["a","b","c"]}`,
+			want: []string{"a", "b", "c"},
+		},
+		{
+			// An older report with no such key, and a file that is not a report
+			// at all, are the same answer here — this cannot tell either from a
+			// whole scan, which is why the caller labels the entries by side
+			// rather than implying the inputs were complete.
+			name: "a report predating the key",
+			data: `{"findings":[],"total":0}`,
+			want: nil,
+		},
+		{
+			name: "not a report",
+			data: `not json`,
+			want: nil,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ReportIncomplete([]byte(tc.data))
+			if len(got) != len(tc.want) {
+				t.Fatalf("ReportIncomplete() = %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Errorf("entry %d = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}

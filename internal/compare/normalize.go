@@ -469,3 +469,29 @@ func driftFieldsSummary(fields []cloud.DriftField) string {
 	}
 	return "drifted: " + strings.Join(names, ", ")
 }
+
+// ReportIncomplete returns the observations the scan behind a saved report could
+// not make.
+//
+// Every envelope this package normalizes carries the record under the same key,
+// so one decode serves all of them and a domain added later is covered by
+// writing its envelope rather than by editing this.
+//
+// It exists because a comparison is only as complete as its inputs, and the two
+// failures are not symmetric. A finding present in the baseline and absent from a
+// current run that could not read that part of the account is RESOLVED by
+// arithmetic and unobserved in fact, and RESOLVED is the answer an operator acts
+// on by closing the ticket.
+//
+// A report with no such key returns nothing, which is the same answer as a whole
+// scan: this cannot distinguish them, and the caller says so rather than
+// implying the inputs were complete.
+func ReportIncomplete(data []byte) []string {
+	var envelope struct {
+		Incomplete []string `json:"incomplete"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil
+	}
+	return envelope.Incomplete
+}

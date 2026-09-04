@@ -79,6 +79,12 @@ type compareReport struct {
 	Resolved  []CompareFindingJSONType `json:"resolved"`
 	Unchanged []CompareFindingJSONType `json:"unchanged"`
 	Summary   compareSummary           `json:"summary"`
+
+	// Incomplete is what the scans behind the two inputs could not read. A
+	// comparison over a run denied part of an account renders exactly like one
+	// over the whole of it, and the arithmetic answer for a finding that was not
+	// observed is RESOLVED — which is the answer an operator acts on.
+	Incomplete []string `json:"incomplete"`
 }
 
 // CompareFindingJSONType is a finding for JSON comparison output.
@@ -98,7 +104,7 @@ type compareSummary struct {
 }
 
 // WriteCompare marshals comparison results as JSON to w.
-func WriteCompare(w io.Writer, newF, resolved, unchanged []CompareFindingJSONType) error {
+func WriteCompare(w io.Writer, newF, resolved, unchanged []CompareFindingJSONType, incomplete []string) error {
 	return writeJSON(w, compareReport{
 		New:       newF,
 		Resolved:  resolved,
@@ -108,6 +114,7 @@ func WriteCompare(w io.Writer, newF, resolved, unchanged []CompareFindingJSONTyp
 			Resolved:  len(resolved),
 			Unchanged: len(unchanged),
 		},
+		Incomplete: observed(incomplete),
 	})
 }
 
