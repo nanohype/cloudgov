@@ -156,3 +156,80 @@ func assertControlFails(t *testing.T, input compliance.InputFindings, controlID 
 	}
 	t.Errorf("control %s is not in the SOC 2 report", controlID)
 }
+
+// Every loader returns the report's unread record alongside its findings, and a
+// call site that discards it with `_` costs nothing that statement coverage can
+// see: replacing all five returns with `report.Findings, nil, nil` leaves this
+// package's statement coverage untouched, while a benchmark evaluated over a scan
+// denied half an account renders exactly like one evaluated over the whole of it.
+// That mutation fails here.
+//
+// The record is the second return because it is not a finding: findings are
+// severity-filtered and this has to survive every filter. So it is asserted
+// here, per loader, in both directions — carried when the report has one, and
+// empty when it does not.
+func TestEveryLoaderCarriesTheReportsUnreadRecord(t *testing.T) {
+	const unread = "describe regions: AccessDenied; scanned us-east-1 only"
+
+	loaders := map[string]struct {
+		write func(*bytes.Buffer, []string) error
+		load  func(string) ([]string, error)
+	}{
+		"iam": {
+			write: func(b *bytes.Buffer, inc []string) error {
+				return output.WriteIAM(b, []cloud.Finding{{Severity: cloud.SeverityHigh, Type: cloud.FindingAdminAccess, Provider: "aws"}}, 1, 1, nil, inc)
+			},
+			load: func(p string) ([]string, error) { _, inc, err := compliance.LoadIAMReport(p); return inc, err },
+		},
+		"storage": {
+			write: func(b *bytes.Buffer, inc []string) error {
+				return output.WriteStorage(b, []cloud.BucketFinding{{Severity: cloud.SeverityHigh, Type: cloud.BucketUnencrypted, Provider: "aws", Bucket: "b"}}, inc)
+			},
+			load: func(p string) ([]string, error) { _, inc, err := compliance.LoadStorageReport(p); return inc, err },
+		},
+		"network": {
+			write: func(b *bytes.Buffer, inc []string) error {
+				return output.WriteNetwork(b, []cloud.NetworkFinding{{Severity: cloud.SeverityHigh, Type: cloud.NetworkAdminPortOpen, Provider: "aws", Resource: "sg-1"}}, inc)
+			},
+			load: func(p string) ([]string, error) { _, inc, err := compliance.LoadNetworkReport(p); return inc, err },
+		},
+		"certs": {
+			write: func(b *bytes.Buffer, inc []string) error {
+				return output.WriteCerts(b, []cloud.CertFinding{{Severity: cloud.SeverityHigh, Provider: "aws", Domain: "example.test", ExpiresAt: time.Now()}}, inc)
+			},
+			load: func(p string) ([]string, error) { _, inc, err := compliance.LoadCertsReport(p); return inc, err },
+		},
+		"tags": {
+			write: func(b *bytes.Buffer, inc []string) error {
+				return output.WriteTags(b, []cloud.TagFinding{{Severity: cloud.SeverityMedium, Provider: "aws", ResourceID: "r", MissingTags: []string{"Environment"}}}, inc)
+			},
+			load: func(p string) ([]string, error) { _, inc, err := compliance.LoadTagsReport(p); return inc, err },
+		},
+	}
+
+	for domain, l := range loaders {
+		t.Run(domain+"/carries an unread record", func(t *testing.T) {
+			path := writeReport(t, domain+".json", func(b *bytes.Buffer) error { return l.write(b, []string{unread}) })
+			got, err := l.load(path)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if len(got) != 1 || got[0] != unread {
+				t.Errorf("the %s loader dropped the report's unread record: got %v, want [%q]", domain, got, unread)
+			}
+		})
+
+		t.Run(domain+"/reports a whole scan as whole", func(t *testing.T) {
+			// The positive control on the assertion above: a loader returning a
+			// constant non-empty record would pass it and fail here.
+			path := writeReport(t, domain+"-clean.json", func(b *bytes.Buffer) error { return l.write(b, nil) })
+			got, err := l.load(path)
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if len(got) != 0 {
+				t.Errorf("the %s loader invented an unread record for a whole scan: %v", domain, got)
+			}
+		})
+	}
+}

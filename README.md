@@ -1033,9 +1033,15 @@ did not answer, and `compliance` carries forward whatever the scan reports it
 loads could not read, because a control evaluated over a partial account is not
 an evaluated control.
 
-Commands that read no cloud account (`compare`, `report`, `baseline`,
-`remediate`) exit `0`/`1`/`2` only, as does `k8s rbac` — its two reads return an
-error rather than a short list, so there is no partial state to report.
+Commands that read no cloud account (`report`, `baseline`, `remediate`) exit
+`0`/`1`/`2` only, as does `k8s rbac` — its two reads return an error rather than
+a short list, so there is no partial state to report.
+
+`compare` reads no account either and still honours the contract, because its
+inputs carry one. A finding the baseline saw and the current run could not read
+is `RESOLVED` by arithmetic and unobserved in fact, and `RESOLVED` is the answer
+an operator acts on by closing the ticket. Both inputs' `incomplete` arrays travel
+with the result, labelled by which side they came from.
 
 ---
 
