@@ -157,13 +157,12 @@ func assertControlFails(t *testing.T, input compliance.InputFindings, controlID 
 	t.Errorf("control %s is not in the SOC 2 report", controlID)
 }
 
-// Every loader returns the report's unread record alongside its findings, and
-// before this test every call site discarded it with `_`. That was the gap
-// statement coverage cannot see: replacing all five returns with
-// `report.Findings, nil, nil` left this package at 100% and the whole module's
-// suite green, while a benchmark evaluated over a scan that was denied half an
-// account rendered exactly like one evaluated over the whole of it. This test is
-// what closes it, so that mutation now fails here.
+// Every loader returns the report's unread record alongside its findings, and a
+// call site that discards it with `_` costs nothing that statement coverage can
+// see: replacing all five returns with `report.Findings, nil, nil` leaves this
+// package's statement coverage untouched, while a benchmark evaluated over a scan
+// denied half an account renders exactly like one evaluated over the whole of it.
+// That mutation fails here.
 //
 // The record is the second return because it is not a finding: findings are
 // severity-filtered and this has to survive every filter. So it is asserted

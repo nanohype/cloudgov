@@ -33,9 +33,10 @@ repo_root="$(pwd)"
 require_tools grep awk go || exit 2
 
 # The org floor and where it comes from, named once for the gate and its
-# messages. .coverage-floors states it in prose independently — nothing there is
-# derived from this — so the two can disagree, and the self-test below is what
-# holds the value rather than this declaration.
+# messages — and for those only. .coverage-floors and CONTRIBUTING.md each state
+# 75 in prose, deriving it from nothing, so three places can disagree and a
+# change here leaves two of them asserting the old value. The self-test below is
+# what holds this one; the other two are held by reading.
 #
 # The standard publishes four floors — branches 60, lines 75, functions 75,
 # statements 75. `go test -cover` reports statements and nothing else, so this is
@@ -336,8 +337,7 @@ self_test() {
 
   # Exactly at it: "measures AT or above" is the word the comparison implements,
   # so a package measuring exactly the org floor must be required to carry it.
-  # Relaxing >= to > makes this case pass silently, which is the mutation this
-  # gate was returned for.
+  # Relaxing >= to > makes this case pass silently.
   if evaluate_floors \
     'ok  	'"${module}"'/internal/exactly	0.1s	coverage: 75.0% of statements' \
     'internal/exactly/d.go 75.0 0' >/dev/null <<-'EOF'
@@ -345,6 +345,21 @@ self_test() {
 	EOF
   then
     self_test_die "accepted a package measuring exactly the org floor with a floor below it; either the constant has moved up or the comparison is > rather than >="
+  fi
+
+  # The org-floor rule is confined to package floors, and this case is what
+  # confines it. A total and a file floor are different claims from a package's:
+  # the total is the number no package floor can constrain, and a file floor is
+  # pinned at what that one file must hold rather than ratcheted toward a package
+  # standard. Both stay at their own number even when what they measure sits at
+  # or above the org floor. Drop the kind guard and this case is refused.
+  if ! evaluate_floors "$clean_out" "$clean_files" 80 >/dev/null <<-'EOF'
+	total   coverage             60
+	package internal/alpha       85
+	file    internal/alpha/a.go  60
+	EOF
+  then
+    self_test_die "held a total or a file floor to the org floor; that rule is for package floors"
   fi
 
   # A floor naming a package with no coverage data — a stale or typo'd path,
@@ -422,7 +437,7 @@ self_test() {
     self_test_die "accepted a total below its floor while every package met its own"
   fi
 
-  echo "coverage self-test passed: the gate rejects below-floor, stale-path, unfloored and malformed entries, and a package that has met the org floor whose floor sits below it — while still accepting one under the org floor that meets its own ratchet. The org floor itself is pinned from both sides: 74.9 is held to its own ratchet and 75.0 is not."
+  echo "coverage self-test passed: the gate rejects below-floor, stale-path, unfloored and malformed entries, and a package that has met the org floor whose floor sits below it — while still accepting one under the org floor that meets its own ratchet. The org floor itself is pinned from both sides: 74.9 is held to its own ratchet and 75.0 is not. That rule reaches package floors only; a total and a file floor stay at their own number."
 }
 
 self_test
