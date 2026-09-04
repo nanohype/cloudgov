@@ -14,8 +14,17 @@
 # comfortably above 90 while a branch in the scanner that decides whether a
 # credential is reported at all goes untested.
 #
-# The org floor is 75 (nanohype/standards/testing-rubric.json). Packages below it
-# carry the measured number and the reason.
+# The org floor is 75 (nanohype/standards/testing-rubric.json), and the gate
+# asserts it rather than naming it: a package that MEASURES at or above 75 must
+# CARRY a floor at or above 75, so a package that has met the standard cannot
+# drift back under it with a green run. The population is read from the
+# measurement, so the rule needs no list here and a package crossing 75 is held
+# to it on the run that crosses.
+#
+# Packages still under it are held to their own ratchet and named below with the
+# reason. The standard's other three floors — branches, lines, functions — are
+# not asserted anywhere, because `go test -cover` reports statements and nothing
+# else; CONTRIBUTING.md records that rather than leaving it to look enforced.
 
 # ── security-critical: per-file 100%, no ratchet ──────────────────────────────
 # The secret scanner decides whether an exposed credential is reported at all. A
@@ -45,9 +54,13 @@ file    cmd/mcp_cluster.go               100
 
 # ── packages at or above the org floor ────────────────────────────────────────
 #
-# A floor below 75 does not belong under this heading. internal/audit and
-# internal/output are listed with the section below for that reason: the heading
-# is a claim about the entries under it, and two of them contradicted it.
+# A package reaches this section by measuring at or above the org floor.
+#
+# The run holds no property of this SECTION — nothing binds a floor line to a
+# heading, so a line filed here with a lower floor is a filing error the gate
+# cannot see. What the run holds is the property the heading is a consequence of:
+# a package MEASURING at or above 75 must carry a floor at or above it, wherever
+# its line sits. The heading is where to read them.
 package internal/certs              90
 package internal/cloud              78    # capability interfaces, shared types and the tag policy
 package internal/compliance         97
@@ -67,25 +80,35 @@ package internal/quota              95
 package internal/secrets            93
 package internal/storage            90
 package internal/tags               94
+package internal/audit              75    # the audit runner and its report shape
+package internal/output             75    # renderers, JSON envelopes and SARIF
+package internal/baseline           75    # the baseline store and its comparison
 
 # ── the total, ratcheted ──────────────────────────────────────────────────────
 #
-# Nothing here compared any number to the org floor: the per-package floors are
-# each set below it, so every one could be met while the tree as a whole sat
-# under 75. The gate printed the total and gated on nothing.
+# The whole-tree number, which no per-package floor constrains: every package can
+# sit above its own floor while the total sits under the org standard's, because
+# each package floor is set from its own measurement.
 #
-# This does not assert 75 — the tree does not meet it, and a floor set to a
-# number the tree fails is a gate that is red on arrival and gets removed. It
-# asserts the total cannot REGRESS, and names the org floor it has not reached.
-total   coverage                    65    # the org floor is 75; the gate prints the measured total every run, and the toolchain's statement counting moves it
+# This one is a ratchet, not the standard, and it is a loose one. The tree does
+# not meet 75 here, and a floor set to a number the tree fails is a gate that is
+# red on arrival and gets removed — so this sits below the measurement, and the
+# slack is real: the tree can shed statement coverage down to this number with
+# every gate green. The gate prints the measured total every run, and the
+# toolchain's statement counting moves it, which is why the slack is not zero.
+#
+# What holds the direction is the per-package rule above rather than this line:
+# every package that reaches 75 is pinned there, so the gap closes package by
+# package rather than waiting on one number nobody can move.
+total   coverage                    69    # the org floor is 75
 
 # ── packages below the org floor ──────────────────────────────────────────────
-package internal/audit              73    # 74.2 measured
-package internal/output             73    # 77.0 measured; floored below the org floor
-# These are the repo's real coverage debt. Each carries what it measures, and
-# raising one is a change to this file, not permission to stay.
-package internal/baseline           72    # baseline store + comparison
+#
+# The repo's real coverage debt. Each carries the reason it is here rather than a
+# number it measured: a measurement written down is true when written and nothing
+# keeps it true, and the gate prints the live one on every run. Raising one of
+# these is a change to this file, and crossing 75 makes it a required change.
 package internal/compare            64    # report normalization
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports
-package cmd                         17    # handlers resolve providers and render; the logic they call is floored above
+package cmd                         26    # runCompliance and runCompare are driven directly; the other report-reading handlers have the same seam and are not driven, and the ones that resolve a provider have no seam at all — the logic they call is floored above

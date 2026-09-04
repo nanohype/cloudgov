@@ -83,6 +83,20 @@ func runCompare(_ *cobra.Command, _ []string) error {
 
 	result := compare.Diff(baselineFindings, currentFindings)
 
+	// A comparison is only as complete as its inputs. A finding the baseline saw
+	// and the current run could not read is RESOLVED by arithmetic and unobserved
+	// in fact, and RESOLVED is the answer an operator acts on by closing the
+	// ticket — so both inputs' records travel with the result, labelled by which
+	// side they came from.
+	var incomplete []string
+	for _, entry := range compare.ReportIncomplete(baselineData) {
+		incomplete = append(incomplete, "baseline report: "+entry)
+	}
+	for _, entry := range compare.ReportIncomplete(currentData) {
+		incomplete = append(incomplete, "current report: "+entry)
+	}
+	gateIncomplete(incomplete)
+
 	w := os.Stdout
 	if compareOutputFile != "" {
 		f, err := os.Create(compareOutputFile)
@@ -95,22 +109,23 @@ func runCompare(_ *cobra.Command, _ []string) error {
 
 	switch compareFormat {
 	case "json":
-		return writeCompareJSON(w, result)
+		return writeCompareJSON(w, result, incomplete)
 	default:
 		if !quiet {
 			fmt.Fprintf(os.Stderr, "\ncomparing %d baseline findings against %d current findings\n\n",
 				len(baselineFindings), len(currentFindings))
 		}
 		writeCompareTable(w, result)
+		output.IncompleteNote(w, incomplete)
 	}
 	return nil
 }
 
-func writeCompareJSON(w *os.File, result compare.DiffResult) error {
+func writeCompareJSON(w *os.File, result compare.DiffResult, incomplete []string) error {
 	newF := toJSONFindings(result.New)
 	resolved := toJSONFindings(result.Resolved)
 	unchanged := toJSONFindings(result.Unchanged)
-	return output.WriteCompare(w, newF, resolved, unchanged)
+	return output.WriteCompare(w, newF, resolved, unchanged, incomplete)
 }
 
 func writeCompareTable(w *os.File, result compare.DiffResult) {

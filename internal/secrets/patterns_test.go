@@ -87,6 +87,14 @@ func TestRedact(t *testing.T) {
 		{"abc", "****"},
 		{"", "****"},
 		{"abcdef", "abcd****"},
+		// The bound itself. A four-character secret is the longest value the
+		// prefix would reveal whole, so `<=` and `<` differ on exactly this input
+		// and on nothing else — and with `<` the function returns the secret in
+		// cleartext. Statement coverage cannot see the difference: both operators
+		// execute the same two statements, and the file is pinned at 100 for
+		// deciding whether an exposed credential is reported at all.
+		{"abcd", "****"},
+		{"abcde", "abcd****"},
 	}
 	for _, tt := range tests {
 		got := Redact(tt.input)

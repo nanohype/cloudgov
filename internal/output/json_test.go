@@ -533,6 +533,7 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		"iam":       func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
 		"k8s":       func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
 		"repo":      func(w io.Writer) error { return WriteRepo(w, nil, nil) },
+		"compare":   func(w io.Writer) error { return WriteCompare(w, nil, nil, nil, nil) },
 	}
 
 	for domain, write := range writers {
