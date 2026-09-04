@@ -3,10 +3,11 @@ package storage
 import (
 	"fmt"
 	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
+	"github.com/nanohype/cloudgov/internal/fix"
 )
 
 // WriteFixScripts generates one shell remediation script per provider and writes them
@@ -25,10 +26,28 @@ func WriteFixScripts(findings []cloud.BucketFinding, outDir string) ([]string, e
 		byProvider[f.Provider] = append(byProvider[f.Provider], f)
 	}
 
+	// Sorted rather than ranged over the map: the provider decides a filename, so
+	// map order decides which refusal an operator sees and in what order the
+	// written files are reported. Neither should differ between two runs over the
+	// same report.
+	providers := make([]string, 0, len(byProvider))
+	for provider := range byProvider {
+		providers = append(providers, provider)
+	}
+	sort.Strings(providers)
+
 	var written []string
-	for provider, pfindings := range byProvider {
-		name := filepath.Join(outDir, fmt.Sprintf("fix-%s.sh", provider))
-		if err := writeProviderScript(name, provider, pfindings); err != nil {
+	for _, provider := range providers {
+		if err := fix.NameComponent("provider", provider); err != nil {
+			return written, err
+		}
+		// Reachable on a valid provider: PathUnder also refuses a name that is
+		// already a symlink, which has nothing to do with the check above.
+		name, err := fix.PathUnder(outDir, fmt.Sprintf("fix-%s.sh", provider))
+		if err != nil {
+			return written, err
+		}
+		if err := writeProviderScript(name, provider, byProvider[provider]); err != nil {
 			return written, fmt.Errorf("write %s: %w", name, err)
 		}
 		written = append(written, name)
@@ -43,17 +62,17 @@ func writeProviderScript(path, provider string, findings []cloud.BucketFinding) 
 	sb.WriteString("set -euo pipefail\n")
 	sb.WriteString("\n")
 	sb.WriteString("# cloudgov storage audit --fix\n")
-	fmt.Fprintf(&sb, "# Provider: %s\n", provider)
+	fmt.Fprintf(&sb, "# Provider: %s\n", fix.CommentText(provider))
 	fmt.Fprintf(&sb, "# Findings: %d\n", len(findings))
 	sb.WriteString("\n")
 
 	for _, f := range findings {
-		fmt.Fprintf(&sb, "# [%s] %s — %s", f.Severity, f.Type, f.Bucket)
+		fmt.Fprintf(&sb, "# [%s] %s — %s", fix.CommentText(string(f.Severity)), fix.CommentText(string(f.Type)), fix.CommentText(f.Bucket))
 		if f.Region != "" {
-			fmt.Fprintf(&sb, " (%s)", f.Region)
+			fmt.Fprintf(&sb, " (%s)", fix.CommentText(f.Region))
 		}
 		sb.WriteString("\n")
-		fmt.Fprintf(&sb, "# %s\n", f.Detail)
+		fmt.Fprintf(&sb, "# %s\n", fix.CommentText(f.Detail))
 		sb.WriteString(f.Remediation)
 		sb.WriteString("\n\n")
 	}

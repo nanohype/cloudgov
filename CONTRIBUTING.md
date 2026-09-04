@@ -491,9 +491,55 @@ waiting on a single number nobody can move alone.
 - All cloud API calls must accept and respect a `context.Context`.
 - No global state. No `init()` side effects beyond cobra command registration.
 - Use the import aliases from `CLAUDE.md` consistently.
-- Table output uses lipgloss + tabwriter. No interactive TUI (no bubbletea).
-- Do not add comments or docstrings to functions you didn't modify.
-- Do not add features, flags, or options beyond what is directly required.
+- Compose the path of any file you write with `fix.PathUnder`, not
+  `filepath.Join`. Generated filenames are built from values read out of a saved
+  report, and `remediate` reads reports an operator received rather than ones
+  cloudgov wrote — so a bare join lets the report choose where an executable
+  lands. `fix.NameComponent` refuses such a value at the read too, so the error
+  names the report field.
+- Render any report value you put in a generated script's comment banner with
+  `fix.CommentText`. Containing the path is half of it: the same report fills
+  those lines, and a newline in one of them ends the comment and starts a line of
+  its own in a file written `0700`.
+
+### Where the containment claim is held
+
+"No remediation writer places an entry outside the directory it was given" is a
+claim about where a file ends up, so it is held by running rather than by
+reading. `internal/integration/containment_behaviour_test.go` drives every
+remediation writer against a report whose every caller-controlled string names an
+escape, in a sandbox it makes the working directory, and walks the filesystem
+afterwards. A writer that escapes fails there however it wrote — through a
+renamed variable, a rename whose destination nobody classified, a helper in
+another package, a function value, or a subprocess.
+
+Its population is **every exported name a caller can invoke** in
+`internal/{storage,network,orphans,fix}` — a function, a method, or a
+package-level variable holding a function — and no predicate decides which of
+them writes. Each one either has a driver or a sentence in `notAWriter` saying
+why it creates no file, and one in neither fails
+`TestEveryExportedCallableIsObservedOrExplained`. A predicate here would be a
+reading choosing what gets observed, which is how a writer escaped once already:
+the gate matched a body calling `os.MkdirAll`, five writers repeat that call, and
+factoring it into a shared helper produced a sixth writer the gate never saw.
+Moving a writer onto a receiver and binding one to a variable are that same move
+in a different spelling, so the walk takes all three. Exported variables are
+taken whatever their type, because `var Write = os.WriteFile` binds a function
+through an expression no syntax tree can classify; a variable holding no function
+costs one sentence in `notAWriter`, and that is the fail-safe direction.
+
+What it cannot do is prove the property for inputs it does not try. It runs the
+escapes a report can name, which is the surface the defect came in through; it
+says nothing about one a writer invents from a value no report supplies.
+
+`internal/fix/containment_contract_test.go` holds the one part that genuinely is
+about the source: no file imports `io/ioutil`, whose writers no behavioural
+driver was written for.
+
+When you add a writer, add its driver. `fix.PathUnder` and `fix.NameComponent`
+are still how you compose a path — they are what makes the behavioural gate pass
+— and `fix.CommentText` is how a report value goes into a generated script's
+comment banner.
 
 ## Submitting changes
 

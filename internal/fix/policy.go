@@ -3,7 +3,6 @@ package fix
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
@@ -18,7 +17,16 @@ func WriteRawPolicies(policies map[string]cloud.Policy, dir string) error {
 			continue
 		}
 		ext := ".json"
-		filename := filepath.Join(dir, slug(principalID)+ext)
+		s := slug(principalID)
+		if err := NameComponent("principal", s); err != nil {
+			return err
+		}
+		// Reachable on a valid principal: PathUnder also refuses a name that is
+		// already a symlink, which has nothing to do with the check above.
+		filename, err := PathUnder(dir, s+ext)
+		if err != nil {
+			return err
+		}
 		if err := os.WriteFile(filename, pol.Raw, 0o600); err != nil {
 			return fmt.Errorf("write policy %s: %w", principalID, err)
 		}

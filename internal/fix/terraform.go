@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
@@ -51,7 +50,15 @@ func GenerateTerraform(findings []cloud.Finding, policies map[string]cloud.Polic
 
 func writePrincipalTF(principal cloud.Principal, policy cloud.Policy, dir string) error {
 	s := slug(principal.Name)
-	filename := filepath.Join(dir, "minimal_"+s+".tf")
+	if err := NameComponent("principal", s); err != nil {
+		return err
+	}
+	// Reachable on a valid principal: PathUnder also refuses a name that is
+	// already a symlink, which has nothing to do with the check above.
+	filename, err := PathUnder(dir, "minimal_"+s+".tf")
+	if err != nil {
+		return err
+	}
 
 	var content string
 	switch principal.Provider {
@@ -99,8 +106,31 @@ POLICY
 `, s, strings.ReplaceAll(name, "_", "-"), body)
 }
 
+// slug renders an arbitrary principal name as one filename element.
+//
+// The named substitutions are kept so existing filenames do not move, and a
+// sweep against what NameComponent accepts is added behind them. A replacer
+// alone names the characters someone thought of, and this one had already let a
+// backslash and a colon through — a backslash being a separator by this
+// package's own definition, and a colon appearing in every principal ARN.
 func slug(name string) string {
-	return strings.NewReplacer(
+	// The named substitutions first, so the filenames this produces do not change:
+	// "@" carries meaning spelled out, and "." "-" and "/" have always collapsed
+	// to an underscore here.
+	lowered := strings.NewReplacer(
 		"/", "_", "@", "_at_", ".", "_", "-", "_", " ", "_",
 	).Replace(strings.ToLower(name))
+
+	// Then everything else outside the accepted set, which is the half a list of
+	// substitutions kept missing.
+	var b strings.Builder
+	b.Grow(len(lowered))
+	for _, r := range lowered {
+		if allowedInAName(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteRune('_')
+	}
+	return b.String()
 }
