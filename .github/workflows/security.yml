@@ -95,7 +95,7 @@ jobs:
         # explains, and a network failure becomes a build failure.
         run: |
           # renovate: datasource=pypi depName=zizmor
-          pipx install zizmor==1.29.0
+          pipx install zizmor==1.30.0
           # The persona selects which audits RUN, and it is a different axis from
           # severity: the excessive-permissions audit is not executed under the
           # default persona at all, so a workflow-level `contents: write` — a
