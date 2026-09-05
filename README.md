@@ -234,6 +234,24 @@ cloudgov iam scan --concurrency 20
 
 Reads a JSON scan report and generates least-privilege Terraform policy files for each flagged principal.
 
+**It refuses a partial scan.** A report and a fix do not get the same default. An
+`iam scan` that could not see part of an account prints what it missed and leaves
+the exit code to `--fail-on`, because reporting a partial view costs an operator a
+re-read. A fix built from the same report costs them access that is in use: the
+removals are computed from the permissions the scan *observed*, so every
+permission it could not observe reads as unused. A short audit-log window is the
+same problem — a permission last used before the window looks like one never used
+at all.
+
+So `iam fix` stops when the report's `incomplete` array is non-empty, writes
+nothing, and names what was missed, what window the removals would have rested on,
+and the two ways forward. Passing `--accept-incomplete-scan` generates the fix
+anyway, and every generated file records that it was built from a partial scan —
+the caveat travels with the artifact, because a fix file is reviewed in a pull
+request by someone who never saw the command. Raw-policy output gets the caveat as
+a file beside the policies, since a JSON policy has no comment syntax and anything
+added to it stops being a policy.
+
 ```sh
 # Generate fixes for all HIGH+ findings
 cloudgov iam fix --from report.json
@@ -264,6 +282,7 @@ ls ./fixes/
 | `--out` | `./cloudgov-fixes` | Output directory for generated files |
 | `--severity` | `HIGH` | Minimum severity to generate fixes for |
 | `--profile` | (default chain) | AWS named profile to use for credentials (match the profile used for the scan) |
+| `--accept-incomplete-scan` | `false` | Generate fixes from a scan that did not see everything it was asked to; the generated files record that they were |
 
 ---
 

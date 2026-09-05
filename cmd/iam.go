@@ -46,6 +46,15 @@ var (
 	iamFixOut      string
 	iamFixSeverity string
 	iamFixProfile  string
+	// iamFixAcceptIncomplete is the operator saying, in this run, that they want
+	// a fix built from a scan that did not see everything.
+	//
+	// Its own flag rather than --fail-on. --fail-on asks what severity should
+	// make a run exit non-zero, which is a question about reporting; this answers
+	// whether a change may be generated from an unsound premise. Overloading one
+	// on the other would make an operator raising a reporting threshold silently
+	// authorise a remediation.
+	iamFixAcceptIncomplete bool
 )
 
 func init() {
@@ -62,6 +71,8 @@ func init() {
 	iamFixCmd.Flags().StringVar(&iamFixOut, "out", "./cloudgov-fixes", "output directory")
 	iamFixCmd.Flags().StringVar(&iamFixSeverity, "severity", "HIGH", severityUsage("minimum severity to generate fixes for"))
 	iamFixCmd.Flags().StringVar(&iamFixProfile, "profile", "", "AWS named profile to use for credentials (match the profile used for the scan)")
+	iamFixCmd.Flags().BoolVar(&iamFixAcceptIncomplete, "accept-incomplete-scan", false,
+		"generate fixes from a scan that did not see everything it was asked to; the generated files record that they were")
 	_ = iamFixCmd.MarkFlagRequired("from")
 
 	iamCmd.AddCommand(iamScanCmd, iamFixCmd)
@@ -160,33 +171,79 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// iamFixReport is the saved scan this command acts on.
+//
+// Incomplete and Window are read because this command acts on the report rather
+// than displaying it. A scan that could not see part of the account produces a
+// used-permission set that is short, and a fix generated from it removes access
+// on the strength of activity nobody observed. Before these two fields were read
+// the report's own record of what it could not see was discarded at the
+// unmarshal, and the fix inherited the premise without ever seeing it.
+type iamFixReport struct {
+	Findings        []cloud.Finding               `json:"findings"`
+	UsedPermissions map[string][]cloud.Permission `json:"used_permissions"`
+	Incomplete      []string                      `json:"incomplete"`
+	Window          cloud.ScanWindow              `json:"window"`
+}
+
 func runIAMFix(cmd *cobra.Command, _ []string) error {
 	fixSeverity, err := resolveSeverity(iamFixSeverity, cloud.SeverityLow)
 	if err != nil {
 		return err
 	}
-	ctx := cmd.Context()
-
 	data, err := os.ReadFile(iamFromFile)
 	if err != nil {
 		return fmt.Errorf("read report: %w", err)
 	}
 
-	type report struct {
-		Findings        []cloud.Finding               `json:"findings"`
-		UsedPermissions map[string][]cloud.Permission `json:"used_permissions"`
-	}
-	var r report
+	var r iamFixReport
 	if err := json.Unmarshal(data, &r); err != nil {
 		return fmt.Errorf("parse report: %w", err)
 	}
 
-	// Build minimal policies for each unique principal, against the same account
-	// the scan ran in (--profile, matching `iam scan`).
+	// Resolved before the decision so the decision can be made in one place, and
+	// after the report is parsed so an unreadable file fails on its own terms.
+	//
+	// Splitting resolution from the work is what lets the refusal be observed by
+	// looking at the filesystem: generateIAMFixes is reached with providers in
+	// hand, so a test can hand it working ones and watch nothing appear. A
+	// command that resolved and generated in one body could only ever be proven
+	// by its exit code, which is the fix's own account of itself.
+	ctx := cmd.Context()
 	providers, err := resolveIAMProviders(ctx, iamFixProfile)
 	if err != nil {
 		return err
 	}
+
+	return generateIAMFixes(ctx, r, providers, fix.Options{
+		OutputDir: iamFixOut,
+		Severity:  fixSeverity,
+	}, iamFixAcceptIncomplete)
+}
+
+// generateIAMFixes turns a saved report into fix files, or refuses to.
+//
+// A report and a fix do not get the same default. Reporting an incomplete scan
+// costs an operator a re-read, and gateIncomplete leaves that to --fail-on so
+// they can decide what a partial view is worth. Generating a change from one
+// costs them access that is in use: the removals are computed from the
+// permissions the scan OBSERVED, so every permission it could not observe reads
+// as unused. The asymmetry is the point, and it is why this refuses by default
+// where `iam scan` does not.
+//
+// The refusal is the first thing it does, before a directory is made or a
+// provider is called, so a run that has decided not to act leaves no trace of
+// having considered it.
+func generateIAMFixes(ctx context.Context, r iamFixReport, providers []cloud.IAMProvider, opts fix.Options, acceptIncomplete bool) error {
+	if len(r.Incomplete) > 0 && !acceptIncomplete {
+		return fmt.Errorf("%s", refuseIncompleteScan(iamFromFile, r.Incomplete, r.Window))
+	}
+
+	// Accepted, so the caveat travels with the artifact. A fix file outlives the
+	// run that produced it and is reviewed by someone who never saw the command,
+	// so a warning printed once at the terminal is gone by the time it matters.
+	opts.Incomplete = r.Incomplete
+	opts.Window = r.Window
 
 	providerMap := make(map[string]cloud.IAMProvider)
 	for _, p := range providers {
@@ -232,14 +289,9 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 	// policies produces a fix for it that is not a fix.
 	gateIncomplete(append(cloud.Incomplete(providers), unfixed...))
 
-	opts := fix.Options{
-		OutputDir: iamFixOut,
-		Severity:  fixSeverity,
-	}
-
 	switch strings.ToLower(iamFixFormat) {
 	case "json":
-		return fix.WriteRawPolicies(policies, opts.OutputDir)
+		return fix.WriteRawPolicies(policies, opts)
 	default:
 		if err := fix.GenerateTerraform(r.Findings, policies, opts); err != nil {
 			return err
@@ -249,6 +301,39 @@ func runIAMFix(cmd *cobra.Command, _ []string) error {
 		}
 	}
 	return nil
+}
+
+// refuseIncompleteScan renders why no fix was generated, and what would let one
+// be.
+//
+// It names three things, because a refusal naming none of them leaves the
+// operator with a command that merely stopped: what the scan could not see, what
+// the removals would have rested on, and the two ways forward. The window is
+// quoted from the report rather than recomputed — a fix is a claim about the same
+// period the scan claimed, and stating a different one here would be a third
+// number to disagree with.
+func refuseIncompleteScan(reportPath string, incomplete []string, window cloud.ScanWindow) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "no fix generated: %s is a partial scan, and a fix removes permissions "+
+		"the scan did not observe being used\n", reportPath)
+	fmt.Fprintf(&b, "\n%d observation(s) the scan could not make:\n", len(incomplete))
+	for _, o := range incomplete {
+		fmt.Fprintf(&b, "  - %s\n", o)
+	}
+	if window.ObservedDays > 0 {
+		fmt.Fprintf(&b, "\nthe scan covered %d day(s)", window.ObservedDays)
+		if window.Short() {
+			fmt.Fprintf(&b, " of the %d requested", window.RequestedDays)
+			if window.LimitedBy != "" {
+				fmt.Fprintf(&b, "; %s retains no more", window.LimitedBy)
+			}
+		}
+		b.WriteString(". A permission last used before that is indistinguishable from one never used.\n")
+	}
+	b.WriteString("\nEither re-run the scan so it sees what it could not — the entries above name " +
+		"what to grant or widen — or pass --accept-incomplete-scan to generate the fix anyway. " +
+		"The generated files record that they were built from a partial scan.\n")
+	return b.String()
 }
 
 // writePolicyFallbackWarnings surfaces actions the minimal-policy generator

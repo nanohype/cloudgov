@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -624,31 +625,21 @@ func commandsCallingGateIncomplete(t *testing.T) []string {
 // nothing. A denied account produced a fix set smaller than the report it came
 // from, exit 0, and no record of which principals were left out.
 //
-// Every function that resolves providers must itself reach a gate.
+// Every function that resolves providers must REACH a gate.
+//
+// Reach, not call. A handler that resolves providers and hands the work to a
+// helper in this package still owes the contract, and reading only its own body
+// would report the delegation as a violation and the helper as invisible — the
+// reading deciding what gets observed rather than the property. So the walk
+// follows calls into functions this package declares.
 func TestEveryProviderResolvingHandlerGatesOnIncomplete(t *testing.T) {
-	entries, err := os.ReadDir(".")
-	if err != nil {
-		t.Fatalf("read package dir: %v", err)
-	}
+	pkg := packageFuncs(t)
 
 	handlers := 0
 	offenders := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Body == nil {
-				continue
-			}
-			if !callsAny(fn, resolvesProviders) {
+	for _, name := range sortedKeys(pkg.byFile) {
+		for _, fn := range pkg.byFile[name] {
+			if !reaches(pkg, fn, resolvesProviders) {
 				continue
 			}
 			if reason, ok := exemptFromIncompleteGate[name]; ok {
@@ -656,12 +647,12 @@ func TestEveryProviderResolvingHandlerGatesOnIncomplete(t *testing.T) {
 				continue
 			}
 			handlers++
-			if !callsAny(fn, func(n string) bool { return n == "gateIncomplete" }) {
+			if !reaches(pkg, fn, func(n string) bool { return n == "gateIncomplete" }) {
 				offenders++
 				t.Errorf("%s:%d %s resolves cloud providers and never reaches gateIncomplete. "+
 					"Another handler in the same file doing so does not cover this one: a partial "+
 					"account produces a partial answer here and exits 0",
-					name, fset.Position(fn.Pos()).Line, fn.Name.Name)
+					name, pkg.fset.Position(fn.Pos()).Line, fn.Name.Name)
 			}
 		}
 	}
@@ -670,6 +661,104 @@ func TestEveryProviderResolvingHandlerGatesOnIncomplete(t *testing.T) {
 		t.Fatal("no provider-resolving handler found; the detector has stopped reading cmd/")
 	}
 	t.Logf("examined %d provider-resolving handler(s), %d ungated", handlers, offenders)
+}
+
+// packageSource is every function this package declares, indexed by name and by
+// the file it lives in.
+type packageSource struct {
+	fset   *token.FileSet
+	byName map[string]*ast.FuncDecl
+	byFile map[string][]*ast.FuncDecl
+}
+
+func packageFuncs(t *testing.T) packageSource {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	pkg := packageSource{
+		fset:   token.NewFileSet(),
+		byName: map[string]*ast.FuncDecl{},
+		byFile: map[string][]*ast.FuncDecl{},
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(pkg.fset, filepath.Join(".", name), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			pkg.byFile[name] = append(pkg.byFile[name], fn)
+			if fn.Recv == nil {
+				pkg.byName[fn.Name.Name] = fn
+			}
+		}
+	}
+	if len(pkg.byName) == 0 {
+		t.Fatal("no function declarations found in cmd/; the detector has stopped reading the package")
+	}
+	return pkg
+}
+
+// reaches reports whether fn calls a matching name, directly or through a
+// function this package declares.
+//
+// Bounded by a visited set, so mutual recursion terminates rather than hanging
+// the suite.
+func reaches(pkg packageSource, fn *ast.FuncDecl, match func(string) bool) bool {
+	return reachesFrom(pkg, fn, match, map[string]bool{})
+}
+
+func reachesFrom(pkg packageSource, fn *ast.FuncDecl, match func(string) bool, seen map[string]bool) bool {
+	if fn == nil || fn.Body == nil {
+		return false
+	}
+	if fn.Recv == nil {
+		if seen[fn.Name.Name] {
+			return false
+		}
+		seen[fn.Name.Name] = true
+	}
+	if callsAny(fn, match) {
+		return true
+	}
+	found := false
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		ident, ok := call.Fun.(*ast.Ident)
+		if !ok {
+			return true
+		}
+		if callee, declared := pkg.byName[ident.Name]; declared && reachesFrom(pkg, callee, match, seen) {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
+func sortedKeys(m map[string][]*ast.FuncDecl) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // resolvesProviders reports whether a called name is one of the resolvers that

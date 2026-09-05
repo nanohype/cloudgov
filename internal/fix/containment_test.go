@@ -127,7 +127,7 @@ func TestPathUnderContainsWhatNameComponentWouldHaveCaught(t *testing.T) {
 func TestGeneratorsRefuseAPrincipalThatNamesNothing(t *testing.T) {
 	t.Run("terraform", func(t *testing.T) {
 		dir := t.TempDir()
-		err := writePrincipalTF(cloud.Principal{Provider: "aws"}, cloud.Policy{}, dir)
+		err := writePrincipalTF(cloud.Principal{Provider: "aws"}, cloud.Policy{}, dir, "")
 		if err == nil {
 			t.Fatal("a principal with no name was accepted")
 		}
@@ -139,7 +139,7 @@ func TestGeneratorsRefuseAPrincipalThatNamesNothing(t *testing.T) {
 
 	t.Run("raw policy", func(t *testing.T) {
 		dir := t.TempDir()
-		err := WriteRawPolicies(map[string]cloud.Policy{"": {Raw: []byte(`{}`)}}, dir)
+		err := WriteRawPolicies(map[string]cloud.Policy{"": {Raw: []byte(`{}`)}}, Options{OutputDir: dir})
 		if err == nil {
 			t.Fatal("a policy with no principal id was accepted")
 		}
