@@ -190,7 +190,7 @@ jobs:
           # Pinned rather than left to the action's default so a lint result is a
           # function of the commit under test.
           # renovate: datasource=github-releases depName=golangci/golangci-lint
-          version: v2.13.1
+          version: v2.13.2
 
   merge-gate:
     name: merge gate
