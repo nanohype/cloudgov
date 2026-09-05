@@ -62,7 +62,7 @@ file    cmd/mcp_cluster.go               100
 # a package MEASURING at or above 75 must carry a floor at or above it, wherever
 # its line sits. The heading is where to read them.
 package internal/certs              90
-package internal/cloud              78    # capability interfaces, shared types and the tag policy
+package internal/cloud              85    # capability interfaces, shared types and the tag policy
 package internal/compliance         97
 package internal/cloud/aws          82
 package internal/cost               95

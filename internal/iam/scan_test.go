@@ -3,6 +3,7 @@ package iam
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -176,4 +177,161 @@ func TestScan_ProgressReportsAttemptsNotSuccesses(t *testing.T) {
 	if res.Scanned != 0 {
 		t.Errorf("nothing was readable, so nothing was scanned: got %d", res.Scanned)
 	}
+}
+
+// boundedProvider is a provider whose audit log retains a fixed number of days,
+// and which records the StartTime it was actually asked for.
+//
+// Recording it is the point: a provider bounded at 90 days answers a 365-day
+// request with 90 days of data and returns success, so nothing about the call
+// failing tells the scanner it got a narrower answer. The only way to know the
+// window was narrowed is to look at what was asked.
+type boundedProvider struct {
+	mockIAMProvider
+	retentionDays int
+	askedSince    time.Time
+}
+
+func (b *boundedProvider) MaxLookbackDays() int { return b.retentionDays }
+
+func (b *boundedProvider) UsedPermissions(ctx context.Context, p cloud.Principal, since time.Time) ([]cloud.Permission, error) {
+	b.askedSince = since
+	return b.mockIAMProvider.UsedPermissions(ctx, p, since)
+}
+
+// A scan never claims a window wider than the audit log behind it can answer
+// for, and the report says which window it did cover.
+//
+// The unsafe direction is the cautious one: an operator about to remove a
+// permission widens the window to be more certain, and the wider they ask the
+// further past the evidence the claim goes. A permission last used 120 days ago
+// is indistinguishable from one never used when the log holds 90, and the report
+// used to state the stronger claim with more confidence the further out it went.
+//
+// Observed rather than read: the scan is run against a provider that retains
+// less than it is asked for, and both the StartTime the provider received and
+// the text of the finding are checked against the window the report carries.
+func TestScan_NeverClaimsAWindowTheAuditLogCannotAnswer(t *testing.T) {
+	principal := cloud.Principal{ID: "AIDA1", Name: "svc-etl", Type: cloud.PrincipalRole, Provider: "mock"}
+
+	tests := []struct {
+		name          string
+		requestedDays int
+		retentionDays int
+		wantObserved  int
+		wantShort     bool
+	}{
+		{
+			name:          "asked for more than the log holds",
+			requestedDays: 365,
+			retentionDays: 90,
+			wantObserved:  90,
+			wantShort:     true,
+		},
+		{
+			name:          "asked for exactly what the log holds",
+			requestedDays: 90,
+			retentionDays: 90,
+			wantObserved:  90,
+		},
+		{
+			name:          "asked for less than the log holds",
+			requestedDays: 30,
+			retentionDays: 90,
+			wantObserved:  30,
+		},
+		{
+			// A provider declaring no bound is unbounded: retention belongs to
+			// the source, and a source that does not say has none imposed here.
+			name:          "the provider declares no bound",
+			requestedDays: 365,
+			retentionDays: 0,
+			wantObserved:  365,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &boundedProvider{
+				mockIAMProvider: mockIAMProvider{
+					principals: []cloud.Principal{principal},
+					granted:    map[string][]cloud.Permission{"svc-etl": {{Action: "s3:PutObject", Resource: "*"}}},
+					used:       map[string][]cloud.Permission{"svc-etl": {{Action: "s3:GetObject", Resource: "*"}}},
+				},
+				retentionDays: tc.retentionDays,
+			}
+
+			before := time.Now()
+			res, err := Scan(context.Background(), p, ScanOptions{
+				Days: tc.requestedDays, MinSeverity: cloud.SeverityLow, Concurrency: 1,
+			})
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+
+			if res.Window.RequestedDays != tc.requestedDays {
+				t.Errorf("window.requested_days = %d, want %d", res.Window.RequestedDays, tc.requestedDays)
+			}
+			if res.Window.ObservedDays != tc.wantObserved {
+				t.Errorf("window.observed_days = %d, want %d", res.Window.ObservedDays, tc.wantObserved)
+			}
+			if res.Window.Short() != tc.wantShort {
+				t.Errorf("window.Short() = %t, want %t", res.Window.Short(), tc.wantShort)
+			}
+
+			// What the provider was actually asked for, which is the thing the
+			// report is a claim about. A window field that says 90 while the
+			// query reached back 365 would be a second wrong number rather than
+			// a fix.
+			askedDays := int(before.Sub(p.askedSince).Hours()/24 + 0.5)
+			if askedDays != tc.wantObserved {
+				t.Errorf("the provider was queried from %d day(s) ago; the report says %d were covered",
+					askedDays, res.Window.ObservedDays)
+			}
+
+			// Every finding that CLAIMS non-use states the covered window, never
+			// the requested one. This is the assertion the branch exists for: an
+			// operator reads the sentence, not the field.
+			//
+			// The population is the findings whose evidence is the audit log —
+			// "not used in N days" and "no activity in N days". A wildcard-resource
+			// or admin-access finding rests on the granted policy and makes no
+			// claim about a period, so requiring a window in its prose would be
+			// asserting one where none belongs.
+			var windowClaims int
+			for _, f := range res.Findings {
+				if f.Type != cloud.FindingUnusedPermission && f.Type != cloud.FindingStalePrincipal {
+					continue
+				}
+				windowClaims++
+				if !strings.Contains(f.Detail, itoaTest(tc.wantObserved)) {
+					t.Errorf("finding detail %q does not state the covered window of %d days",
+						f.Detail, tc.wantObserved)
+				}
+				if tc.wantShort && strings.Contains(f.Detail, "the last "+itoaTest(tc.requestedDays)+" days") {
+					t.Errorf("finding detail %q asserts the requested window over a scan that covered %d days",
+						f.Detail, tc.wantObserved)
+				}
+			}
+			if windowClaims == 0 {
+				t.Fatal("the scan produced no finding that claims a window, so nothing above examined any prose")
+			}
+
+			// A short window is an observation the scan was asked to make and
+			// could not, so it joins the unread record as well as the field.
+			var noted bool
+			for _, u := range res.Incomplete {
+				if strings.Contains(u, "audit-log lookback") {
+					noted = true
+				}
+			}
+			if noted != tc.wantShort {
+				t.Errorf("short window recorded as unread = %t, want %t: %v", noted, tc.wantShort, res.Incomplete)
+			}
+		})
+	}
+}
+
+func itoaTest(n int) string {
+	return strconv.Itoa(n)
 }

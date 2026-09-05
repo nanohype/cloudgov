@@ -57,7 +57,7 @@ func TestAnalyze_AdminAction(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.action, func(t *testing.T) {
 			granted := []cloud.Permission{perm(tc.action, "arn:aws:s3:::bucket")}
-			findings := analyze(p, granted, nil, 30)
+			findings := analyze(p, granted, nil, fullWindow(30))
 			if !containsType(findings, cloud.FindingAdminAccess) {
 				t.Errorf("action %q: expected FindingAdminAccess", tc.action)
 			}
@@ -74,7 +74,7 @@ func TestAnalyze_AdminSkipsOtherChecks(t *testing.T) {
 	meta := map[string]string{"account_id": "111111111111"}
 	p := makePrincipal("u1", "admin-role", "aws", meta)
 	granted := []cloud.Permission{perm("*", "arn:aws:s3:us-east-1:999999999999:bucket")}
-	findings := analyze(p, granted, nil, 30)
+	findings := analyze(p, granted, nil, fullWindow(30))
 
 	if containsType(findings, cloud.FindingWildcardResource) {
 		t.Error("admin action should not also produce WildcardResource finding")
@@ -91,7 +91,7 @@ func TestAnalyze_WildcardResource(t *testing.T) {
 	p := makePrincipal("u1", "test-user", "aws", nil)
 	granted := []cloud.Permission{perm("s3:GetObject", "*")}
 	used := []cloud.Permission{perm("s3:GetObject", "*")}
-	findings := analyze(p, granted, used, 30)
+	findings := analyze(p, granted, used, fullWindow(30))
 
 	if !containsType(findings, cloud.FindingWildcardResource) {
 		t.Errorf("expected FindingWildcardResource, got %v", findings)
@@ -113,7 +113,7 @@ func TestAnalyze_UnusedPermission(t *testing.T) {
 		perm("s3:PutObject", "arn:aws:s3:::bucket/*"),
 	}
 	used := []cloud.Permission{perm("s3:GetObject", "arn:aws:s3:::bucket/*")}
-	findings := analyze(p, granted, used, 30)
+	findings := analyze(p, granted, used, fullWindow(30))
 
 	if !containsType(findings, cloud.FindingUnusedPermission) {
 		t.Errorf("expected FindingUnusedPermission, got %v", findings)
@@ -136,7 +136,7 @@ func TestAnalyze_UnusedPermission(t *testing.T) {
 func TestAnalyze_NoUnusedWhenUsedIsEmpty(t *testing.T) {
 	p := makePrincipal("u1", "idle-user", "aws", nil)
 	granted := []cloud.Permission{perm("s3:GetObject", "arn:aws:s3:::bucket/*")}
-	findings := analyze(p, granted, nil, 30)
+	findings := analyze(p, granted, nil, fullWindow(30))
 
 	if containsType(findings, cloud.FindingUnusedPermission) {
 		t.Error("should not emit UnusedPermission when used list is empty")
@@ -150,7 +150,7 @@ func TestAnalyze_UsedWildcardMatchesSpecificGrant(t *testing.T) {
 	p := makePrincipal("u1", "test-user", "aws", nil)
 	granted := []cloud.Permission{perm("s3:GetObject", "arn:aws:s3:::bucket/*")}
 	used := []cloud.Permission{perm("s3:GetObject", "*")}
-	findings := analyze(p, granted, used, 30)
+	findings := analyze(p, granted, used, fullWindow(30))
 
 	if containsType(findings, cloud.FindingUnusedPermission) {
 		t.Error("wildcard usage should satisfy specific resource grant check")
@@ -160,7 +160,7 @@ func TestAnalyze_UsedWildcardMatchesSpecificGrant(t *testing.T) {
 func TestAnalyze_StalePrincipal(t *testing.T) {
 	p := makePrincipal("u1", "stale-role", "aws", nil)
 	granted := []cloud.Permission{perm("ec2:DescribeInstances", "arn:aws:ec2:us-east-1:*:instance/*")}
-	findings := analyze(p, granted, []cloud.Permission{}, 90)
+	findings := analyze(p, granted, []cloud.Permission{}, fullWindow(90))
 
 	if !containsType(findings, cloud.FindingStalePrincipal) {
 		t.Errorf("expected FindingStalePrincipal, got %v", findings)
@@ -179,7 +179,7 @@ func TestAnalyze_StalePrincipal(t *testing.T) {
 
 func TestAnalyze_NoStalePrincipalWhenGrantedEmpty(t *testing.T) {
 	p := makePrincipal("u1", "empty-user", "aws", nil)
-	findings := analyze(p, []cloud.Permission{}, []cloud.Permission{}, 30)
+	findings := analyze(p, []cloud.Permission{}, []cloud.Permission{}, fullWindow(30))
 	if len(findings) != 0 {
 		t.Errorf("expected no findings for principal with no grants, got %v", findings)
 	}
@@ -205,7 +205,7 @@ func TestAnalyze_CrossAccountAccess(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			granted := []cloud.Permission{perm("s3:GetObject", tc.resource)}
 			used := []cloud.Permission{perm("s3:GetObject", tc.resource)}
-			findings := analyze(p, granted, used, 30)
+			findings := analyze(p, granted, used, fullWindow(30))
 			got := containsType(findings, cloud.FindingCrossAccountAccess)
 			if got != tc.wantFlag {
 				t.Errorf("resource %q: cross-account flag = %v, want %v", tc.resource, got, tc.wantFlag)
@@ -218,7 +218,7 @@ func TestAnalyze_CrossAccountRequiresAccountID(t *testing.T) {
 	p := makePrincipal("u1", "no-meta-user", "aws", nil)
 	granted := []cloud.Permission{perm("s3:GetObject", "arn:aws:s3:us-east-1:999999999999:bucket")}
 	used := []cloud.Permission{perm("s3:GetObject", "arn:aws:s3:us-east-1:999999999999:bucket")}
-	findings := analyze(p, granted, used, 30)
+	findings := analyze(p, granted, used, fullWindow(30))
 	if containsType(findings, cloud.FindingCrossAccountAccess) {
 		t.Error("cross-account check requires account_id metadata; should not flag without it")
 	}
@@ -231,7 +231,7 @@ func TestAnalyze_Dedup(t *testing.T) {
 		perm("s3:GetObject", "*"),
 	}
 	used := []cloud.Permission{perm("s3:GetObject", "*")}
-	findings := analyze(p, granted, used, 30)
+	findings := analyze(p, granted, used, fullWindow(30))
 
 	if n := countType(findings, cloud.FindingWildcardResource); n != 1 {
 		t.Errorf("expected 1 WildcardResource finding after dedup, got %d", n)
@@ -247,7 +247,7 @@ func TestAnalyze_MultipleFindings(t *testing.T) {
 		perm("s3:DeleteObject", "arn:aws:s3:us-east-1:222222222222:bucket"),
 	}
 	used := []cloud.Permission{perm("s3:GetObject", "*")}
-	findings := analyze(p, granted, used, 30)
+	findings := analyze(p, granted, used, fullWindow(30))
 
 	for _, wantType := range []cloud.FindingType{
 		cloud.FindingWildcardResource,
@@ -366,4 +366,11 @@ func TestDedupFindings_DifferentPrincipals(t *testing.T) {
 	if len(deduped) != 2 {
 		t.Errorf("expected 2 findings for different principals, got %d", len(deduped))
 	}
+}
+
+// fullWindow is a window the audit log covered in full: what a scan reports when
+// nothing bounded it. Cases that care about a SHORT window build one explicitly,
+// so a fixture cannot make the covered case and the clamped case look alike.
+func fullWindow(days int) cloud.ScanWindow {
+	return cloud.ScanWindow{RequestedDays: days, ObservedDays: days}
 }

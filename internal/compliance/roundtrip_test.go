@@ -124,7 +124,7 @@ func TestLoadIAMReportRoundTrip(t *testing.T) {
 		Resource: "role/admin", Detail: "AdministratorAccess attached",
 	}
 	path := writeReport(t, "iam.json", func(b *bytes.Buffer) error {
-		return output.WriteIAM(b, []cloud.Finding{want}, 1, 1, nil, nil)
+		return output.WriteIAM(b, []cloud.Finding{want}, 1, 1, nil, nil, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
 	})
 
 	got, _, err := compliance.LoadIAMReport(path)
@@ -177,7 +177,7 @@ func TestEveryLoaderCarriesTheReportsUnreadRecord(t *testing.T) {
 	}{
 		"iam": {
 			write: func(b *bytes.Buffer, inc []string) error {
-				return output.WriteIAM(b, []cloud.Finding{{Severity: cloud.SeverityHigh, Type: cloud.FindingAdminAccess, Provider: "aws"}}, 1, 1, nil, inc)
+				return output.WriteIAM(b, []cloud.Finding{{Severity: cloud.SeverityHigh, Type: cloud.FindingAdminAccess, Provider: "aws"}}, 1, 1, nil, inc, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
 			},
 			load: func(p string) ([]string, error) { _, inc, err := compliance.LoadIAMReport(p); return inc, err },
 		},

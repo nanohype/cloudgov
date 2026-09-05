@@ -98,6 +98,9 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 	allUsedPerms := make(map[string][]cloud.Permission)
 	totalPrincipals := 0
 	totalScanned := 0
+	// One envelope, several providers: the report can claim only the window every
+	// contributing provider covered.
+	var windows []cloud.ScanWindow
 	for _, p := range providers {
 		providerName := p.Name()
 		if !quiet {
@@ -117,6 +120,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 		}
 		allFindings = append(allFindings, result.Findings...)
 		incomplete = append(incomplete, result.Incomplete...)
+		windows = append(windows, result.Window)
 		totalPrincipals += result.Principals
 		totalScanned += result.Scanned
 		for pid, used := range result.UsedPermissions {
@@ -134,6 +138,8 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 		w = f
 	}
 
+	scanWindow := cloud.NarrowestWindow(windows)
+
 	incomplete = append(incomplete, cloud.Incomplete(providers)...)
 
 	gate(allFindings, func(f cloud.Finding) cloud.Severity { return f.Severity })
@@ -141,7 +147,7 @@ func runIAMScan(cmd *cobra.Command, _ []string) error {
 
 	switch iamFormat {
 	case "json":
-		return output.WriteIAM(w, allFindings, totalPrincipals, totalScanned, allUsedPerms, incomplete)
+		return output.WriteIAM(w, allFindings, totalPrincipals, totalScanned, allUsedPerms, incomplete, scanWindow)
 	case "sarif":
 		return output.WriteSARIF(w, allFindings, Version, incomplete)
 	default:

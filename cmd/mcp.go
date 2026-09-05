@@ -158,7 +158,7 @@ func registerMCPTools(s *mcp.Server) {
 			}
 			incomplete := append(res.Incomplete, cloud.Incomplete(providers)...)
 			return jsonResult(func(w io.Writer) error {
-				return output.WriteIAM(w, res.Findings, res.Principals, res.Scanned, res.UsedPermissions, incomplete)
+				return output.WriteIAM(w, res.Findings, res.Principals, res.Scanned, res.UsedPermissions, incomplete, res.Window)
 			})
 		})
 

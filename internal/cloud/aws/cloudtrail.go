@@ -18,6 +18,23 @@ type cloudtrailAPI interface {
 
 // cloudtrailUsedPermissions queries CloudTrail for events attributed to principal
 // between since and now, returning the unique set of service:Action pairs used.
+// eventHistoryRetentionDays is how far back LookupEvents can answer.
+//
+// LookupEvents reads CloudTrail Event history, which holds 90 days of management
+// events and nothing older. A StartTime further back is accepted by the API and
+// returns the same 90 days, so the request succeeds while the answer is narrower
+// than it was asked for — which is why the bound is declared here rather than
+// discovered from a failure.
+//
+// This is the bound for THIS reader. An account read through CloudTrail Lake or
+// an Athena-backed trail has a different one, which is why the scanner asks the
+// provider rather than assuming a number.
+const eventHistoryRetentionDays = 90
+
+// MaxLookbackDays declares the Event history bound. Implements
+// cloud.LookbackLimiter.
+func (p *Provider) MaxLookbackDays() int { return eventHistoryRetentionDays }
+
 func (p *Provider) cloudtrailUsedPermissions(ctx context.Context, principal cloud.Principal, since time.Time) ([]cloud.Permission, error) {
 	// Build lookup attributes: filter by username or ARN
 	attrs := []cttypes.LookupAttribute{}

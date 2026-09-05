@@ -222,3 +222,32 @@ func TestExtractResource(t *testing.T) {
 		})
 	}
 }
+
+// The AWS provider declares the bound the scanner narrows to.
+//
+// The scanner has no retention number of its own — it asks the provider through
+// cloud.LookbackLimiter — so a provider that stops declaring one is read as
+// unbounded and every window is granted in full. That failure is silent: the
+// scan succeeds, the report claims the requested window, and the only tell is
+// this assertion.
+func TestProviderDeclaresEventHistoryRetention(t *testing.T) {
+	p := &Provider{}
+
+	limiter, ok := any(p).(cloud.LookbackLimiter)
+	if !ok {
+		t.Fatal("the AWS provider does not implement cloud.LookbackLimiter, so the scanner treats " +
+			"CloudTrail Event history as unbounded and grants any window asked for")
+	}
+	if limiter.MaxLookbackDays() <= 0 {
+		t.Fatalf("MaxLookbackDays() = %d; a non-positive bound is read as no bound",
+			limiter.MaxLookbackDays())
+	}
+
+	// Reached the way the scanner reaches it, rather than by calling the method
+	// directly: the scanner resolves the bound through a type assertion over a
+	// slice of providers, and a provider whose method exists but is not seen
+	// there bounds nothing.
+	if got := cloud.LookbackLimit([]cloud.IAMProvider{p}); got != limiter.MaxLookbackDays() {
+		t.Errorf("cloud.LookbackLimit sees %d, the provider declares %d", got, limiter.MaxLookbackDays())
+	}
+}
