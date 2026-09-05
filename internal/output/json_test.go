@@ -69,7 +69,7 @@ func TestWriteIAM(t *testing.T) {
 	}
 
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, findings, 5, 5, nil, nil)
+		return WriteIAM(buf, findings, 5, 5, nil, nil, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
 	})
 
 	if out.Total != len(findings) {
@@ -116,7 +116,7 @@ func TestWriteIAMEmpty(t *testing.T) {
 		Principals int               `json:"principals_scanned"`
 	}
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, nil, 0, 0, nil, nil)
+		return WriteIAM(buf, nil, 0, 0, nil, nil, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
 	})
 	if out.Total != 0 {
 		t.Errorf("total: got %d, want 0", out.Total)
@@ -135,7 +135,7 @@ func TestWriteIAMPrincipalNil(t *testing.T) {
 		Total    int               `json:"total"`
 	}
 	out := roundTrip[iamOut](t, func(buf *bytes.Buffer) error {
-		return WriteIAM(buf, findings, 1, 1, nil, nil)
+		return WriteIAM(buf, findings, 1, 1, nil, nil, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
 	})
 	if out.Total != 1 {
 		t.Errorf("total: got %d, want 1", out.Total)
@@ -455,8 +455,10 @@ func TestReportsCarryIncompleteIndependentOfFlags(t *testing.T) {
 		"lambda":    func(w *bytes.Buffer) error { return WriteLambdaPolicy(w, nil, incomplete) },
 		"cost":      func(w *bytes.Buffer) error { return WriteCost(w, nil, incomplete) },
 		"drift":     func(w *bytes.Buffer) error { return WriteDrift(w, nil, incomplete) },
-		"iam":       func(w *bytes.Buffer) error { return WriteIAM(w, nil, 0, 0, nil, incomplete) },
-		"storage":   func(w *bytes.Buffer) error { return WriteStorage(w, nil, incomplete) },
+		"iam": func(w *bytes.Buffer) error {
+			return WriteIAM(w, nil, 0, 0, nil, incomplete, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
+		},
+		"storage": func(w *bytes.Buffer) error { return WriteStorage(w, nil, incomplete) },
 	}
 
 	for name, write := range writers {
@@ -551,10 +553,12 @@ func TestEveryEnvelopeAlwaysCarriesIncomplete(t *testing.T) {
 		"WriteDrift":        func(w io.Writer) error { return WriteDrift(w, nil, nil) },
 		"WriteLambdaPolicy": func(w io.Writer) error { return WriteLambdaPolicy(w, nil, nil) },
 		"WritePlatform":     func(w io.Writer) error { return WritePlatform(w, nil, nil) },
-		"WriteIAM":          func(w io.Writer) error { return WriteIAM(w, nil, 0, 0, nil, nil) },
-		"WriteK8sFindings":  func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
-		"WriteRepo":         func(w io.Writer) error { return WriteRepo(w, nil, nil) },
-		"WriteCompare":      func(w io.Writer) error { return WriteCompare(w, nil, nil, nil, nil) },
+		"WriteIAM": func(w io.Writer) error {
+			return WriteIAM(w, nil, 0, 0, nil, nil, cloud.ScanWindow{RequestedDays: 90, ObservedDays: 90})
+		},
+		"WriteK8sFindings": func(w io.Writer) error { return WriteK8sFindings(w, nil, nil) },
+		"WriteRepo":        func(w io.Writer) error { return WriteRepo(w, nil, nil) },
+		"WriteCompare":     func(w io.Writer) error { return WriteCompare(w, nil, nil, nil, nil) },
 		// These two carry the record on the value they marshal rather than
 		// taking it as an argument, which is how they sat outside a denominator
 		// that counted the argument — and they were the two that emitted null.

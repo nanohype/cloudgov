@@ -64,15 +64,26 @@ type iamReport struct {
 	Listed  int `json:"principals_listed"`
 	Scanned int `json:"principals_scanned"`
 	// Incomplete is what the scan could not read.
-	Incomplete      []string                      `json:"incomplete"`
+	Incomplete []string `json:"incomplete"`
+	// Window is the audit-log period the scan covered, and the period every
+	// claim in Findings rests on.
+	//
+	// It is a field rather than only a sentence inside each finding's Detail
+	// because a consumer has to be able to read it: a report whose window lives
+	// only in prose cannot be checked by anything, and `iam fix` reads this
+	// report to decide whether a premise holds. Carried whether or not the
+	// window was short, so "what window is this?" has an answer on every report
+	// rather than only on the ones that fell short.
+	Window          cloud.ScanWindow              `json:"window"`
 	UsedPermissions map[string][]cloud.Permission `json:"used_permissions,omitempty"`
 }
 
 // WriteIAM marshals IAM findings as JSON to w.
-func WriteIAM(w io.Writer, findings []cloud.Finding, principalsListed, principalsScanned int, usedPerms map[string][]cloud.Permission, incomplete []string) error {
+func WriteIAM(w io.Writer, findings []cloud.Finding, principalsListed, principalsScanned int, usedPerms map[string][]cloud.Permission, incomplete []string, window cloud.ScanWindow) error {
 	return writeJSON(w, iamReport{
 		Findings:        findings,
 		Total:           len(findings),
+		Window:          window,
 		Listed:          principalsListed,
 		Scanned:         principalsScanned,
 		Incomplete:      observed(incomplete),

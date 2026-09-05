@@ -180,6 +180,22 @@ Required IAM permissions for a read-only audit role:
 
 Compares granted permissions against CloudTrail activity over the lookback window and reports unused, admin, and cross-account risks.
 
+**The window it reports is the window it covered.** `--days` is what you ask for;
+the audit log behind the scan decides what can be answered. CloudTrail's Event
+history holds 90 days of management events and returns those same 90 for a wider
+request, so a scan asked for more is narrowed to what the source retains and every
+finding states the covered period rather than the requested one. The JSON report
+carries both as a `window` object — `requested_days`, `observed_days`, and
+`limited_by` naming the provider that bounded it — so a consumer reads the window
+instead of parsing it out of a sentence, and a narrowed window is also recorded as
+an incomplete observation.
+
+Retention belongs to the source, not to cloudgov: a provider reading an
+Athena-backed trail or CloudTrail Lake declares its own bound, and one that
+declares none is treated as unbounded. Over several providers the report carries
+the narrowest window any of them covered, because the envelope can only claim what
+all of them could answer for.
+
 ```sh
 # Scan the current AWS account (90-day lookback)
 cloudgov iam scan
@@ -204,7 +220,7 @@ cloudgov iam scan --concurrency 20
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--days` | `90` | CloudTrail lookback window in days |
+| `--days` | `90` | CloudTrail lookback window in days, narrowed to what the audit log retains |
 | `--principal` | | Scan a single principal by name or ID |
 | `--severity` | `LOW` | Minimum severity to report: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`, `INFO` |
 | `--output` | `table` | Output format: `table`, `json`, `sarif` |

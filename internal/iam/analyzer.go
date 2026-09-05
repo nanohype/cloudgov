@@ -40,12 +40,30 @@ type Result struct {
 	// non-empty value means Findings is a partial view: the permissions of
 	// those principals were never compared against anything.
 	Incomplete []string
+
+	// Window is what the scan actually looked at, which is not always what it
+	// was asked for. It is a value in its own right rather than a line in
+	// Incomplete: a consumer deciding whether a finding is safe to act on has to
+	// read the window whether or not the run is gating on anything.
+	Window cloud.ScanWindow
 }
 
 // Scan runs the full IAM scan against a provider: fetch principals, compare
 // granted vs used permissions, and emit findings.
 func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Result, error) {
-	since := time.Now().AddDate(0, 0, -opts.Days)
+	// The window every claim in this report rests on, computed once.
+	//
+	// A provider whose audit log retains less than the caller asked for answers
+	// the narrower question and returns success, so the request has to be
+	// narrowed here or the findings assert a period nothing looked at. The bound
+	// comes from the provider because retention belongs to the source: this
+	// scanner has no number of its own to be wrong with.
+	window := cloud.ScanWindow{RequestedDays: opts.Days, ObservedDays: opts.Days}
+	if limit := cloud.LookbackLimit([]cloud.IAMProvider{provider}); limit > 0 && limit < opts.Days {
+		window.ObservedDays = limit
+		window.LimitedBy = provider.Name()
+	}
+	since := time.Now().AddDate(0, 0, -window.ObservedDays)
 
 	concurrency := opts.Concurrency
 	if concurrency <= 0 {
@@ -69,6 +87,16 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 	}
 
 	var result Result
+	result.Window = window
+	if window.Short() {
+		// Recorded as an unread observation as well as carried as a field. The
+		// two are for different readers: the field answers "what window is this?"
+		// for anything reading the report, and the record puts a short window on
+		// the same footing as a denied probe for a run that is gating.
+		result.Incomplete = append(result.Incomplete, fmt.Sprintf(
+			"audit-log lookback: %d day(s) requested, %d covered — %s retains no more, so nothing is known about the %d day(s) before that",
+			window.RequestedDays, window.ObservedDays, window.LimitedBy, window.RequestedDays-window.ObservedDays))
+	}
 	result.Principals = len(principals)
 	result.UsedPermissions = make(map[string][]cloud.Permission)
 
@@ -129,7 +157,7 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 				mu.Unlock()
 			}
 
-			findings := analyze(p, granted, used, opts.Days)
+			findings := analyze(p, granted, used, window)
 			var toAdd []cloud.Finding
 			for _, f := range findings {
 				if cloud.SeverityRank(f.Severity) >= cloud.SeverityRank(opts.MinSeverity) {
@@ -173,7 +201,7 @@ func Scan(ctx context.Context, provider cloud.IAMProvider, opts ScanOptions) (Re
 }
 
 // analyze computes the delta between granted and used permissions for one principal.
-func analyze(p cloud.Principal, granted, used []cloud.Permission, days int) []cloud.Finding {
+func analyze(p cloud.Principal, granted, used []cloud.Permission, window cloud.ScanWindow) []cloud.Finding {
 	var findings []cloud.Finding
 
 	// Index used permissions for fast lookup
@@ -235,12 +263,16 @@ func analyze(p cloud.Principal, granted, used []cloud.Permission, days int) []cl
 		keyWild := normalizeKey(g.Action, "*")
 		if !usedSet[key] && !usedSet[keyWild] && len(used) > 0 {
 			findings = append(findings, cloud.Finding{
-				Severity:    cloud.SeverityHigh,
-				Type:        cloud.FindingUnusedPermission,
-				Provider:    p.Provider,
-				Principal:   &p,
-				Resource:    g.Resource,
-				Detail:      g.Action + " was not used in the last " + itoa(days) + " days",
+				Severity:  cloud.SeverityHigh,
+				Type:      cloud.FindingUnusedPermission,
+				Provider:  p.Provider,
+				Principal: &p,
+				Resource:  g.Resource,
+				// Rendered from the window rather than restating it. A sentence
+				// naming a period the scan did not cover is the same defect
+				// wearing prose, and the two cannot drift apart when only one of
+				// them holds the number.
+				Detail:      g.Action + " was not used in " + window.Describe(),
 				Remediation: "Remove " + g.Action + " from the policy if it is no longer needed.",
 			})
 		}
@@ -253,7 +285,7 @@ func analyze(p cloud.Principal, granted, used []cloud.Permission, days int) []cl
 			Type:        cloud.FindingStalePrincipal,
 			Provider:    p.Provider,
 			Principal:   &p,
-			Detail:      "no activity detected in the last " + itoa(days) + " days",
+			Detail:      "no activity detected in " + window.Describe(),
 			Remediation: "Consider disabling or deleting this principal if it is no longer in use.",
 		})
 	}
@@ -305,8 +337,4 @@ func dedupFindings(findings []cloud.Finding) []cloud.Finding {
 		}
 	}
 	return out
-}
-
-func itoa(n int) string {
-	return fmt.Sprintf("%d", n)
 }
