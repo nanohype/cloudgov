@@ -27,6 +27,15 @@ import (
 // A control in neither fails this test. That is the whole of the population
 // question: the controls come from the benchmarks themselves, so a control added
 // to either one arrives here without an edit and has to be answered.
+//
+// The first half is the one a suite tends not to have. Tests are written for the
+// case that fails, so the evaluators were exercised — a finding goes in, a FAIL
+// comes out — while nothing asked whether a control could produce a FAIL at all.
+// A fixture encodes a defect by asserting something false, and it encodes the
+// same defect by asserting nothing about the half that matters; the second is
+// harder to see, because there is no wrong line to point at. A suite that only
+// ever checks failures cannot notice that a control has stopped being able to
+// produce one.
 
 // cisFailingWitness is an input that must make its CIS control report FAIL.
 //
