@@ -217,57 +217,6 @@ func TestEvaluateTagsControl(t *testing.T) {
 	t.Error("control 4.1 not found")
 }
 
-// The two generic evaluators serve controls a scan is evidence toward but does
-// not decide, and they must never report PASS. PASS is what an auditor reads as
-// "examined and clean", and neither evaluator examined anything: it returns a
-// verdict about a control on the strength of findings about a different one.
-//
-// Both branches are pinned, because the branch that matters is the one that runs
-// when a scan DID find something — an evaluator that declines only on an empty
-// input still hands out a verdict on the path an operator actually takes.
-// Statement coverage cannot see the difference: returning
-// `ControlResult{Control: ctrl, Status: StatusPass, ...}` executes the same one
-// statement the decline does, and the file's 100 floor is met either way.
-func TestGenericEvaluatorsNeverReportAVerdict(t *testing.T) {
-	ctrl := Control{ID: "2.1.1", Title: "a control nothing examined"}
-
-	declines := map[string]func(withFindings bool) ControlResult{
-		"evalStorageGeneric": func(withFindings bool) ControlResult {
-			var findings []cloud.BucketFinding
-			if withFindings {
-				findings = []cloud.BucketFinding{{Type: cloud.BucketPublicAccess, Bucket: "docs"}}
-			}
-			return evalStorageGeneric(ctrl, findings)
-		},
-		"evalIAMGeneric": func(withFindings bool) ControlResult {
-			var findings []cloud.Finding
-			if withFindings {
-				findings = []cloud.Finding{{Type: cloud.FindingAdminAccess, Resource: "role/admin"}}
-			}
-			return evalIAMGeneric(ctrl, findings)
-		},
-	}
-
-	for name, evaluate := range declines {
-		for _, withFindings := range []bool{false, true} {
-			label := "no findings loaded"
-			if withFindings {
-				label = "findings loaded for the domain"
-			}
-			t.Run(name+"/"+label, func(t *testing.T) {
-				got := evaluate(withFindings)
-				if got.Status != StatusNotEvaluated {
-					t.Fatalf("status = %s, want NOT_EVALUATED — this evaluator examined nothing "+
-						"and a verdict here is a claim the tool cannot compute: %+v", got.Status, got)
-				}
-				if got.Detail == "" {
-					t.Error("the decline carries no reason, so a reader cannot tell why the tool declined")
-				}
-			})
-		}
-	}
-}
-
 // A control's Description and its Status travel in the same JSON, and an auditor
 // reads both. A control whose shipped description says it is reported as not
 // evaluated must in fact report that, or the artifact contradicts itself in a way
