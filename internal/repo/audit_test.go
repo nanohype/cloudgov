@@ -57,7 +57,7 @@ func typesOf(fs []cloud.RepoFinding) map[cloud.RepoFindingType]int {
 func healthy(name string) cloud.RepoSettings {
 	return cloud.RepoSettings{
 		Name: name, DefaultRef: "main", Protected: true,
-		RequiredChecks: []string{"build"}, EnforceAdmins: true,
+		RequiredChecks: []string{"build"}, StrictChecks: true, EnforceAdmins: true,
 		AlertsEnabled: true, SecurityUpdatesEnabled: true,
 	}
 }
@@ -345,5 +345,115 @@ func TestAuditStillReportsAGenuinelyUnprotectedRepo(t *testing.T) {
 	}
 	if !found {
 		t.Error("a genuinely unprotected repository produced no NO_BRANCH_PROTECTION finding")
+	}
+}
+
+// A protection rule can require the whole CI matrix and still merge a PR that no
+// run ever evaluated against the tree the merge produces. GitHub calls the
+// setting "Require branches to be up to date before merging"; without it a check
+// that went green against an older base is accepted as the verdict on the merged
+// result, and two individually correct PRs that are jointly broken merge with
+// every gate green.
+//
+// The scope is derived from the repository, not from the expected shape: a rule
+// requiring at least one check must require it strictly, and a rule requiring
+// none already reports NO_REQUIRED_CHECKS. The two cannot both fire, which is
+// what the third case pins — a repository with no checks must not be told twice
+// about one defect.
+func TestAudit_RequiredChecksMustBeStrict(t *testing.T) {
+	withChecks := func(name string, checks []string, strict bool) cloud.RepoSettings {
+		s := healthy(name)
+		s.RequiredChecks = checks
+		s.StrictChecks = strict
+		return s
+	}
+
+	tests := []struct {
+		name     string
+		settings cloud.RepoSettings
+		want     map[cloud.RepoFindingType]int
+	}{
+		{
+			name:     "checks required and not strict",
+			settings: withChecks("landing-zone", []string{"Format Check", "Validate", "tflint"}, false),
+			want:     map[cloud.RepoFindingType]int{cloud.RepoChecksNotStrict: 1},
+		},
+		{
+			name:     "checks required and strict",
+			settings: withChecks("landing-zone", []string{"Format Check"}, true),
+			want:     map[cloud.RepoFindingType]int{},
+		},
+		{
+			// One defect, one finding. A rule requiring nothing is already
+			// NO_REQUIRED_CHECKS, and reporting it as unstrict too would send an
+			// operator to a setting that changes nothing until the first check
+			// is added.
+			name:     "no checks required at all",
+			settings: withChecks("homebrew-tap", nil, false),
+			want:     map[cloud.RepoFindingType]int{cloud.RepoNoRequiredChecks: 1},
+		},
+		{
+			// Nothing is claimed about a rule that was never read. Protected is a
+			// zero value here, not an answer, and the unread record carries it.
+			name: "branch protection could not be read",
+			settings: cloud.RepoSettings{
+				Name: "cloudgov", DefaultRef: "main",
+				AlertsEnabled: true, SecurityUpdatesEnabled: true,
+				Unread: map[string]string{"branch protection": "HTTP 502"},
+			},
+			want: map[cloud.RepoFindingType]int{},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &fakeReader{
+				repos:    []string{tc.settings.Name},
+				settings: map[string]cloud.RepoSettings{tc.settings.Name: tc.settings},
+			}
+			findings, _, err := Audit(context.Background(), r, "nanohype", defaults())
+			if err != nil {
+				t.Fatalf("audit: %v", err)
+			}
+			got := typesOf(findings)
+			for want, count := range tc.want {
+				if got[want] != count {
+					t.Errorf("%s = %d, want %d (all findings: %v)", want, got[want], count, got)
+				}
+			}
+			for have := range got {
+				if _, expected := tc.want[have]; !expected {
+					t.Errorf("unexpected finding %s: %v", have, got)
+				}
+			}
+		})
+	}
+}
+
+// The strict flag reaches the audit at all.
+//
+// The field was read from the API and compared to nothing anywhere in
+// production, so every value it could hold produced the same report. This is the
+// case that fails if the comparison is removed again: the same repository, read
+// twice, must not audit identically with the flag on and off.
+func TestAudit_StrictFlagChangesTheReport(t *testing.T) {
+	report := func(strict bool) map[cloud.RepoFindingType]int {
+		s := healthy("eks-gitops")
+		s.StrictChecks = strict
+		r := &fakeReader{
+			repos:    []string{s.Name},
+			settings: map[string]cloud.RepoSettings{s.Name: s},
+		}
+		findings, _, err := Audit(context.Background(), r, "nanohype", defaults())
+		if err != nil {
+			t.Fatalf("audit: %v", err)
+		}
+		return typesOf(findings)
+	}
+
+	on, off := report(true), report(false)
+	if len(on) == len(off) {
+		t.Fatalf("the same repository audits identically with strict checks on and off "+
+			"(%v vs %v); the flag is read and gates nothing", on, off)
 	}
 }
