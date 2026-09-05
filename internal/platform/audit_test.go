@@ -30,6 +30,11 @@ const (
 	tBudget  = "tenant-budget"
 	tRole    = "arn:aws:iam::123456789012:role/dev-app1-tenant"
 	tCluster = "development-cluster"
+	// tBoundary is the ceiling the operator attaches to every tenant role and
+	// publishes on Platform.status. It is part of a conformant role, not an
+	// extra: a role without it is bounded by whatever policy happens to be
+	// attached.
+	tBoundary = "arn:aws:iam::123456789012:policy/tenant-permissions-boundary"
 
 	// podIdentityTrust is what the operator writes on every tenant role: the EKS
 	// service principal and nothing else. There is no ServiceAccount subject —
@@ -55,6 +60,7 @@ func platformCR(phase string, families []string) *unstructured.Unstructured {
 		},
 		"status": map[string]interface{}{
 			"phase": phase, "namespace": tNS, "iamRoleArn": tRole,
+			"permissionsBoundaryArn": tBoundary,
 			"podIdentity": map[string]interface{}{
 				"clusterName": tCluster, "namespace": tNS, "serviceAccount": defaultSAName, "roleArn": tRole,
 			},
@@ -222,16 +228,23 @@ func (f fakeRoles) GetPodIdentityAssociation(_ context.Context, _, ns, sa string
 
 // conformantRole is a tenant role as the operator actually reconciles it: Pod
 // Identity trust, the always-written model-scoping policy plus generated scoped
-// policies inline, the baseline attached, and an association binding it to the
-// tenant ServiceAccount.
+// policies inline, the baseline attached, the published permissions boundary,
+// and an association binding it to the tenant ServiceAccount.
+//
+// The boundary belongs in the conformant fixture rather than only in the case
+// that asserts it. A fixture standing for "the tenant the audit should be silent
+// about" that carries no boundary makes a boundaryless role the reference shape,
+// and every test measuring drift against it starts from a role the contract does
+// not describe.
 func conformantRole() fakeRoles {
 	return fakeRoles{
 		info: &cloud.IAMRoleInfo{
-			ARN:                 tRole,
-			TrustPolicyDocument: podIdentityTrust,
-			Tags:                map[string]string{},
-			AttachedPolicyARNs:  []string{"arn:aws:iam::123456789012:policy/tenant-baseline"},
-			InlinePolicyNames:   []string{"bedrock-model-scoping", "datastore-access", "tenant-key-access"},
+			ARN:                    tRole,
+			TrustPolicyDocument:    podIdentityTrust,
+			Tags:                   map[string]string{},
+			AttachedPolicyARNs:     []string{"arn:aws:iam::123456789012:policy/tenant-baseline"},
+			InlinePolicyNames:      []string{"bedrock-model-scoping", "datastore-access", "tenant-key-access"},
+			PermissionsBoundaryARN: tBoundary,
 		},
 		assoc: map[string]*cloud.PodIdentityAssociation{
 			tNS + "/" + defaultSAName: {RoleARN: tRole, Namespace: tNS, ServiceAccount: defaultSAName},
@@ -854,5 +867,134 @@ func TestAudit_ConformantRunReportsNothingIncomplete(t *testing.T) {
 	}
 	if len(incomplete) != 0 {
 		t.Fatalf("a fully observed conformant platform reported %d incomplete entries: %v", len(incomplete), incomplete)
+	}
+}
+
+// The permissions boundary is the ceiling every other tenant-identity control
+// assumes. The trust shape, the inline allowlist and the declared managed
+// policies all bound what the operator PUTS on the role; the boundary bounds what
+// the role can do whatever is put on it. A role that lost it is not slightly less
+// conformant — the scoped inline policy becomes the only limit, and the next
+// policy attached is unbounded.
+//
+// Presence and identity are separate questions and the audit answers what it can.
+// Absent is a finding on its own evidence. Present is compared against the
+// boundary the Platform publishes; where the Platform publishes none there is
+// nothing to compare against, and that is recorded as an unread observation
+// rather than passed over — presence alone does not distinguish this tenant's
+// ceiling from somebody else's.
+func TestAudit_TenantRolePermissionsBoundary(t *testing.T) {
+	const otherBoundary = "arn:aws:iam::123456789012:policy/some-other-boundary"
+
+	withBoundary := func(attached string) fakeRoles {
+		r := conformantRole()
+		info := *r.info
+		info.PermissionsBoundaryARN = attached
+		r.info = &info
+		return r
+	}
+	published := func(arn string) *unstructured.Unstructured {
+		cr := platformCR("Ready", []string{"anthropic"})
+		if arn == "" {
+			unstructured.RemoveNestedField(cr.Object, "status", "permissionsBoundaryArn")
+		} else {
+			_ = unstructured.SetNestedField(cr.Object, arn, "status", "permissionsBoundaryArn")
+		}
+		return cr
+	}
+
+	tests := []struct {
+		name        string
+		attached    string
+		publishes   string
+		wantType    cloud.PlatformFindingType
+		wantUnread  bool
+		wantSilence bool
+	}{
+		{
+			name:      "no boundary on the role",
+			attached:  "",
+			publishes: tBoundary,
+			wantType:  cloud.PlatformRoleBoundaryMissing,
+		},
+		{
+			// Absent is a finding whether or not anything published an expected
+			// value: no ceiling is wrong against every ceiling.
+			name:      "no boundary on the role and none published",
+			attached:  "",
+			publishes: "",
+			wantType:  cloud.PlatformRoleBoundaryMissing,
+		},
+		{
+			name:      "a different boundary",
+			attached:  otherBoundary,
+			publishes: tBoundary,
+			wantType:  cloud.PlatformRoleBoundaryMismatch,
+		},
+		{
+			// The case a presence check would call conformant. Nothing to compare
+			// against is not the same as matching, so it is recorded rather than
+			// reported clean.
+			name:       "a boundary the Platform does not publish",
+			attached:   otherBoundary,
+			publishes:  "",
+			wantUnread: true,
+		},
+		{
+			name:        "the published boundary",
+			attached:    tBoundary,
+			publishes:   tBoundary,
+			wantSilence: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			typed := kubefake.NewSimpleClientset(conformantObjects()...)
+			dyn := dynClient(published(tc.publishes), budgetCR(true), tenantCR(false, false))
+			findings, unread, err := Audit(context.Background(), typed, dyn, withBoundary(tc.attached))
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var boundaryFindings []cloud.PlatformFinding
+			for _, f := range findings {
+				if f.Type == cloud.PlatformRoleBoundaryMissing || f.Type == cloud.PlatformRoleBoundaryMismatch {
+					boundaryFindings = append(boundaryFindings, f)
+				}
+			}
+
+			switch {
+			case tc.wantType != "":
+				if len(boundaryFindings) != 1 || boundaryFindings[0].Type != tc.wantType {
+					t.Fatalf("want exactly one %s, got %+v", tc.wantType, boundaryFindings)
+				}
+				if boundaryFindings[0].Severity != cloud.SeverityCritical {
+					t.Errorf("severity = %s, want CRITICAL — the boundary is the ceiling the rest of "+
+						"the model rests on", boundaryFindings[0].Severity)
+				}
+				if boundaryFindings[0].Remediation == "" {
+					t.Error("the finding carries no remediation, so a reader is told what is wrong and not what to do")
+				}
+			default:
+				if len(boundaryFindings) != 0 {
+					t.Fatalf("want no boundary finding, got %+v", boundaryFindings)
+				}
+			}
+
+			var mentions int
+			for _, u := range unread {
+				if strings.Contains(u, "permissions boundary") {
+					mentions++
+				}
+			}
+			if tc.wantUnread && mentions == 0 {
+				t.Errorf("a boundary that could not be compared was neither reported nor recorded as "+
+					"unread; the tenant reads as conformant. unread = %v", unread)
+			}
+			if !tc.wantUnread && mentions != 0 {
+				t.Errorf("recorded the boundary as unread when it was checked: %v", unread)
+			}
+		})
 	}
 }

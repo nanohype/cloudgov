@@ -150,6 +150,10 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 	suspendedAt, _, _ := unstructured.NestedString(p.Object, "status", "suspendedAt")
 	suspended := suspendedAt != ""
 	extras, _, _ := unstructured.NestedStringSlice(p.Object, "spec", "identity", "extraPolicyArns")
+	// The ceiling the tenant role must carry, published by the operator that
+	// attached it. Read from status rather than configured here: the auditor
+	// stays read-only and gains no value of its own to drift from the cluster's.
+	boundary, _, _ := unstructured.NestedString(p.Object, "status", "permissionsBoundaryArn")
 	binding := readBinding(p, ns)
 
 	f := func(sev cloud.Severity, t cloud.PlatformFindingType, resource, detail, remediation string) cloud.PlatformFinding {
@@ -229,7 +233,7 @@ func auditPlatform(ctx context.Context, typed kubernetes.Interface, dyn dynamic.
 	out = append(out, auditNetworkPolicy(ctx, typed, dyn, ns, f, note)...)
 	out = append(out, auditServiceAccount(ctx, typed, binding, f, note)...)
 	if roles != nil && roleArn != "" {
-		out = append(out, auditRole(ctx, roles, roleArn, suspended, extras, f, note)...)
+		out = append(out, auditRole(ctx, roles, roleArn, suspended, extras, boundary, f, note)...)
 		out = append(out, auditPodIdentity(ctx, roles, binding, roleArn, f, note)...)
 	}
 	return out, incomplete
@@ -444,7 +448,7 @@ func orUnset(s string) string {
 // policies and nothing hand-attached, has a suspension tag consistent with
 // Platform.status, and carries the declared extraPolicyArns plus a baseline when
 // active.
-func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspended bool, extras []string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
+func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspended bool, extras []string, expectedBoundary string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
 	name := roleNameFromARN(roleArn)
 	if name == "" {
 		return nil
@@ -463,6 +467,7 @@ func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspen
 	var out []cloud.PlatformFinding
 	out = append(out, auditTrustPolicy(info.TrustPolicyDocument, roleArn, f)...)
 	out = append(out, auditInlinePolicies(info.InlinePolicyNames, roleArn, suspended, f)...)
+	out = append(out, auditPermissionsBoundary(info.PermissionsBoundaryARN, expectedBoundary, roleArn, f, note)...)
 
 	roleSuspended := info.Tags["platform.nanohype.dev/suspended"] == "true"
 	if suspended != roleSuspended {
@@ -489,6 +494,47 @@ func auditRole(ctx context.Context, roles IdentityReader, roleArn string, suspen
 			"Verify the operator attached the baseline policy (or that the tenant is intentionally suspended)."))
 	}
 	return out
+}
+
+// auditPermissionsBoundary checks the ceiling the rest of the tenant identity
+// model rests on.
+//
+// Every other control here bounds what the operator PUTS on the role — the trust
+// shape, the inline allowlist, the declared managed policies. The boundary bounds
+// what the role can do whatever is put on it, so a role that lost it is not
+// slightly less conformant: the scoped inline policy becomes the only limit, and
+// the next policy attached to it is unbounded.
+//
+// Presence and identity are separate questions and only one of them can always be
+// answered. A missing boundary is a finding on its own evidence. A boundary that
+// is present is compared to the one the Platform publishes, and when the Platform
+// publishes none there is nothing to compare against — a different boundary is not
+// a weaker version of the same ceiling but a different ceiling, and presence does
+// not distinguish them.
+//
+// So the unanswerable case is recorded as an unread observation rather than
+// passed over. An audit that checked presence and called the tenant conformant
+// would report a role carrying somebody else's ceiling as clean, which is the
+// conflation this tool refuses everywhere else.
+func auditPermissionsBoundary(attached, expected, roleArn string, f findingFunc, note noteFunc) []cloud.PlatformFinding {
+	if attached == "" {
+		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformRoleBoundaryMissing, roleArn,
+			"tenant role carries no permissions boundary; the ceiling every other tenant-identity control assumes is absent",
+			"Attach the tenant permissions boundary the Platform publishes. Without it a policy "+
+				"attached to this role later is bounded by nothing.")}
+	}
+	if expected == "" {
+		note("tenant role "+roleArn+" carries permissions boundary "+attached+
+			", and Platform.status.permissionsBoundaryArn is empty, so the boundary's identity was not checked", nil)
+		return nil
+	}
+	if attached != expected {
+		return []cloud.PlatformFinding{f(cloud.SeverityCritical, cloud.PlatformRoleBoundaryMismatch, roleArn,
+			"tenant role permissions boundary is "+attached+", and Platform.status.permissionsBoundaryArn is "+expected,
+			"Reconcile the role to the published boundary. A boundary that is present but different "+
+				"is a different ceiling, not a weaker form of the same one.")}
+	}
+	return nil
 }
 
 // auditTrustPolicy asserts the Pod Identity trust shape. It deliberately does
