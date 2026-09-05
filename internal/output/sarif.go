@@ -415,6 +415,8 @@ func buildPlatformRules() []sarifRule {
 		{cloud.PlatformRoleExtraPolicyMissing, "TenantRoleExtraPolicyMissing", "warning"},
 		{cloud.PlatformRoleSuspensionDrift, "TenantRoleSuspensionDrift", "error"},
 		{cloud.PlatformRoleNoBaseline, "TenantRoleNoBaseline", "error"},
+		{cloud.PlatformRoleBoundaryMissing, "TenantRolePermissionsBoundaryMissing", "error"},
+		{cloud.PlatformRoleBoundaryMismatch, "TenantRolePermissionsBoundaryMismatch", "error"},
 		{cloud.PlatformPodIdentityMissing, "PodIdentityAssociationMissing", "error"},
 		{cloud.PlatformPodIdentityMismatch, "PodIdentityAssociationMismatch", "error"},
 		{cloud.PlatformPodIdentityUnknown, "PodIdentityBindingUnknown", "note"},

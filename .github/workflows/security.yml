@@ -64,13 +64,13 @@ jobs:
         # never reaches. `grep -rn '#nosec' --include='*.go' .` answers which
         # sites those are; no other mechanism suppresses a finding, so the grep
         # is the whole of it.
-        uses: securego/gosec@9e75c0576c9878035d4221392108d458abe10fc3 # v2.28.0
+        uses: securego/gosec@deb54465fea23d19a77f037e11e6589021f8501d # v2.29.0
         with:
           args: -severity medium -exclude=G304 -fmt sarif -out gosec.sarif ./...
 
       - name: upload sarif
         if: always()
-        uses: github/codeql-action/upload-sarif@42947a340483f03ba47bb1a039b2c519aab3df85 # v3.32.2
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3.37.9
         with:
           sarif_file: gosec.sarif
           category: gosec
@@ -95,7 +95,7 @@ jobs:
         # explains, and a network failure becomes a build failure.
         run: |
           # renovate: datasource=pypi depName=zizmor
-          pipx install zizmor==1.29.0
+          pipx install zizmor==1.30.0
           # The persona selects which audits RUN, and it is a different axis from
           # severity: the excessive-permissions audit is not executed under the
           # default persona at all, so a workflow-level `contents: write` — a
@@ -129,7 +129,7 @@ jobs:
     # merges come from pull requests; on push it is skipped and gates nothing.
     if: always() && github.event_name == 'pull_request'
     steps:
-      - uses: nanohype/.github/actions/merge-gate@6ec6c5b3e6c4a8b15e12da4afd7ac4870a630092 # main
+      - uses: nanohype/.github/actions/merge-gate@1761cf7500badf44ea21dae6b09810c4641be0e2 # main
         with:
           needs: ${{ toJSON(needs) }}
           gate-job-id: merge-gate-security

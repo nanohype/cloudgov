@@ -28,6 +28,16 @@ const (
 	PlatformRoleExtraPolicyMissing PlatformFindingType = "TENANT_ROLE_EXTRA_POLICY_MISSING"
 	PlatformRoleSuspensionDrift    PlatformFindingType = "TENANT_ROLE_SUSPENSION_DRIFT"
 	PlatformRoleNoBaseline         PlatformFindingType = "TENANT_ROLE_NO_BASELINE"
+	// PlatformRoleBoundaryMissing — the tenant role carries no permissions
+	// boundary. The boundary is the ceiling every other tenant-identity control
+	// assumes: without it a scoped inline policy is the only limit, and any
+	// policy attached later is unbounded.
+	PlatformRoleBoundaryMissing PlatformFindingType = "TENANT_ROLE_PERMISSIONS_BOUNDARY_MISSING"
+	// PlatformRoleBoundaryMismatch — the role carries a boundary other than the
+	// one the Platform publishes. A different boundary is not a weaker version of
+	// the same ceiling; it is a different ceiling, and presence alone does not
+	// distinguish them.
+	PlatformRoleBoundaryMismatch PlatformFindingType = "TENANT_ROLE_PERMISSIONS_BOUNDARY_MISMATCH"
 
 	// EKS Pod Identity binding conformance. The association is what actually
 	// vends the tenant role to tenant pods — the role's trust policy carries no
@@ -77,6 +87,8 @@ var AllPlatformFindingTypes = []PlatformFindingType{
 	PlatformBudgetMissing,
 	PlatformKillSwitchDisabled,
 	PlatformComplianceWeaker,
+	PlatformRoleBoundaryMissing,
+	PlatformRoleBoundaryMismatch,
 	PlatformTenantMissing,
 	PlatformHipaaGuardrailInherited,
 }
@@ -89,6 +101,11 @@ type IAMRoleInfo struct {
 	Tags                map[string]string
 	AttachedPolicyARNs  []string
 	InlinePolicyNames   []string
+	// PermissionsBoundaryARN is the boundary attached to the role, empty when
+	// none is. Empty is a real answer here rather than an unread one: GetRole
+	// returns the field on every role and omits it only when the role has no
+	// boundary, so the read either succeeded or the whole call failed.
+	PermissionsBoundaryARN string
 }
 
 // PodIdentityAssociation is the read-only view of an EKS Pod Identity

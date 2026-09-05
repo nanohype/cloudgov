@@ -190,7 +190,7 @@ jobs:
           # Pinned rather than left to the action's default so a lint result is a
           # function of the commit under test.
           # renovate: datasource=github-releases depName=golangci/golangci-lint
-          version: v2.13.1
+          version: v2.13.2
 
   merge-gate:
     name: merge gate
@@ -210,7 +210,7 @@ jobs:
     # merges come from pull requests; on push it is skipped and gates nothing.
     if: always() && github.event_name == 'pull_request'
     steps:
-      - uses: nanohype/.github/actions/merge-gate@6ec6c5b3e6c4a8b15e12da4afd7ac4870a630092 # main
+      - uses: nanohype/.github/actions/merge-gate@1761cf7500badf44ea21dae6b09810c4641be0e2 # main
         with:
           needs: ${{ toJSON(needs) }}
           gate-job-id: merge-gate

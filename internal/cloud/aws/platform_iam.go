@@ -16,7 +16,7 @@ import (
 )
 
 // GetRoleInfo fetches an IAM role's ARN, decoded trust policy, tags, attached
-// managed-policy ARNs, and inline-policy names — the inputs the platform auditor
+// managed-policy ARNs, inline-policy names, and permissions boundary — the inputs the platform auditor
 // needs to verify tenant-role conformance. Returns (nil, nil) when the role does
 // not exist. Half of platform.IdentityReader.
 func (p *Provider) GetRoleInfo(ctx context.Context, roleName string) (*cloud.IAMRoleInfo, error) {
@@ -32,6 +32,9 @@ func (p *Provider) GetRoleInfo(ctx context.Context, roleName string) (*cloud.IAM
 	}
 
 	info := &cloud.IAMRoleInfo{ARN: awssdk.ToString(out.Role.Arn), Tags: map[string]string{}}
+	if b := out.Role.PermissionsBoundary; b != nil {
+		info.PermissionsBoundaryARN = awssdk.ToString(b.PermissionsBoundaryArn)
+	}
 	if doc := awssdk.ToString(out.Role.AssumeRolePolicyDocument); doc != "" {
 		if dec, derr := url.QueryUnescape(doc); derr == nil {
 			info.TrustPolicyDocument = dec
