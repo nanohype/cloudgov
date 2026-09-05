@@ -2,7 +2,7 @@ module github.com/nanohype/cloudgov
 
 go 1.26.0
 
-toolchain go1.27.0
+toolchain go1.27.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.7
@@ -26,7 +26,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sns v1.42.7
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.46.7
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.73.7
-	github.com/aws/smithy-go v1.27.9
+	github.com/aws/smithy-go v1.28.1
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
