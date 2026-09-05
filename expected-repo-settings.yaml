@@ -16,6 +16,15 @@ allowDeletions: false
 alertsEnabled: true
 securityUpdatesEnabled: true
 
+# Whether required checks must be STRICT is not a setting here.
+#
+# A rule that requires checks must require them against the tree the merge
+# produces, not the tree the PR branched from, or a check that went green against
+# an older base is accepted as the verdict on the merged result. That is not a
+# per-repo preference, so the audit derives the scope from the repository: every
+# rule requiring at least one check is measured on it, and a rule requiring none
+# already reports NO_REQUIRED_CHECKS.
+#
 # Per-repo required checks. A repo absent from this map is still measured on
 # everything else — an omission must never read as an exemption.
 #

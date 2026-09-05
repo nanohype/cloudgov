@@ -162,6 +162,32 @@ func auditOne(s cloud.RepoSettings, exp Expected) []cloud.RepoFinding {
 						"if the job no longer exists.")
 			}
 		}
+		// Strict checks: the rule requires status checks, and requires them
+		// against the tree the merge produces rather than the one the PR branched
+		// from.
+		//
+		// Without it a check that passed against an older base is accepted as the
+		// verdict on the merged result, so a repository whose whole CI matrix is
+		// required still merges a PR that no run ever evaluated against main as
+		// it now stands. Two green PRs that are individually correct and jointly
+		// broken are the ordinary way this happens, and neither one is doing
+		// anything wrong.
+		//
+		// The population is read from the repository rather than from the
+		// expected shape: every repository whose rule requires at least one check
+		// must require them strictly. Strict is meaningless with nothing to be
+		// strict about, and a rule requiring no check at all already reports
+		// NO_REQUIRED_CHECKS above — so the two are exclusive by construction and
+		// neither needs a list naming which repositories are in scope.
+		if len(s.RequiredChecks) > 0 && !s.StrictChecks {
+			add(cloud.SeverityMedium, cloud.RepoChecksNotStrict,
+				fmt.Sprintf("%d required check(s) do not require the branch to be up to date",
+					len(s.RequiredChecks)),
+				"Enable \"Require branches to be up to date before merging\". The cost is that a "+
+					"PR behind the default branch must be updated before it merges, which is what "+
+					"a merge queue automates; the alternative is a required check whose verdict "+
+					"was computed against a tree that no longer exists.")
+		}
 		if exp.EnforceAdmins && !s.EnforceAdmins {
 			add(cloud.SeverityMedium, cloud.RepoAdminsExempt,
 				"enforce_admins is off — an admin merges past every required check",

@@ -40,6 +40,10 @@ const (
 	RepoSecurityUpdatesDisabled RepoFindingType = "DEPENDABOT_SECURITY_UPDATES_DISABLED"
 	// RepoOpenAlerts — Dependabot alerts are open and unread.
 	RepoOpenAlerts RepoFindingType = "DEPENDABOT_ALERTS_OPEN"
+	// RepoChecksNotStrict — the protection rule requires status checks but does
+	// not require the branch to be up to date, so a check that passed against an
+	// older base is accepted as the verdict on the merged tree.
+	RepoChecksNotStrict RepoFindingType = "REQUIRED_CHECKS_NOT_STRICT"
 	// RepoUnprotectable — protection is unavailable on this repo's plan. Not a
 	// misconfiguration and not fixable by any setting: a private repo on the free
 	// plan cannot be protected at all. Reported so the exposure is stated rather
@@ -63,6 +67,7 @@ var RepoFindingTypes = []RepoFindingType{
 	RepoNoProtection,
 	RepoNoRequiredChecks,
 	RepoMissingRequiredCheck,
+	RepoChecksNotStrict,
 	RepoAdminsExempt,
 	RepoForcePushAllowed,
 	RepoDeletionAllowed,
