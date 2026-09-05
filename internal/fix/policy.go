@@ -8,9 +8,24 @@ import (
 )
 
 // WriteRawPolicies writes raw policy JSON/YAML files (one per principal) to dir.
-func WriteRawPolicies(policies map[string]cloud.Policy, dir string) error {
+func WriteRawPolicies(policies map[string]cloud.Policy, opts Options) error {
+	dir := opts.OutputDir
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("create output dir: %w", err)
+	}
+
+	// The caveat cannot go inside the policy documents: a raw IAM policy has no
+	// comment syntax and anything added to it stops being a policy. So it goes
+	// in a file beside them, named to sort ahead of the policies and to be
+	// unmissable in a directory listing or a pull request.
+	if banner := provenanceBanner(opts); banner != "" {
+		notePath, err := PathUnder(dir, partialScanNote)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(notePath, []byte(banner), 0o600); err != nil {
+			return fmt.Errorf("write partial-scan note: %w", err)
+		}
 	}
 	for principalID, pol := range policies {
 		if len(pol.Raw) == 0 {

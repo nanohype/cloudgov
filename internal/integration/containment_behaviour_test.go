@@ -103,7 +103,7 @@ var remediationWriters = map[string]func(outDir, escape string) ([]string, error
 	"fix.WriteRawPolicies": func(outDir, escape string) ([]string, error) {
 		return nil, fix.WriteRawPolicies(map[string]cloud.Policy{
 			escape: {Raw: []byte(`{"Version":"2012-10-17"}`)},
-		}, outDir)
+		}, fix.Options{OutputDir: outDir})
 	},
 	"fix.GenerateTerraform": func(outDir, escape string) ([]string, error) {
 		findings := []cloud.Finding{{

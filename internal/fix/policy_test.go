@@ -22,7 +22,7 @@ func TestWriteRawPolicies_WritesOnePerPrincipal(t *testing.T) {
 		"reader-role": {Raw: []byte(`{"Version":"2012-10-17","Statement":[]}`)},
 	}
 
-	if err := WriteRawPolicies(policies, dir); err != nil {
+	if err := WriteRawPolicies(policies, Options{OutputDir: dir}); err != nil {
 		t.Fatalf("WriteRawPolicies: %v", err)
 	}
 
@@ -47,7 +47,7 @@ func TestWriteRawPolicies_CreatesTheDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "policies")
 	if err := WriteRawPolicies(map[string]cloud.Policy{
 		"role": {Raw: []byte("{}")},
-	}, dir); err != nil {
+	}, Options{OutputDir: dir}); err != nil {
 		t.Fatalf("WriteRawPolicies: %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestWriteRawPolicies_SkipsPrincipalsWithNoDocument(t *testing.T) {
 	if err := WriteRawPolicies(map[string]cloud.Policy{
 		"unreadable": {},
 		"readable":   {Raw: []byte("{}")},
-	}, dir); err != nil {
+	}, Options{OutputDir: dir}); err != nil {
 		t.Fatalf("WriteRawPolicies: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestWriteRawPolicies_StaysInsideTheOutputDirectory(t *testing.T) {
 	if err := WriteRawPolicies(map[string]cloud.Policy{
 		"../../escaped": {Raw: []byte("{}")},
 		"arn:aws:iam::111111111111:role/platform/admin": {Raw: []byte("{}")},
-	}, dir); err != nil {
+	}, Options{OutputDir: dir}); err != nil {
 		t.Fatalf("WriteRawPolicies: %v", err)
 	}
 
@@ -121,7 +121,7 @@ func TestWriteRawPolicies_WritesRestrictiveModes(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "policies")
 	if err := WriteRawPolicies(map[string]cloud.Policy{
 		"role": {Raw: []byte("{}")},
-	}, dir); err != nil {
+	}, Options{OutputDir: dir}); err != nil {
 		t.Fatalf("WriteRawPolicies: %v", err)
 	}
 
@@ -150,7 +150,7 @@ func TestWriteRawPolicies_ReportsAnUnusableDirectory(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
-	err := WriteRawPolicies(map[string]cloud.Policy{"role": {Raw: []byte("{}")}}, file)
+	err := WriteRawPolicies(map[string]cloud.Policy{"role": {Raw: []byte("{}")}}, Options{OutputDir: file})
 	if err == nil {
 		t.Fatal("writing into a non-directory reported success")
 	}
@@ -161,7 +161,7 @@ func TestWriteRawPolicies_ReportsAnUnusableDirectory(t *testing.T) {
 
 func TestWriteRawPolicies_EmptyInputIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
-	if err := WriteRawPolicies(map[string]cloud.Policy{}, dir); err != nil {
+	if err := WriteRawPolicies(map[string]cloud.Policy{}, Options{OutputDir: dir}); err != nil {
 		t.Fatalf("empty policy set should be a no-op, got %v", err)
 	}
 }
