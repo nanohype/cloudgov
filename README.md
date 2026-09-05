@@ -850,7 +850,18 @@ the tenant namespace and its restricted Pod Security Standards label, the
 ResourceQuota and LimitRange, the default-deny `tenant-egress` policy (as a
 NetworkPolicy or a CiliumNetworkPolicy, whichever the cluster's network engine
 uses), the tenant ServiceAccount and the EKS Pod Identity association that binds
-it, and the tenant IAM role's trust policy and generated inline policies.
+it, and the tenant IAM role's trust policy, generated inline policies and
+permissions boundary.
+
+The boundary is checked in two parts, because only one of them can always be
+answered. A tenant role carrying no boundary is reported at CRITICAL on its own
+evidence: the boundary is the ceiling the rest of the tenant identity model rests
+on, and without it the next policy attached to the role is bounded by nothing. A
+boundary that is present is compared against the ARN the Platform publishes on
+`status.permissionsBoundaryArn`; where the Platform publishes none, there is
+nothing to compare against and the run records the boundary as unchecked rather
+than reporting the tenant conformant — a different boundary is a different
+ceiling, and presence alone does not tell the two apart.
 
 The cluster half needs a kubeconfig; the tenant-role and Pod Identity half needs
 AWS credentials. Absent AWS credentials do not fail the run — the cluster-side

@@ -13,6 +13,7 @@ import (
 const (
 	testTenantRole    = "production-cluster-digest-pipeline-tenant"
 	testTenantRoleARN = "arn:aws:iam::111111111111:role/eks-agent-platform/tenants/" + testTenantRole
+	testBoundaryARN   = "arn:aws:iam::111111111111:policy/tenant-permissions-boundary"
 	testPodTrust      = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"pods.eks.amazonaws.com"},"Action":["sts:AssumeRole","sts:TagSession"]}]}`
 )
 
@@ -26,6 +27,9 @@ func TestGetRoleInfo(t *testing.T) {
 				AssumeRolePolicyDocument: awssdk.String(url.QueryEscape(testPodTrust)),
 				Tags: []iamtypes.Tag{
 					{Key: awssdk.String("platform.nanohype.dev/suspended"), Value: awssdk.String("true")},
+				},
+				PermissionsBoundary: &iamtypes.AttachedPermissionsBoundary{
+					PermissionsBoundaryArn: awssdk.String(testBoundaryARN),
 				},
 			},
 		},
@@ -59,6 +63,39 @@ func TestGetRoleInfo(t *testing.T) {
 	}
 	if len(info.InlinePolicyNames) != 2 {
 		t.Errorf("inline policies: got %v", info.InlinePolicyNames)
+	}
+	// The auditor compares this ARN against the one the Platform publishes, so a
+	// field that is read and dropped here reports every tenant's ceiling as
+	// absent.
+	if info.PermissionsBoundaryARN != testBoundaryARN {
+		t.Errorf("permissions boundary: got %q, want %q", info.PermissionsBoundaryARN, testBoundaryARN)
+	}
+}
+
+// A role with no boundary and a role whose boundary could not be read are the
+// same value here, so the distinction has to hold somewhere: GetRole returns the
+// field on every role and omits it only when there is none, and the whole call
+// fails otherwise. An empty string is therefore an answer, and the auditor treats
+// it as one.
+func TestGetRoleInfo_NoBoundaryIsEmptyNotAnError(t *testing.T) {
+	m := &mockIAM{
+		roleDetail: map[string]iamtypes.Role{
+			testTenantRole: {Arn: awssdk.String(testTenantRoleARN)},
+		},
+		attachedRole: map[string][][]iamtypes.AttachedPolicy{testTenantRole: {{}}},
+		inlineRole:   map[string][][]string{testTenantRole: {{}}},
+	}
+	p := &Provider{iam: m}
+
+	info, err := p.GetRoleInfo(context.Background(), testTenantRole)
+	if err != nil {
+		t.Fatalf("GetRoleInfo: %v", err)
+	}
+	if info == nil {
+		t.Fatal("expected role info")
+	}
+	if info.PermissionsBoundaryARN != "" {
+		t.Errorf("permissions boundary: got %q, want empty", info.PermissionsBoundaryARN)
 	}
 }
 
