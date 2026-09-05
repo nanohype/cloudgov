@@ -1,8 +1,6 @@
 package compliance
 
 import (
-	"fmt"
-
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
@@ -47,6 +45,9 @@ func evaluateControl(benchmarkID string, ctrl Control, input InputFindings) Cont
 // --- CIS AWS v3 ---
 
 func evaluateCISAWS(ctrl Control, input InputFindings) ControlResult {
+	if probe, uncollected := cisUncollected[ctrl.ID]; uncollected {
+		return evalNotEvaluated(ctrl, uncollectedDetail(probe))
+	}
 	switch ctrl.ID {
 	// IAM controls
 	case "1.16":
@@ -55,23 +56,14 @@ func evaluateCISAWS(ctrl Control, input InputFindings) ControlResult {
 		return evalStalePrincipal(ctrl, input.IAM)
 	case "1.15":
 		return evalBroadScope(ctrl, input.IAM)
-	case "1.4", "1.5", "1.17", "1.19", "1.22":
-		return evalIAMGeneric(ctrl, input.IAM)
-
 	// Storage controls
 	case "2.1.4":
 		return evalStorageFinding(ctrl, input.Storage, cloud.BucketUnencrypted)
 	case "2.1.5":
 		return evalStorageFinding(ctrl, input.Storage, cloud.BucketPublicAccess)
-	case "2.1.1", "2.1.2", "2.2.1":
-		return evalStorageGeneric(ctrl, input.Storage)
-
 	// Logging controls
 	case "3.7":
 		return evalStorageFinding(ctrl, input.Storage, cloud.BucketNoLogging)
-	case "3.1", "3.4":
-		return evalNotEvaluated(ctrl, "CloudTrail configuration not included in scan data")
-
 	// Monitoring
 	case "4.1":
 		return evalTags(ctrl, input.Tags)
@@ -81,9 +73,6 @@ func evaluateCISAWS(ctrl Control, input InputFindings) ControlResult {
 		return evalNetworkFinding(ctrl, input.Network, cloud.NetworkAdminPortOpen)
 	case "5.2", "5.3":
 		return evalNetworkAdminPorts(ctrl, input.Network)
-	case "5.4":
-		return evalNetworkFinding(ctrl, input.Network, cloud.NetworkOpenIngress)
-
 	default:
 		return evalNotEvaluated(ctrl, "no evaluator for this control")
 	}
@@ -92,6 +81,9 @@ func evaluateCISAWS(ctrl Control, input InputFindings) ControlResult {
 // --- SOC 2 Type II ---
 
 func evaluateSOC2(ctrl Control, input InputFindings) ControlResult {
+	if probe, uncollected := soc2Uncollected[ctrl.ID]; uncollected {
+		return evalNotEvaluated(ctrl, uncollectedDetail(probe))
+	}
 	switch ctrl.ID {
 	// CC6 — Logical and Physical Access Controls
 	case "CC6.1":
@@ -106,8 +98,6 @@ func evaluateSOC2(ctrl Control, input InputFindings) ControlResult {
 		return evalStorageFinding(ctrl, input.Storage, cloud.BucketUnencrypted)
 
 	// CC7 — System Operations
-	case "CC7.1":
-		return evalIAMGeneric(ctrl, input.IAM)
 	case "CC7.2":
 		return evalStorageFinding(ctrl, input.Storage, cloud.BucketNoLogging)
 
@@ -126,9 +116,6 @@ func evaluateSOC2(ctrl Control, input InputFindings) ControlResult {
 		return evalStorageFinding(ctrl, input.Storage, cloud.BucketPublicACL)
 
 	// Not evaluatable — require organizational / process data
-	case "CC1.1", "CC2.1", "CC3.1", "CC4.1", "CC5.1", "CC8.1", "CC9.1":
-		return evalNotEvaluated(ctrl, "requires organizational policy review, not cloud API data")
-
 	default:
 		return evalNotEvaluated(ctrl, "no evaluator for this control")
 	}
@@ -196,24 +183,6 @@ func evalBroadScope(ctrl Control, findings []cloud.Finding) ControlResult {
 	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no broad scope policies detected"}
 }
 
-// evalIAMGeneric serves the controls whose criterion an IAM scan is evidence
-// toward but does not decide: password policy, credential rotation cadence, MFA
-// enrolment, change-management review. cloudgov reads none of those, so it holds
-// no evidence either way and reports NOT_EVALUATED with the IAM finding count as
-// context.
-//
-// It must never report PASS. A control this evaluator serves is one nothing
-// examined, and PASS is the answer an auditor reads as "examined and clean" —
-// the same conflation the incomplete contract exists to prevent elsewhere in
-// this tool, arriving here as a compliance verdict.
-func evalIAMGeneric(ctrl Control, findings []cloud.Finding) ControlResult {
-	if len(findings) == 0 {
-		return evalNotEvaluated(ctrl, "no IAM findings provided")
-	}
-	return evalNotEvaluated(ctrl, fmt.Sprintf(
-		"cloudgov has no evaluator for this control; the %d IAM finding(s) loaded are context, not a verdict", len(findings)))
-}
-
 func evalStorageFinding(ctrl Control, findings []cloud.BucketFinding, findingType cloud.BucketFindingType) ControlResult {
 	if len(findings) == 0 {
 		return ControlResult{Control: ctrl, Status: StatusNotEvaluated, Detail: "no storage findings provided"}
@@ -228,28 +197,6 @@ func evalStorageFinding(ctrl Control, findings []cloud.BucketFinding, findingTyp
 		return ControlResult{Control: ctrl, Status: StatusFail, Findings: refs, Detail: string(findingType) + " issues found"}
 	}
 	return ControlResult{Control: ctrl, Status: StatusPass, Detail: "no " + string(findingType) + " issues detected"}
-}
-
-// evalStorageGeneric serves the storage controls a storage audit is evidence
-// toward but does not decide: bucket-policy HTTPS enforcement, MFA Delete, and
-// EBS volume encryption. cloudgov reads none of those three states.
-//
-// It must never report PASS, for the same reason evalIAMGeneric must not. A
-// control this evaluator serves is one nothing examined, and PASS is what an
-// auditor reads as "examined and clean" — a verdict the tool cannot compute, in
-// the artifact someone points at to say a control passed. Returning PASS because
-// a storage scan produced findings about something else is the conflation the
-// incomplete contract prevents everywhere else in this tool, arriving as a
-// compliance verdict.
-//
-// It declines in both cases, naming the finding count as context rather than as
-// a verdict.
-func evalStorageGeneric(ctrl Control, findings []cloud.BucketFinding) ControlResult {
-	if len(findings) == 0 {
-		return ControlResult{Control: ctrl, Status: StatusNotEvaluated, Detail: "no storage findings provided"}
-	}
-	return evalNotEvaluated(ctrl, fmt.Sprintf(
-		"cloudgov has no evaluator for this control; the %d storage finding(s) loaded are context, not a verdict", len(findings)))
 }
 
 func evalNetworkFinding(ctrl Control, findings []cloud.NetworkFinding, findingType cloud.NetworkFindingType) ControlResult {
