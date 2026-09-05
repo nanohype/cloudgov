@@ -65,8 +65,8 @@ var soc2Evaluatable = map[string]struct {
 // API cannot supply. They must report NOT_EVALUATED and never PASS: a criterion
 // nobody checked reported as passed is the failure this benchmark exists to make
 // visible.
-// CC7.1 joins them: it maps to evalIAMGeneric, which serves criteria an IAM scan
-// is evidence toward but does not decide, and so holds no verdict either.
+// CC7.1 joins them for a different reason: an IAM scan is evidence toward it and
+// does not decide it, so soc2Uncollected names the change history that would.
 var soc2NotEvaluatable = []string{"CC1.1", "CC2.1", "CC3.1", "CC4.1", "CC5.1", "CC7.1", "CC8.1", "CC9.1"}
 
 func soc2Control(t *testing.T, id string) Control {
