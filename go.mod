@@ -27,7 +27,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.50.0
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.76.0
 	github.com/aws/smithy-go v1.28.1
-	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/charmbracelet/lipgloss/v2 v2.0.6
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sync v0.22.0
