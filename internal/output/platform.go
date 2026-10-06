@@ -3,18 +3,18 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // PlatformFindings renders Platform-tenant conformance findings to w.
 func PlatformFindings(w io.Writer, findings []cloud.PlatformFinding) {
+	w = styled(w)
 	if len(findings) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no platform conformance findings"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("SEVERITY"),
 		headerStyle.Render("PLATFORM"),

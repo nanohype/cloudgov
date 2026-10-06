@@ -3,18 +3,18 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // QuotaUsages renders a quota utilization table.
 func QuotaUsages(w io.Writer, quotas []cloud.QuotaUsage) {
+	w = styled(w)
 	if len(quotas) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no quotas found"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("PROVIDER"),
 		headerStyle.Render("SERVICE"),

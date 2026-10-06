@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"io"
 	"sort"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // InventoryResources renders an inventory table with resource details.
 func InventoryResources(w io.Writer, resources []cloud.InventoryResource) {
+	w = styled(w)
 	if len(resources) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no resources found"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("TYPE"),
 		headerStyle.Render("PROVIDER"),

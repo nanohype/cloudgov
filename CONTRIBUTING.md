@@ -335,7 +335,14 @@ JSON report struct, and the writers for both. Shared infrastructure lives alongs
 lipgloss styles and helpers in `style.go`, the JSON writer in `jsoncore.go`, and SARIF in
 `sarif.go`. Adding a domain adds a file — it never edits a shared renderer.
 
-Table output uses lipgloss + tabwriter, matching the existing style.
+Table output uses lipgloss + tabwriter, matching the existing style. A table renderer
+starts with `w = styled(w)` and builds its table with `newTable(w)`, never
+`tabwriter.NewWriter` directly. lipgloss v2 styles always emit colour escapes, and the
+writer is what decides whether the destination can show them: off a terminal they are
+stripped before the tabwriter measures a cell, so a piped or `--output-file` table is
+plain text with aligned columns. `TestTableRenderersListIsComplete` fails until a new
+renderer is added to `tableRenderers` in `color_test.go`, which checks it emits no escape
+off a terminal.
 
 ### 6. Write tests
 

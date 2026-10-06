@@ -3,18 +3,18 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // OrphanResources renders an orphan resources table with a TOTAL row at the bottom.
 func OrphanResources(w io.Writer, orphans []cloud.OrphanResource) {
+	w = styled(w)
 	if len(orphans) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no orphaned resources found"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("KIND"),
 		headerStyle.Render("PROVIDER"),
