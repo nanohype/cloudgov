@@ -1,13 +1,17 @@
 package output
 
 import (
+	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
+	"text/tabwriter"
 
-	"fmt"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+
 	"github.com/nanohype/cloudgov/internal/cloud"
-	"io"
 )
 
 var (
@@ -25,6 +29,50 @@ var (
 	unknownStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF6600")).Bold(true)
 	greenStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#00AA00"))
 )
+
+// styled routes a renderer's writer through the colour profile of wherever it
+// actually leads.
+//
+// lipgloss v2's Style.Render always emits 24-bit escapes; deciding whether the
+// destination can show them moved out of the style and into the writer. v1 made
+// that call from stdout, so a piped table or a CI log came out plain. Without
+// this both would carry raw escape codes. Deciding from the destination rather
+// than stdout also keeps them out of an --output-file artifact written from a
+// terminal, which v1 coloured. The writer detects a terminal and honours
+// NO_COLOR and CLICOLOR_FORCE, downsampling to what the terminal supports and
+// stripping everything when it is not one.
+//
+// Every exported table renderer calls this first; TestTableRenderersListIsComplete
+// holds the package to it.
+func styled(w io.Writer) io.Writer {
+	if _, ok := w.(*colorprofile.Writer); ok {
+		return w
+	}
+	return colorprofile.NewWriter(w, os.Environ())
+}
+
+// table is a tabwriter whose input has already been matched to the
+// destination's colour profile.
+//
+// tabwriter pads each cell to the widest byte length in its column. Stripping
+// escapes on the way out of it would pad every styled cell for codes the reader
+// never sees, so the downsampling sits in front of it instead: off a terminal
+// the cells it measures are the plain text it prints.
+type table struct {
+	io.Writer
+	tw *tabwriter.Writer
+}
+
+func newTable(w io.Writer) *table {
+	cw := styled(w).(*colorprofile.Writer)
+	tw := tabwriter.NewWriter(cw.Forward, 0, 0, 2, ' ', 0)
+	return &table{Writer: &colorprofile.Writer{Forward: tw, Profile: cw.Profile}, tw: tw}
+}
+
+// Flush writes the table out. The renderers return no error and a failed write
+// to the destination has nowhere to be reported from here, as with the bare
+// tabwriter this replaces.
+func (t *table) Flush() { _ = t.tw.Flush() }
 
 func colorSeverity(s cloud.Severity) lipgloss.Style {
 	switch s {
@@ -72,6 +120,7 @@ func truncate(s string, n int) string {
 // unreadable one. An artifact that cannot be read correctly on its own is a
 // false clean with a delivery delay.
 func IncompleteNote(w io.Writer, incomplete []string) {
+	w = styled(w)
 	// A complete run says so. Printing nothing here made "0 findings, and I read
 	// everything I was asked to" render identically to "0 findings" from a run
 	// that read half the account — and an empty findings table is exactly where a

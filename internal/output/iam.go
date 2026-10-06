@@ -3,18 +3,18 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // IAMFindings renders a findings table to w, followed by a severity summary line.
 func IAMFindings(w io.Writer, findings []cloud.Finding, totalPrincipals int) {
+	w = styled(w)
 	if len(findings) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no findings"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
 		headerStyle.Render("SEVERITY"),
 		headerStyle.Render("TYPE"),
