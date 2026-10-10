@@ -111,4 +111,4 @@ total   coverage                    69    # the org floor is 75
 package internal/compare            64    # report normalization
 package internal/cloud/k8s          57    # most paths need a live apiserver; the RBAC analyzer and the connection resolver are the covered parts
 package internal/report             60    # aggregation over saved reports
-package cmd                         29    # runCompliance, runCompare and the iam fix generator are driven directly; the other report-reading handlers have the same seam and are not driven, and the ones that resolve a provider have no seam at all — the logic they call is floored above
+package cmd                         26    # rebased from 29 for Go 1.27.2, which counts statements inside some blocks differently: the same 173 tests cover the same 260 of 1050 blocks and measure 28.9 where Go 1.27.1 measured 32.4. runCompliance, runCompare and the iam fix generator are driven directly; the other report-reading handlers have the same seam and are not driven, and the ones that resolve a provider have no seam at all — the logic they call is floored above
