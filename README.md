@@ -1226,11 +1226,15 @@ cloudgov iam scan --severity CRITICAL --output json --quiet | \
 
 | Format | Flag | Use case |
 |--------|------|----------|
-| Table | `--output table` | Human-readable terminal output with colors |
+| Table | `--output table` | Human-readable terminal output; colored only on a terminal |
 | JSON | `--output json` | Scripts, alerting, dashboards |
 | SARIF | `--output sarif` | GitHub Advanced Security, IDE integrations |
 
 All formats can be written to a file with `--output-file path/to/file`.
+
+Table output is colored when it goes to a terminal and plain text when it is piped,
+redirected, or written with `--output-file`. `NO_COLOR` drops color on a terminal;
+`CLICOLOR_FORCE=1` keeps it through a pipe.
 
 ---
 

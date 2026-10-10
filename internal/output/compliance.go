@@ -3,18 +3,18 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/compliance"
 )
 
 // ComplianceReport renders a compliance evaluation table.
 func ComplianceReport(w io.Writer, report compliance.ComplianceReport) {
+	w = styled(w)
 	if len(report.Results) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no controls evaluated"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("STATUS"),
 		headerStyle.Render("ID"),

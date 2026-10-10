@@ -3,20 +3,20 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // CostDiffs renders cost diff tables for each provider.
 func CostDiffs(w io.Writer, diffs []cloud.CostDiff) {
+	w = styled(w)
 	for _, d := range diffs {
 		fmt.Fprintf(w, "\n%s  %s → %s  vs  %s → %s\n",
 			headerStyle.Render("["+d.Provider+"]"),
 			d.BeforeStart.Format("2006-01-02"), d.BeforeEnd.Format("2006-01-02"),
 			d.AfterStart.Format("2006-01-02"), d.AfterEnd.Format("2006-01-02"),
 		)
-		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		tw := newTable(w)
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 			headerStyle.Render("SERVICE"),
 			headerStyle.Render("BEFORE"),

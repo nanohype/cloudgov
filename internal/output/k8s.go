@@ -3,18 +3,18 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // K8sFindings renders a Kubernetes RBAC findings table.
 func K8sFindings(w io.Writer, findings []cloud.K8sFinding) {
+	w = styled(w)
 	if len(findings) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no findings"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("SEVERITY"),
 		headerStyle.Render("TYPE"),

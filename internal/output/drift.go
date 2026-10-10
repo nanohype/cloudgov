@@ -4,18 +4,18 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/nanohype/cloudgov/internal/cloud"
 )
 
 // DriftResults renders a drift detection results table.
 func DriftResults(w io.Writer, results []cloud.DriftResult) {
+	w = styled(w)
 	if len(results) == 0 {
 		fmt.Fprintln(w, dimStyle.Render("no resources checked"))
 		return
 	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("STATUS"),
 		headerStyle.Render("RESOURCE"),

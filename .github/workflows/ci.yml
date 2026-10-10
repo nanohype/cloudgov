@@ -104,8 +104,19 @@ jobs:
           # renovate: datasource=gnu depName=bash
           BASH32_VERSION=3.2.57
           BASH32_SHA256=3fa9daf85ebf35068f090ce51283ddeeb3c75eb5bc70b1a4a7cb05868bfe06a4
-          curl -fsSL -o /tmp/bash32.tar.gz \
-            "https://ftp.gnu.org/gnu/bash/bash-${BASH32_VERSION}.tar.gz"
+          # The digest, not the host, is what makes the tarball trustworthy, so
+          # any GNU mirror will do: ftp.gnu.org alone has gone unreachable from
+          # runners for long enough to hold every pull request red.
+          fetched=
+          for base in https://ftp.gnu.org/gnu https://ftpmirror.gnu.org https://mirrors.kernel.org/gnu; do
+            if curl -fsSL --connect-timeout 20 --retry 2 -o /tmp/bash32.tar.gz \
+              "${base}/bash/bash-${BASH32_VERSION}.tar.gz"; then
+              fetched=1
+              break
+            fi
+            echo "::warning::bash ${BASH32_VERSION} unavailable from ${base}"
+          done
+          test -n "${fetched}"
           echo "${BASH32_SHA256}  /tmp/bash32.tar.gz" | sha256sum -c -
           tar -xzf /tmp/bash32.tar.gz -C /tmp
           cd "/tmp/bash-${BASH32_VERSION}"

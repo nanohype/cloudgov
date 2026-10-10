@@ -9,6 +9,7 @@ import (
 
 // AuditReport renders a unified audit report with sections per domain.
 func AuditReport(w io.Writer, report *audit.Report) {
+	w = styled(w)
 	fmt.Fprintf(w, "%s  completed in %s\n", headerStyle.Render("[audit]"), dimStyle.Render(report.Duration))
 
 	if len(report.IAM) > 0 {

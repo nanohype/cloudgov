@@ -3,12 +3,12 @@ package output
 import (
 	"fmt"
 	"io"
-	"text/tabwriter"
 )
 
 // CompareTable renders a diff comparison table.
 func CompareTable(w io.Writer, result CompareResult) {
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	w = styled(w)
+	tw := newTable(w)
 	fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
 		headerStyle.Render("STATUS"),
 		headerStyle.Render("DOMAIN"),
