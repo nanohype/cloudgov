@@ -125,12 +125,16 @@ jobs:
           # K&R style, where `f()` declares a function of unspecified arguments.
           # The GCC on ubuntu-26.04 runners defaults to C23, which reads `f()` as
           # taking none and rejects every call that passes one, so the language
-          # is pinned to C17, the last standard with the old meaning. It goes on
-          # CC rather than CFLAGS: the build also compiles helper programs
-          # (mkbuiltins, run at build time) with CC_FOR_BUILD and its own flags,
-          # which inherit CC but not CFLAGS.
-          ./configure --quiet --prefix=/usr/local CC="gcc -std=gnu17" \
-            CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -O2"
+          # is pinned to C17, the last standard with the old meaning.
+          #
+          # All three go on CC, not CFLAGS. The build also compiles helper
+          # programs (mkbuiltins, bashversion) with CC_FOR_BUILD and
+          # CFLAGS_FOR_BUILD; configure sets
+          # the first to $(CC) and the second to its own "-g", so a flag in
+          # CFLAGS never reaches them.
+          ./configure --quiet --prefix=/usr/local \
+            CC="gcc -std=gnu17 -Wno-implicit-function-declaration -Wno-implicit-int" \
+            CFLAGS="-O2"
           make --quiet -j"$(nproc)"
           # Installed where the gate looks, and asserted to be what was asked
           # for: a build that silently produced bash 5 would restore the skip.
