@@ -120,10 +120,14 @@ jobs:
           echo "${BASH32_SHA256}  /tmp/bash32.tar.gz" | sha256sum -c -
           tar -xzf /tmp/bash32.tar.gz -C /tmp
           cd "/tmp/bash-${BASH32_VERSION}"
-          # bash 3.2 predates the compilers on a current runner; these are the
-          # two diagnostics it trips that are errors by default now.
+          # bash 3.2 predates the compilers on a current runner. Two of the
+          # diagnostics it trips are errors by default now, and it is written in
+          # K&R style, where `f()` declares a function of unspecified arguments.
+          # GCC 15 (ubuntu-26.04 runners) defaults to C23, which reads `f()` as
+          # taking none and rejects every call that passes one, so the language
+          # is pinned to C17, the last standard with the old meaning.
           ./configure --quiet --prefix=/usr/local \
-            CFLAGS="-Wno-implicit-function-declaration -Wno-implicit-int -O2"
+            CFLAGS="-std=gnu17 -Wno-implicit-function-declaration -Wno-implicit-int -O2"
           make --quiet -j"$(nproc)"
           # Installed where the gate looks, and asserted to be what was asked
           # for: a build that silently produced bash 5 would restore the skip.
